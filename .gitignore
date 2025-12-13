@@ -1,0 +1,180 @@
+# ========================================
+# Node.js / Bun
+# ========================================
+node_modules/
+.bun/
+bun.lockb
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ========================================
+# SvelteKit
+# ========================================
+.svelte-kit/
+build/
+.vercel/
+.netlify/
+
+# ========================================
+# Vite
+# ========================================
+dist/
+*.local
+
+# ========================================
+# Tauri
+# ========================================
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+src-tauri/.cargo/
+
+# Android 生成文件
+src-tauri/gen/android/
+*.apk
+*.aab
+*.keystore
+
+# iOS 生成文件
+src-tauri/gen/apple/
+
+# ========================================
+# Rust
+# ========================================
+**/*.rs.bk
+*.pdb
+
+# ========================================
+# IDE / 编辑器
+# ========================================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ========================================
+# 操作系统
+# ========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ========================================
+# 日志文件
+# ========================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ========================================
+# 环境变量 / 密钥
+# ========================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+secrets/
+credentials/
+
+# ========================================
+# 测试 / 覆盖率
+# ========================================
+coverage/
+.nyc_output/
+*.lcov
+.coverage
+htmlcov/
+
+# ========================================
+# 缓存
+# ========================================
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+.turbo/
+
+# ========================================
+# 备份文件
+# ========================================
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+*.temp
+
+# ========================================
+# 数据库
+# ========================================
+*.sqlite
+*.sqlite3
+*.db
+
+# ========================================
+# 打包产物
+# ========================================
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# ========================================
+# 其他
+# ========================================
+.history/
+*.pid
+*.seed
+*.pid.lock
+.grunt
+bower_components/
+jspm_packages/
+web_modules/
