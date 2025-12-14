@@ -4,13 +4,41 @@
         showAiSettings, 
         saveAiConfig, 
         updateAiConfig,
-        testAiConnection, 
-        aiProviders,
-        getCurrentProvider 
+        testAiConnection,
+        getAiProviders,
+        loadModelsForProvider,
+        modelsLoading,
+        providerModels,
+        getAiProviderInfo
     } from '../stores/ai.js';
     import { showAlert } from '../stores/modal.js';
+    import { onMount } from 'svelte';
+    import { isG4FProvider } from '../utils/g4f-client.js';
 
     let testing = false;
+    let providers = [];
+    let currentModels = [];
+    let currentProvider = null;
+
+    onMount(async () => {
+        providers = await getAiProviders();
+        await loadCurrentProviderInfo();
+        await loadCurrentProviderModels();
+    });
+
+    async function loadCurrentProviderInfo() {
+        currentProvider = await getAiProviderInfo($aiConfig.provider);
+    }
+
+    async function loadCurrentProviderModels() {
+        const providerId = $aiConfig.provider;
+        const apiKey = $aiConfig.apiKey || '';
+        currentModels = await loadModelsForProvider(providerId, apiKey);
+        
+        if (currentModels.length > 0 && !currentModels.includes($aiConfig.model)) {
+            updateAiConfig({ model: currentModels[0] });
+        }
+    }
 
     async function handleTestConnection() {
         testing = true;
@@ -38,21 +66,41 @@
         showAiSettings.set(false);
     }
 
-    function handleProviderChange(e) {
+    async function handleProviderChange(e) {
         const providerId = e.target.value;
-        const provider = aiProviders.find(p => p.id === providerId);
+        const provider = providers.find(p => p.id === providerId);
+        
         updateAiConfig({
             provider: providerId,
-            model: provider?.defaultModel || ''
+            model: provider?.defaultModel || 'auto'
         });
+
+        await loadCurrentProviderInfo();
+        await loadCurrentProviderModels();
     }
 
-    $: currentProvider = getCurrentProvider();
+    async function handleApiKeyChange() {
+        if (currentProvider?.supportsModelList && $aiConfig.apiKey) {
+            await loadCurrentProviderModels();
+        }
+    }
+
+    async function handleRefreshModels() {
+        await loadCurrentProviderModels();
+    }
+
+    function openApiUrl(url) {
+        if (!url) return;
+        window.open(url, '_blank');
+    }
+
+    $: needsApiKey = currentProvider && currentProvider.authType !== 'none' && !isG4FProvider($aiConfig.provider);
+    $: displayModels = $providerModels[$aiConfig.provider] || currentModels || currentProvider?.defaultModels || [];
 </script>
 
 {#if $showAiSettings}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div on:click={handleClose} class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+        <div on:click={handleClose} on:keydown={handleClose} role="button" tabindex="0" class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-rose-50">
                 <h3 class="font-bold text-lg text-rose-700 flex items-center gap-2">
@@ -68,40 +116,79 @@
                     <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">AI 厂商</label>
                     <select value={$aiConfig.provider} on:change={handleProviderChange}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400">
-                        {#each aiProviders as provider}
-                            <option value={provider.id}>{provider.name}</option>
-                        {/each}
+                        <optgroup label="G4F 免费服务">
+                            {#each providers.filter(p => p.id.startsWith('g4f')) as provider}
+                                <option value={provider.id}>{provider.name}</option>
+                            {/each}
+                        </optgroup>
+                        <optgroup label="国际服务商">
+                            {#each providers.filter(p => !p.id.startsWith('g4f') && ['openai', 'anthropic', 'google', 'mistral', 'cohere', 'perplexity', 'together', 'fireworks', 'openrouter', 'groq', 'huggingface', 'novita', 'cloudflare'].includes(p.id)) as provider}
+                                <option value={provider.id}>{provider.name}</option>
+                            {/each}
+                        </optgroup>
+                        <optgroup label="国内服务商">
+                            {#each providers.filter(p => ['deepseek', 'zhipu', 'qwen', 'moonshot', 'spark', 'baidu', 'hunyuan', 'yi', 'baichuan', 'minimax', 'stepfun', 'doubao', 'sensetime', 'siliconflow'].includes(p.id)) as provider}
+                                <option value={provider.id}>{provider.name}</option>
+                            {/each}
+                        </optgroup>
+                        <optgroup label="本地部署">
+                            {#each providers.filter(p => ['ollama', 'lmstudio', 'custom'].includes(p.id)) as provider}
+                                <option value={provider.id}>{provider.name}</option>
+                            {/each}
+                        </optgroup>
                     </select>
-                    {#if currentProvider?.docUrl}
-                        <a href={currentProvider.docUrl} target="_blank"
-                            class="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1 mt-2">
-                            <i class="ph ph-link"></i> 查看文档
-                        </a>
-                    {/if}
+                    <div class="flex items-center gap-3 mt-2">
+                        {#if currentProvider?.docUrl}
+                            <a href={currentProvider.docUrl} target="_blank"
+                                class="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                                <i class="ph ph-book-open"></i> 查看文档
+                            </a>
+                        {/if}
+                        {#if currentProvider?.apiUrl}
+                            <button on:click={() => openApiUrl(currentProvider.apiUrl)}
+                                class="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 font-bold">
+                                <i class="ph ph-key"></i> 获取 API Key
+                            </button>
+                        {/if}
+                    </div>
                 </div>
 
-                {#if currentProvider && currentProvider.models.length > 0}
+                {#if displayModels.length > 0}
                     <div>
-                        <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">模型</label>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="text-xs font-bold text-slate-500 uppercase">模型</label>
+                            {#if currentProvider?.supportsModelList}
+                                <button on:click={handleRefreshModels} disabled={$modelsLoading}
+                                    class="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                                    <i class="ph ph-arrows-clockwise" class:animate-spin={$modelsLoading}></i>
+                                    {$modelsLoading ? '加载中...' : '刷新列表'}
+                                </button>
+                            {/if}
+                        </div>
                         <select bind:value={$aiConfig.model}
                             class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400">
-                            {#each currentProvider.models as model}
+                            {#each displayModels as model}
                                 <option value={model}>{model}</option>
                             {/each}
                         </select>
+                        <div class="text-[10px] text-slate-400 mt-1">
+                            共 {displayModels.length} 个可用模型
+                        </div>
                     </div>
                 {/if}
 
-                <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
-                        API Key
-                        {#if currentProvider?.authType === 'baidu_token'}
-                            <span class="text-rose-500">(百度使用 API Key)</span>
-                        {/if}
-                    </label>
-                    <input bind:value={$aiConfig.apiKey} type="password" placeholder="请输入 API Key"
-                        class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono">
-                </div>
+                {#if needsApiKey}
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                            API Key
+                            {#if currentProvider?.authType === 'baidu_token'}
+                                <span class="text-rose-500">(百度使用 API Key)</span>
+                            {/if}
+                        </label>
+                        <input bind:value={$aiConfig.apiKey} on:blur={handleApiKeyChange} type="password" placeholder="请输入 API Key"
+                            class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono">
+                    </div>
+                {/if}
 
                 {#if currentProvider?.authType === 'baidu_token'}
                     <div>

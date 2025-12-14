@@ -68,7 +68,7 @@
             <i class="ph ph-check-square-offset text-xl"></i>
         </div>
         <div class="flex-1 min-w-0">
-            <h1 class="text-lg font-bold tracking-tight text-slate-800 leading-tight">PlanPro</h1>
+            <h1 class="text-lg font-bold tracking-tight text-slate-800 leading-tight">WorkPlan</h1>
             <div class="text-[10px] text-slate-400 font-mono truncate" title="当前Key">🔑 {$taskStore.accessKey}</div>
         </div>
     </div>
@@ -146,6 +146,18 @@
             class:text-slate-600={$currentView !== 'statistics'}
             class:hover:bg-slate-50={$currentView !== 'statistics'}>
             <i class="ph ph-chart-bar text-lg"></i> 数据统计
+        </button>
+
+        <button on:click={() => switchView('aichat')}
+            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
+            class:bg-gradient-to-r={$currentView === 'aichat'}
+            class:from-indigo-50={$currentView === 'aichat'}
+            class:to-purple-50={$currentView === 'aichat'}
+            class:text-indigo-700={$currentView === 'aichat'}
+            class:text-slate-600={$currentView !== 'aichat'}
+            class:hover:bg-slate-50={$currentView !== 'aichat'}>
+            <i class="ph ph-robot text-lg"></i> AI Chat
+            <span class="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white">New</span>
         </button>
 
         <button on:click={() => switchView('settings')}

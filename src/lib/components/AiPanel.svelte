@@ -4,7 +4,8 @@
         isAiLoading, 
         showAiPanel, 
         showAiSettings, 
-        sendAiMessage, 
+        sendAiMessage,
+        retryLastMessage,
         confirmAiTask, 
         removeAiMessage,
         getCurrentProvider
@@ -32,6 +33,15 @@
             scrollToBottom();
         } catch (error) {
             await showAlert({ title: '发送失败', message: error.message, variant: 'danger' });
+        }
+    }
+
+    async function handleRetry(index) {
+        try {
+            await retryLastMessage(index);
+            scrollToBottom();
+        } catch (error) {
+            await showAlert({ title: '重试失败', message: error.message, variant: 'danger' });
         }
     }
 
@@ -94,11 +104,14 @@
                     class:bg-blue-600={msg.role === 'user'}
                     class:text-white={msg.role === 'user'}
                     class:rounded-tr-none={msg.role === 'user'}
-                    class:bg-white={msg.role !== 'user'}
+                    class:bg-white={msg.role !== 'user' && msg.type !== 'error'}
                     class:border={msg.role !== 'user'}
-                    class:border-rose-100={msg.role !== 'user'}
-                    class:text-slate-700={msg.role !== 'user'}
-                    class:rounded-tl-none={msg.role !== 'user'}>
+                    class:border-rose-100={msg.role !== 'user' && msg.type !== 'error'}
+                    class:text-slate-700={msg.role !== 'user' && msg.type !== 'error'}
+                    class:rounded-tl-none={msg.role !== 'user'}
+                    class:bg-red-50={msg.type === 'error'}
+                    class:border-red-200={msg.type === 'error'}
+                    class:text-red-700={msg.type === 'error'}>
                     {#if msg.type === 'text'}
                         {msg.content}
                     {:else if msg.type === 'loading'}
@@ -106,6 +119,18 @@
                             <div class="w-1.5 h-1.5 bg-rose-400 rounded-full animate-bounce"></div>
                             <div class="w-1.5 h-1.5 bg-rose-400 rounded-full animate-bounce" style="animation-delay: 75ms"></div>
                             <div class="w-1.5 h-1.5 bg-rose-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+                        </div>
+                    {:else if msg.type === 'error'}
+                        <div class="flex flex-col gap-2">
+                            <div class="flex items-center gap-2">
+                                <i class="ph-fill ph-warning-circle"></i>
+                                <span>出错了: {msg.content}</span>
+                            </div>
+                            <button on:click={() => handleRetry(index)}
+                                class="self-start px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 flex items-center gap-1 transition">
+                                <i class="ph ph-arrow-clockwise"></i>
+                                重试
+                            </button>
                         </div>
                     {:else if msg.type === 'task_card'}
                         <div class="mt-1">

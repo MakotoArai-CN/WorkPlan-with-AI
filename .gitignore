@@ -112,8 +112,6 @@ lerna-debug.log*
 # 环境变量 / 密钥
 # ========================================
 .env
-.env.*
-!.env.example
 *.pem
 *.key
 *.crt

@@ -1,31 +1,34 @@
 <script>
     import { taskStore, activeTask } from '../stores/tasks.js';
+    import { settingsStore } from '../stores/settings.js';
+    import { aiConfig, generateReport } from '../stores/ai.js';
+    import { showAlert } from '../stores/modal.js';
+    import { get } from 'svelte/store';
 
     let statsStart = new Date().toISOString().split('T')[0];
     let statsEnd = new Date().toISOString().split('T')[0];
     let statsStatus = 'all';
     let statsRangeType = 'week';
+    let generatingReport = false;
+    let reportContent = '';
+    let showReport = false;
 
     $: statsData = (() => {
         let list = $taskStore.tasks.filter(t => {
             const d = t.date.split('T')[0];
             return d >= statsStart && d <= statsEnd;
         });
-
         if (statsStatus === 'incomplete') {
             list = list.filter(t => t.status === 'todo' || t.status === 'doing');
         } else if (statsStatus !== 'all') {
             list = list.filter(t => t.status === statsStatus);
         }
-
         list.sort((a, b) => new Date(b.date) - new Date(a.date));
-
         const total = list.length;
         const done = list.filter(t => t.status === 'done').length;
         const doing = list.filter(t => t.status === 'doing').length;
         const todo = list.filter(t => t.status === 'todo').length;
         const rate = total > 0 ? ((done / total) * 100).toFixed(1) : 0;
-
         return { total, done, doing, todo, rate, list };
     })();
 
@@ -35,7 +38,6 @@
         const y = d.getFullYear();
         const m = d.getMonth();
         const day = d.getDay() || 7;
-
         if (type === 'today') {
             statsStart = statsEnd = new Date().toISOString().split('T')[0];
         } else if (type === 'yesterday') {
@@ -89,6 +91,41 @@
 
     function selectTask(task) {
         activeTask.set(task);
+    }
+
+    async function handleGenerateReport(type) {
+        if (statsData.list.length === 0) {
+            await showAlert({ title: '无数据', message: '当前时间段内没有任务数据', variant: 'warning' });
+            return;
+        }
+        const config = get(aiConfig);
+        if (!config.apiKey && config.provider !== 'g4f' && !config.provider.startsWith('g4f-') && config.provider !== 'ollama' && config.provider !== 'lmstudio') {
+            await showAlert({ title: '未配置 AI', message: '请先在 AI 设置中配置 API Key', variant: 'warning' });
+            return;
+        }
+        generatingReport = true;
+        reportContent = '';
+        try {
+            const result = await generateReport(statsData.list, type, config);
+            reportContent = result;
+            showReport = true;
+        } catch (error) {
+            await showAlert({ title: '生成失败', message: error.message, variant: 'danger' });
+        } finally {
+            generatingReport = false;
+        }
+    }
+
+    function closeReport() {
+        showReport = false;
+        reportContent = '';
+    }
+
+    function copyReport() {
+        if (navigator.clipboard && reportContent) {
+            navigator.clipboard.writeText(reportContent);
+            showAlert({ title: '复制成功', message: '报告内容已复制到剪贴板', variant: 'success' });
+        }
     }
 
     setStatsRange('week');
@@ -161,6 +198,40 @@
         </div>
     </div>
 
+    {#if $settingsStore.enableAiSummary}
+        <div class="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
+            <div class="flex items-center justify-between flex-wrap gap-3">
+                <div class="flex items-center gap-2">
+                    <i class="ph-fill ph-sparkle text-indigo-600 text-xl"></i>
+                    <span class="font-bold text-indigo-800">AI 报告生成</span>
+                    <span class="text-xs text-indigo-500">基于当前筛选的任务数据</span>
+                </div>
+                <div class="flex gap-2">
+                    <button on:click={() => handleGenerateReport('daily')}
+                        disabled={generatingReport || statsData.list.length === 0}
+                        class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2 transition">
+                        {#if generatingReport}
+                            <i class="ph ph-spinner animate-spin"></i>
+                        {:else}
+                            <i class="ph ph-sun"></i>
+                        {/if}
+                        生成日报
+                    </button>
+                    <button on:click={() => handleGenerateReport('weekly')}
+                        disabled={generatingReport || statsData.list.length === 0}
+                        class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-bold hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2 transition">
+                        {#if generatingReport}
+                            <i class="ph ph-spinner animate-spin"></i>
+                        {:else}
+                            <i class="ph ph-calendar-check"></i>
+                        {/if}
+                        生成周报
+                    </button>
+                </div>
+            </div>
+        </div>
+    {/if}
+
     <div class="md:hidden space-y-3">
         <div class="px-2 text-xs font-bold text-slate-400">任务明细 ({statsStart} ~ {statsEnd})</div>
         {#if statsData.list.length === 0}
@@ -231,3 +302,30 @@
         </table>
     </div>
 </div>
+
+{#if showReport}
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div on:click={closeReport} class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative flex flex-col max-h-[85vh] overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-indigo-50">
+                <h3 class="font-bold text-lg text-indigo-700 flex items-center gap-2">
+                    <i class="ph-fill ph-file-text"></i> AI 生成报告
+                </h3>
+                <div class="flex items-center gap-2">
+                    <button on:click={copyReport}
+                        class="text-sm text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1 px-3 py-1 rounded hover:bg-indigo-100">
+                        <i class="ph ph-copy"></i> 复制
+                    </button>
+                    <button on:click={closeReport} class="text-slate-500 hover:text-slate-700">
+                        <i class="ph ph-x text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6">
+                <div class="prose prose-sm max-w-none">
+                    <pre class="whitespace-pre-wrap text-sm text-slate-700 font-mono bg-slate-50 p-4 rounded-lg border border-slate-200">{reportContent}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+{/if}

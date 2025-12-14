@@ -1,25 +1,77 @@
 import { writable, get } from 'svelte/store';
 
-function createSettingsStore() {
-    const { subscribe, set, update } = writable({
+function getInitialSettings() {
+    if (typeof window === 'undefined') {
+        return {
+            enableNotification: true,
+            autoStart: false,
+            autoStartLoading: false,
+            notificationAvailable: false,
+            enableAiSummary: true,
+            closeToQuit: false,
+            agreementAccepted: false,
+            showAgreement: false,
+            appVersion: '0.2.0'
+        };
+    }
+    
+    const saved = localStorage.getItem('planpro_system_settings');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            return {
+                enableNotification: parsed.enableNotification ?? true,
+                autoStart: false,
+                autoStartLoading: false,
+                notificationAvailable: false,
+                enableAiSummary: parsed.enableAiSummary ?? true,
+                closeToQuit: parsed.closeToQuit ?? false,
+                agreementAccepted: parsed.agreementAccepted ?? false,
+                showAgreement: false,
+                appVersion: '0.2.0'
+            };
+        } catch {
+            return {
+                enableNotification: true,
+                autoStart: false,
+                autoStartLoading: false,
+                notificationAvailable: false,
+                enableAiSummary: true,
+                closeToQuit: false,
+                agreementAccepted: false,
+                showAgreement: false,
+                appVersion: '0.2.0'
+            };
+        }
+    }
+    
+    return {
         enableNotification: true,
         autoStart: false,
         autoStartLoading: false,
         notificationAvailable: false,
-        appVersion: '4.0.0'
-    });
+        enableAiSummary: true,
+        closeToQuit: false,
+        agreementAccepted: false,
+        showAgreement: false,
+        appVersion: '0.2.0'
+    };
+}
+
+function createSettingsStore() {
+    const { subscribe, set, update } = writable(getInitialSettings());
 
     async function init() {
         if (typeof window === 'undefined') return;
-
+        
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '4.0.0' }));
+            update(s => ({ ...s, appVersion: '0.2.0' }));
         }
-
+        
         try {
             const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
             const granted = await isPermissionGranted();
@@ -31,7 +83,7 @@ function createSettingsStore() {
         } catch {
             update(s => ({ ...s, notificationAvailable: false }));
         }
-
+        
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const status = await invoke('get_autostart_status');
@@ -39,21 +91,30 @@ function createSettingsStore() {
         } catch {
             update(s => ({ ...s, autoStart: false }));
         }
-
-        const saved = localStorage.getItem('planpro_system_settings');
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                update(s => ({ ...s, enableNotification: parsed.enableNotification ?? true }));
-            } catch {}
+        
+        const current = get({ subscribe });
+        if (current.closeToQuit) {
+            syncCloseToQuit(true);
         }
     }
 
     function save(state) {
         if (typeof window === 'undefined') return;
         localStorage.setItem('planpro_system_settings', JSON.stringify({
-            enableNotification: state.enableNotification
+            enableNotification: state.enableNotification,
+            enableAiSummary: state.enableAiSummary,
+            closeToQuit: state.closeToQuit,
+            agreementAccepted: state.agreementAccepted
         }));
+    }
+
+    async function syncCloseToQuit(value) {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('set_close_to_quit', { value });
+        } catch (e) {
+            console.error('Failed to sync closeToQuit:', e);
+        }
     }
 
     return {
@@ -64,6 +125,21 @@ function createSettingsStore() {
             save(newState);
             return newState;
         }),
+        toggleAiSummary: () => update(s => {
+            const newState = { ...s, enableAiSummary: !s.enableAiSummary };
+            save(newState);
+            return newState;
+        }),
+        toggleCloseToQuit: async () => {
+            const current = get({ subscribe });
+            const newValue = !current.closeToQuit;
+            await syncCloseToQuit(newValue);
+            update(s => {
+                const newState = { ...s, closeToQuit: newValue };
+                save(newState);
+                return newState;
+            });
+        },
         toggleAutoStart: async () => {
             update(s => ({ ...s, autoStartLoading: true }));
             const current = get({ subscribe });
@@ -85,7 +161,7 @@ function createSettingsStore() {
             try {
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
                 await sendNotification({
-                    title: 'PlanPro 测试通知',
+                    title: 'WorkPlan 测试通知',
                     body: '通知功能正常工作！'
                 });
             } catch (e) {
@@ -96,12 +172,10 @@ function createSettingsStore() {
             const state = get({ subscribe });
             if (!state.enableNotification || !state.notificationAvailable) return;
             if (!tasks || tasks.length === 0) return;
-
             try {
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
                 const titles = tasks.slice(0, 5).map(t => t.title).join('、');
                 const extra = tasks.length > 5 ? `...等 ${tasks.length} 项任务` : '';
-
                 await sendNotification({
                     title: `今日待办 (${tasks.length})`,
                     body: titles + extra
@@ -109,6 +183,17 @@ function createSettingsStore() {
             } catch (e) {
                 console.error('Failed to show notification:', e);
             }
+        },
+        acceptAgreement: () => update(s => {
+            const newState = { ...s, agreementAccepted: true, showAgreement: false };
+            save(newState);
+            return newState;
+        }),
+        showAgreementModal: () => update(s => ({ ...s, showAgreement: true })),
+        hideAgreementModal: () => update(s => ({ ...s, showAgreement: false })),
+        isAgreementAccepted: () => {
+            const state = get({ subscribe });
+            return state.agreementAccepted;
         }
     };
 }

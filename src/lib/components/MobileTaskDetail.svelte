@@ -51,8 +51,8 @@
 </script>
 
 {#if $activeTask}
-    <div class="md:hidden fixed inset-0 z-50 bg-white flex flex-col" style="animation: slideInRight 0.25s ease-out">
-        <div class="h-14 border-b border-slate-100 flex items-center justify-between px-4 bg-white shrink-0">
+    <div class="md:hidden fixed inset-0 z-50 bg-white flex flex-col safe-area-detail" style="animation: slideInRight 0.25s ease-out">
+        <div class="h-14 border-b border-slate-100 flex items-center justify-between px-4 bg-white shrink-0 detail-header">
             <button on:click={close} class="text-slate-500 flex items-center gap-1 font-bold">
                 <i class="ph-bold ph-caret-left text-lg"></i> 返回
             </button>
@@ -71,7 +71,7 @@
             </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 space-y-6 pb-24 bg-slate-50/50">
+        <div class="flex-1 overflow-y-auto p-5 space-y-6 detail-content">
             <div>
                 <div class="flex items-center gap-2 mb-2">
                     {#if isOverdue($activeTask)}
@@ -137,7 +137,7 @@
             </div>
         </div>
 
-        <div class="absolute bottom-6 right-6 z-10">
+        <div class="absolute bottom-6 right-6 z-10 fab-button">
             <button on:click={() => openModal($activeTask)}
                 class="w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-300 flex items-center justify-center active:scale-90 transition-transform">
                 <i class="ph-bold ph-pencil-simple text-2xl"></i>
@@ -150,5 +150,21 @@
     @keyframes slideInRight {
         from { transform: translateX(100%); }
         to { transform: translateX(0); }
+    }
+
+    .safe-area-detail {
+        padding-top: env(safe-area-inset-top);
+    }
+
+    .detail-header {
+        margin-top: env(safe-area-inset-top);
+    }
+
+    .detail-content {
+        padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+    }
+
+    .fab-button {
+        bottom: calc(1.5rem + env(safe-area-inset-bottom));
     }
 </style>

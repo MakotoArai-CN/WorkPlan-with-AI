@@ -13,6 +13,14 @@
         }
     }
 
+    async function toggleCloseToQuit() {
+        try {
+            await settingsStore.toggleCloseToQuit();
+        } catch (error) {
+            await showAlert({ title: '设置失败', message: '设置失败：' + error, variant: 'danger' });
+        }
+    }
+
     async function testNotification() {
         try {
             await settingsStore.testNotification();
@@ -55,6 +63,10 @@
     async function openGithub() {
         await invoke('open_github');
     }
+
+    function showAgreement() {
+        settingsStore.showAgreementModal();
+    }
 </script>
 
 <header class="h-16 bg-white/90 backdrop-blur px-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0">
@@ -64,7 +76,7 @@
     </div>
 </header>
 
-<div class="flex-1 overflow-y-auto p-6 space-y-6 pb-32">
+<div class="flex-1 overflow-y-auto p-6 space-y-6 min-h-0 pb-40">
     {#if $settingsStore.notificationAvailable}
         <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
@@ -96,6 +108,25 @@
 
     <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
+            <i class="ph ph-sparkle text-lg"></i> AI 功能
+        </div>
+        <div class="p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="font-bold text-slate-700">AI 报告生成</div>
+                    <div class="text-xs text-slate-500">在数据统计中使用 AI 生成日报/周报</div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={$settingsStore.enableAiSummary}
+                        on:change={settingsStore.toggleAiSummary} class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
             <i class="ph ph-power text-lg"></i> 启动设置
         </div>
         <div class="p-6 space-y-4">
@@ -122,6 +153,26 @@
 
     <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
+            <i class="ph ph-x-circle text-lg"></i> 窗口行为
+        </div>
+        <div class="p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="font-bold text-slate-700">关闭时彻底退出</div>
+                    <div class="text-xs text-slate-500">关闭窗口时直接退出程序，而不是最小化到托盘</div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={$settingsStore.closeToQuit}
+                        on:change={toggleCloseToQuit}
+                        class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
             <i class="ph ph-info text-lg"></i> 关于
         </div>
         <div class="p-6 space-y-4">
@@ -130,7 +181,7 @@
                     <i class="ph-bold ph-check-square-offset text-3xl"></i>
                 </div>
                 <div class="flex-1">
-                    <h3 class="text-xl font-bold text-slate-800">WorkPlan with AI</h3>
+                    <h3 class="text-xl font-bold text-slate-800">WorkPlan  with AI</h3>
                     <div class="text-sm text-slate-500">版本 {$settingsStore.appVersion}</div>
                 </div>
             </div>
@@ -145,6 +196,10 @@
                     {checkingUpdate ? '检查中...' : '检查更新'}
                 </button>
             </div>
+            <button on:click={showAgreement}
+                class="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-sm font-bold text-slate-600 transition">
+                <i class="ph ph-scroll text-lg"></i> 查看用户协议与隐私政策
+            </button>
         </div>
     </div>
 

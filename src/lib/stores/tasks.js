@@ -1,14 +1,18 @@
 import { writable, derived } from 'svelte/store';
 
-const SUPABASE_URL = 'https://aietizthbhsvnwwkuddz.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_qJ1ytNkpXpLqjlSELTriQw_J1vZyX0d';
-const TABLE_NAME = 'planpro_data';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
+const TABLE_NAME = import.meta.env.VITE_SUPABASE_TABLE || 'planpro_data';
 
 let supabase = null;
 
 async function getSupabase() {
     if (supabase) return supabase;
     if (typeof window === 'undefined') return null;
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+        console.warn('Supabase configuration missing. Cloud sync disabled.');
+        return null;
+    }
     const { createClient } = await import('@supabase/supabase-js');
     supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
     return supabase;
@@ -62,6 +66,7 @@ function createTaskStore() {
                 update(s => ({ ...s, syncStatus: 'error' }));
                 return;
             }
+
             if (data && data.content) {
                 const json = data.content;
                 const cloudStr = getPureDataString({
@@ -89,13 +94,17 @@ function createTaskStore() {
     async function saveData(state) {
         const client = await getSupabase();
         if (!client || !state.accessKey) return;
+
         const currentPureStr = getPureDataString({
             tasks: state.tasks,
             templates: state.templates,
             scheduledTasks: state.scheduledTasks
         });
+
         if (currentPureStr === state.lastCloudStr) return;
+
         update(s => ({ ...s, syncStatus: 'syncing' }));
+
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(async () => {
             try {
@@ -104,6 +113,7 @@ function createTaskStore() {
                 const { error } = await client
                     .from(TABLE_NAME)
                     .upsert({ user_key: state.accessKey, content: rawData, updated_at: nowTimestamp }, { onConflict: 'user_key' });
+
                 if (error) {
                     console.error('Save error:', error);
                     update(s => ({ ...s, syncStatus: 'error' }));
@@ -123,11 +133,13 @@ function createTaskStore() {
         const todayDate = new Date(today);
         let addedCount = 0;
         const newTasks = [...state.tasks];
+
         state.scheduledTasks.forEach(sch => {
             if (!sch.enabled) return;
             let checkDate = sch.lastGeneratedDate
                 ? new Date(new Date(sch.lastGeneratedDate).setDate(new Date(sch.lastGeneratedDate).getDate() + 1))
                 : new Date(todayDate);
+
             while (checkDate <= todayDate) {
                 const dayOfWeek = checkDate.getDay();
                 if (sch.repeatDays.includes(dayOfWeek)) {
@@ -149,6 +161,7 @@ function createTaskStore() {
             }
             sch.lastGeneratedDate = today;
         });
+
         if (addedCount > 0) {
             update(s => ({ ...s, tasks: newTasks }));
         }
@@ -290,8 +303,10 @@ export const activeTasks = derived(
             if ($viewDate === $today) return taskDate <= $today;
             return taskDate === $viewDate;
         });
+
         const pMap = { critical: 3, urgent: 2, normal: 1 };
         const sMap = { doing: 2, todo: 1 };
+
         return list.sort((a, b) => {
             const pDiff = pMap[b.priority] - pMap[a.priority];
             if (pDiff !== 0) return pDiff;

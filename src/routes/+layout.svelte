@@ -16,17 +16,23 @@
         await settingsStore.init();
         loadAiConfig();
 
+        const currentSettings = get(settingsStore);
+        if (currentSettings.closeToQuit) {
+            try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                await invoke('set_close_to_quit', { value: true });
+            } catch {}
+        }
+
         let unlistenNotification = () => {};
         let unlistenAutostart = () => {};
         let unlistenUpdate = () => {};
 
         try {
             const { listen } = await import('@tauri-apps/api/event');
-
             unlistenNotification = await listen('tray-notification-toggle', () => {
                 settingsStore.toggleNotification();
             });
-
             unlistenAutostart = await listen('tray-autostart-toggle', async () => {
                 try {
                     await settingsStore.toggleAutoStart();
@@ -34,7 +40,6 @@
                     console.error(e);
                 }
             });
-
             unlistenUpdate = await listen('tray-check-update', async () => {
                 const { invoke } = await import('@tauri-apps/api/core');
                 const settings = get(settingsStore);

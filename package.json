@@ -1,6 +1,6 @@
 {
   "name": "workplan",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "",
   "type": "module",
   "scripts": {
@@ -14,7 +14,9 @@
     "tauri:dev": "tauri dev",
     "tauri:build-linux": "tauri build --platform linux",
     "tauri:build-windows": "tauri build --platform windows",
-    "tauri:build-macos": "tauri build --platform macos"
+    "tauri:build-macos": "tauri build --platform macos",
+    "tauri:build-android": "tauri build --platform android",
+    "tauri:build-ios": "tauri build --platform ios"
   },
   "license": "MIT",
   "dependencies": {

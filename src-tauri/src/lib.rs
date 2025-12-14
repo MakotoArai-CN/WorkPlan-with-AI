@@ -5,8 +5,12 @@ use tauri::{
     Emitter, Manager, RunEvent, WindowEvent,
 };
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod autostart;
+
+static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 async fn check_update() -> Result<serde_json::Value, String> {
@@ -83,7 +87,8 @@ async fn open_github() -> Result<(), String> {
 async fn open_releases() -> Result<(), String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        open::that("https://github.com/MakotoArai-CN/WorkPlanwithAI/releases").map_err(|e| e.to_string())
+        open::that("https://github.com/MakotoArai-CN/WorkPlanwithAI/releases")
+            .map_err(|e| e.to_string())
     }
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -92,9 +97,24 @@ async fn open_releases() -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn set_close_to_quit(value: bool) {
+    CLOSE_TO_QUIT.store(value, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn get_close_to_quit() -> bool {
+    CLOSE_TO_QUIT.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -106,89 +126,89 @@ pub fn run() {
             get_autostart_status,
             get_app_version,
             open_github,
-            open_releases
+            open_releases,
+            set_close_to_quit,
+            get_close_to_quit,
+            exit_app
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        builder = builder
-            .plugin(tauri_plugin_autostart::Builder::new().build())
-            .setup(|app| {
-                let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
-                let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
-                let notification =
-                    MenuItem::with_id(app, "notification", "系统通知", true, None::<&str>)?;
-                let autostart_item =
-                    MenuItem::with_id(app, "autostart", "开机自启", true, None::<&str>)?;
-                let about = MenuItem::with_id(app, "about", "关于程序", true, None::<&str>)?;
-                let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)?;
+    let builder = builder
+        .plugin(tauri_plugin_autostart::Builder::new().build())
+        .setup(|app| {
+            let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let notification =
+                MenuItem::with_id(app, "notification", "系统通知", true, None::<&str>)?;
+            let autostart_item =
+                MenuItem::with_id(app, "autostart", "开机自启", true, None::<&str>)?;
+            let about = MenuItem::with_id(app, "about", "关于程序", true, None::<&str>)?;
+            let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)?;
 
-                let menu = Menu::with_items(
-                    app,
-                    &[
-                        &show,
-                        &notification,
-                        &autostart_item,
-                        &about,
-                        &update,
-                        &quit,
-                    ],
-                )?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &show,
+                    &notification,
+                    &autostart_item,
+                    &about,
+                    &update,
+                    &quit,
+                ],
+            )?;
 
-                let _tray = TrayIconBuilder::new()
-                    .icon(app.default_window_icon().unwrap().clone())
-                    .menu(&menu)
-                    .tooltip("WorkPlan - 任务管理")
-                    .on_menu_event(|app, event| match event.id.as_ref() {
-                        "quit" => {
-                            app.exit(0);
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("WorkPlan - 任务管理")
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                    }
+                    "notification" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("tray-notification-toggle", ());
                         }
-                        "notification" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("tray-notification-toggle", ());
-                            }
+                    }
+                    "autostart" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("tray-autostart-toggle", ());
                         }
-                        "autostart" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("tray-autostart-toggle", ());
-                            }
+                    }
+                    "about" => {
+                        let _ = open::that("https://github.com/MakotoArai-CN/WorkPlanwithAI");
+                    }
+                    "update" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("tray-check-update", ());
                         }
-                        "about" => {
-                            let _ =
-                                open::that("https://github.com/MakotoArai-CN/WorkPlanwithAI");
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
-                        "update" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("tray-check-update", ());
-                            }
-                        }
-                        _ => {}
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    })
-                    .build(app)?;
+                    }
+                })
+                .build(app)?;
 
-                Ok(())
-            });
-    }
+            Ok(())
+        });
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -203,9 +223,13 @@ pub fn run() {
                 } = event
                 {
                     if label == "main" {
-                        api.prevent_close();
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.hide();
+                        if CLOSE_TO_QUIT.load(Ordering::SeqCst) {
+                            app_handle.exit(0);
+                        } else {
+                            api.prevent_close();
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.hide();
+                            }
                         }
                     }
                 }

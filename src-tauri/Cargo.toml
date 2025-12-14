@@ -1,6 +1,6 @@
 [package]
 name = "workplan"
-version = "0.1.0"
+version = "0.2.0"
 description = "WorkPlan with AI - Task Management"
 authors = ["MakotoArai-CN"]
 edition = "2021"
@@ -23,10 +23,16 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 open = "5"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+winreg = { version = "0.52", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+
+[features]
+default = []
 
 [profile.release]
 panic = "abort"
