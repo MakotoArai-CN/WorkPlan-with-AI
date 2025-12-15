@@ -148,7 +148,7 @@ jobs:
         run: bun tauri android init
 
       - name: Build Android APK
-        run: bun tauri android build --apk
+        run: bun tauri android build
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
