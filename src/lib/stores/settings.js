@@ -11,10 +11,12 @@ function getInitialSettings() {
             closeToQuit: false,
             agreementAccepted: false,
             showAgreement: false,
-            appVersion: '0.2.0'
+            appVersion: '0.2.1',
+            dailyReportPrompt: '',
+            weeklyReportPrompt: ''
         };
     }
-    
+
     const saved = localStorage.getItem('planpro_system_settings');
     if (saved) {
         try {
@@ -28,7 +30,9 @@ function getInitialSettings() {
                 closeToQuit: parsed.closeToQuit ?? false,
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
-                appVersion: '0.2.0'
+                appVersion: '0.2.1',
+                dailyReportPrompt: parsed.dailyReportPrompt || '',
+                weeklyReportPrompt: parsed.weeklyReportPrompt || ''
             };
         } catch {
             return {
@@ -40,11 +44,13 @@ function getInitialSettings() {
                 closeToQuit: false,
                 agreementAccepted: false,
                 showAgreement: false,
-                appVersion: '0.2.0'
+                appVersion: '0.2.1',
+                dailyReportPrompt: '',
+                weeklyReportPrompt: ''
             };
         }
     }
-    
+
     return {
         enableNotification: true,
         autoStart: false,
@@ -54,7 +60,9 @@ function getInitialSettings() {
         closeToQuit: false,
         agreementAccepted: false,
         showAgreement: false,
-        appVersion: '0.2.0'
+        appVersion: '0.2.1',
+        dailyReportPrompt: '',
+        weeklyReportPrompt: ''
     };
 }
 
@@ -63,15 +71,15 @@ function createSettingsStore() {
 
     async function init() {
         if (typeof window === 'undefined') return;
-        
+
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.2.0' }));
+            update(s => ({ ...s, appVersion: '0.2.1' }));
         }
-        
+
         try {
             const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
             const granted = await isPermissionGranted();
@@ -83,7 +91,7 @@ function createSettingsStore() {
         } catch {
             update(s => ({ ...s, notificationAvailable: false }));
         }
-        
+
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const status = await invoke('get_autostart_status');
@@ -91,7 +99,7 @@ function createSettingsStore() {
         } catch {
             update(s => ({ ...s, autoStart: false }));
         }
-        
+
         const current = get({ subscribe });
         if (current.closeToQuit) {
             syncCloseToQuit(true);
@@ -104,7 +112,9 @@ function createSettingsStore() {
             enableNotification: state.enableNotification,
             enableAiSummary: state.enableAiSummary,
             closeToQuit: state.closeToQuit,
-            agreementAccepted: state.agreementAccepted
+            agreementAccepted: state.agreementAccepted,
+            dailyReportPrompt: state.dailyReportPrompt,
+            weeklyReportPrompt: state.weeklyReportPrompt
         }));
     }
 
@@ -120,16 +130,19 @@ function createSettingsStore() {
     return {
         subscribe,
         init,
+
         toggleNotification: () => update(s => {
             const newState = { ...s, enableNotification: !s.enableNotification };
             save(newState);
             return newState;
         }),
+
         toggleAiSummary: () => update(s => {
             const newState = { ...s, enableAiSummary: !s.enableAiSummary };
             save(newState);
             return newState;
         }),
+
         toggleCloseToQuit: async () => {
             const current = get({ subscribe });
             const newValue = !current.closeToQuit;
@@ -140,6 +153,7 @@ function createSettingsStore() {
                 return newState;
             });
         },
+
         toggleAutoStart: async () => {
             update(s => ({ ...s, autoStartLoading: true }));
             const current = get({ subscribe });
@@ -153,6 +167,7 @@ function createSettingsStore() {
                 throw e;
             }
         },
+
         testNotification: async () => {
             const state = get({ subscribe });
             if (!state.notificationAvailable) {
@@ -168,10 +183,12 @@ function createSettingsStore() {
                 throw new Error('发送通知失败: ' + e.message);
             }
         },
+
         showTaskNotification: async (tasks) => {
             const state = get({ subscribe });
             if (!state.enableNotification || !state.notificationAvailable) return;
             if (!tasks || tasks.length === 0) return;
+
             try {
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
                 const titles = tasks.slice(0, 5).map(t => t.title).join('、');
@@ -184,13 +201,29 @@ function createSettingsStore() {
                 console.error('Failed to show notification:', e);
             }
         },
+
+        setDailyReportPrompt: (prompt) => update(s => {
+            const newState = { ...s, dailyReportPrompt: prompt };
+            save(newState);
+            return newState;
+        }),
+
+        setWeeklyReportPrompt: (prompt) => update(s => {
+            const newState = { ...s, weeklyReportPrompt: prompt };
+            save(newState);
+            return newState;
+        }),
+
         acceptAgreement: () => update(s => {
             const newState = { ...s, agreementAccepted: true, showAgreement: false };
             save(newState);
             return newState;
         }),
+
         showAgreementModal: () => update(s => ({ ...s, showAgreement: true })),
+
         hideAgreementModal: () => update(s => ({ ...s, showAgreement: false })),
+
         isAgreementAccepted: () => {
             const state = get({ subscribe });
             return state.agreementAccepted;

@@ -5,6 +5,7 @@ use tauri::{
     Emitter, Manager, RunEvent, WindowEvent,
 };
 
+use tauri_plugin_opener::OpenerExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -12,29 +13,54 @@ mod autostart;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
 
-#[tauri::command]
-async fn check_update() -> Result<serde_json::Value, String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let client = reqwest::Client::new();
-        let response = client
-            .get("https://api.github.com/repos/MakotoArai-CN/WorkPlanwithAI/releases/latest")
-            .header("User-Agent", "WorkPlan")
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+fn is_newer_version(current: &str, latest: &str) -> bool {
+    let parse_version = |v: &str| -> Vec<u32> {
+        v.trim_start_matches('v')
+            .split('.')
+            .filter_map(|s| s.parse::<u32>().ok())
+            .collect()
+    };
 
-        if response.status().is_success() {
-            let data: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-            Ok(data)
-        } else {
-            Err(format!("HTTP Error: {}", response.status()))
+    let current_parts = parse_version(current);
+    let latest_parts = parse_version(latest);
+
+    for i in 0..std::cmp::max(current_parts.len(), latest_parts.len()) {
+        let c = current_parts.get(i).unwrap_or(&0);
+        let l = latest_parts.get(i).unwrap_or(&0);
+        if l > c {
+            return true;
+        }
+        if l < c {
+            return false;
         }
     }
+    false
+}
 
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        Err("不支持在移动设备上检查更新".to_string())
+#[tauri::command]
+async fn check_update() -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://api.github.com/repos/MakotoArai-CN/WorkPlan-with-AI/releases/latest")
+        .header("User-Agent", "WorkPlan")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        let data: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        
+        let current_version = env!("CARGO_PKG_VERSION");
+        let latest_version = data["tag_name"].as_str().unwrap_or("");
+        let has_update = is_newer_version(current_version, latest_version);
+        
+        Ok(serde_json::json!({
+            "has_update": has_update,
+            "current_version": current_version,
+            "latest_version": latest_version.trim_start_matches('v')
+        }))
+    } else {
+        Err(format!("HTTP Error: {}", response.status()))
     }
 }
 
@@ -71,30 +97,17 @@ fn get_app_version() -> String {
 }
 
 #[tauri::command]
-async fn open_github() -> Result<(), String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        open::that("https://github.com/MakotoArai-CN/WorkPlanwithAI").map_err(|e| e.to_string())
-    }
-
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        Ok(())
-    }
+async fn open_github(app: tauri::AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url("https://github.com/MakotoArai-CN/WorkPlan-with-AI", None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn open_releases() -> Result<(), String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        open::that("https://github.com/MakotoArai-CN/WorkPlanwithAI/releases")
-            .map_err(|e| e.to_string())
-    }
-
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        Ok(())
-    }
+async fn open_releases(app: tauri::AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url("https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases", None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -182,7 +195,9 @@ pub fn run() {
                         }
                     }
                     "about" => {
-                        let _ = open::that("https://github.com/MakotoArai-CN/WorkPlanwithAI");
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("tray-open-about", ());
+                        }
                     }
                     "update" => {
                         if let Some(window) = app.get_webview_window("main") {

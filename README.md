@@ -52,7 +52,7 @@ WorkPlan  with AI 是一个现代化的跨平台桌面任务管理和计划制�
 - 月之暗面 (Kimi)
 - Groq (免费快速推理)
 
-> G4F 免费API疑似逆向，可能不稳定，如需长期稳定使用请使用付费API。
+> G4F 免费API疑似逆向，可能不稳定，会出现限流等问题，报错`429`，`500`一般是由于API调用次数超限（需要等CD），如需长期稳定使用请使用付费API。
 
 ## 🛠 技术架构
 
@@ -86,13 +86,13 @@ WorkPlan  with AI 是一个现代化的跨平台桌面任务管理和计划制�
 
 ### 安装步骤
 
-> 注意：`@gpt4free`这个依赖库在 npm 仓库的资源是不完整的，需要从[官方的仓库](https://github.com/gpt4free/g4f.dev)拉取。
+> 注意：`@gpt4free`这个依赖库在 npm 仓库的资源是不完整的，需要从[官方的仓库](https://github.com/gpt4free/g4f.dev)拉取，或者复制项目中的`static\@gpt4free`到`node_modules`目录下。
 
 1. 克隆项目仓库：
 
 ```bash
-git clone https://github.com/MakotoArai-CN/WorkPlanwithAI.git
-cd WorkPlanwithAI
+git clone https://github.com/MakotoArai-CN/WorkPlan-with-AI.git
+cd WorkPlan-with-AI
 ```
 
 2. 安装依赖：
@@ -201,10 +201,11 @@ src-tauri/
 
 ## Todolist
 
-- [ ] 优化移动端UI
 - [ ] 新增多语言支持（超 100 star 就加入 i18 国际化）
-- [ ] 新增AI 报告生成自定义提示词，生成Word模板等（自定义提示词可能支持，但是word模板待定）
-- [ ] 添加AI管理任务功能，增删改查任务等（待定）
+- [ ] 新增右键优化，增加快捷键功能（待定）
+- [x] 优化移动端UI
+- [x] 新增AI 报告生成自定义提示词
+- [x] 添加AI管理任务功能，增删改查任务
 - [x] 适配移动设备
 - [x] 为账号新增保护功能
 - [x] 新增更多AI功能（任务总结，日/周报生成等）
