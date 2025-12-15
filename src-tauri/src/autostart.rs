@@ -1,4 +1,4 @@
-// use std::path::PathBuf;
+use std::path::PathBuf;
 
 #[cfg(target_os = "windows")]
 use winreg::enums::*;
