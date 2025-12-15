@@ -67,14 +67,14 @@ jobs:
         if: matrix.platform != 'windows-latest'
         run: |
           # 先彻底删除官方安装的包（防止残留）
-          rm -rf node_modules/@gpt4free/g4f.dev
+          rm -rf node_modules/@gpt4free
 
           # 确保 scoped 目录存在
-          mkdir -p node_modules/@gpt4free
+          # mkdir -p node_modules/@gpt4free
 
           # 复制自定义完整版本
           if [ -d "static/@gpt4free" ]; then
-            cp -r static/@gpt4free/* node_modules/@gpt4free/
+            cp -r static/@gpt4free node_modules/
 
             # 如果 static 里直接就是 g4f.dev 文件夹，需要移动到正确位置
             if [ -d "node_modules/@gpt4free/g4f.dev" ]; then
@@ -92,16 +92,16 @@ jobs:
         shell: powershell
         run: |
           # 删除官方包
-          if (Test-Path "node_modules\@gpt4free\g4f.dev") {
-            Remove-Item -Recurse -Force "node_modules\@gpt4free\g4f.dev"
+          if (Test-Path "node_modules\@gpt4free") {
+            Remove-Item -Recurse -Force "node_modules\@gpt4free"
           }
 
           # 确保 scoped 目录存在
-          New-Item -ItemType Directory -Force -Path "node_modules\@gpt4free" | Out-Null
+          # New-Item -ItemType Directory -Force -Path "node_modules\@gpt4free" | Out-Null
 
           # 复制自定义版本
           if (Test-Path "static\@gpt4free") {
-            Copy-Item -Recurse -Force "static\@gpt4free\*" "node_modules\@gpt4free\"
+            Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
 
             # 如果复制后已经是正确结构（有 g4f.dev 文件夹），无需处理
             # 如果有多一层嵌套，移动到正确位置
@@ -177,10 +177,10 @@ jobs:
       # Android 也需要覆盖 @gpt4free（防止同样的问题）
       - name: Override @gpt4free with custom complete version (Android)
         run: |
-          rm -rf node_modules/@gpt4free/g4f.dev
-          mkdir -p node_modules/@gpt4free
+          rm -rf node_modules/@gpt4free
+          # mkdir -p node_modules/@gpt4free
           if [ -d "static/@gpt4free" ]; then
-            cp -r static/@gpt4free/* node_modules/@gpt4free/
+            cp -r static/@gpt4free node_modules/
             if [ -d "node_modules/@gpt4free/g4f.dev" ]; then
               echo "Correct structure"
             elif [ -d "node_modules/@gpt4free/*/g4f.dev" ]; then
