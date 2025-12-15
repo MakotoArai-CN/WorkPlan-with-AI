@@ -196,41 +196,51 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      # ==================== 覆盖 @gpt4free (Android) ====================
-
-      - name: Override @gpt4free with custom complete version (Android)
+      - name: Override @gpt4free with custom complete version
         run: |
-          # 先彻底删除官方安装的包
           rm -rf node_modules/@gpt4free
-
-          # 复制自定义完整版本
           if [ -d "static/@gpt4free" ]; then
             cp -r static/@gpt4free node_modules/
-
-            if [ -d "node_modules/@gpt4free/g4f.dev" ]; then
-              echo "Already correct structure"
-            elif [ -d "node_modules/@gpt4free/*/g4f.dev" ]; then
-              mv node_modules/@gpt4free/*/g4f.dev node_modules/@gpt4free/g4f.dev
-            fi
           else
             echo "Warning: static/@gpt4free directory not found!"
             exit 1
           fi
 
-      # ==================== 构建 Android ====================
-
       - name: Initialize Android project
         run: bun run tauri android init
 
-      - name: Build Android APK
-        run: bun run tauri android build
+      - name: Setup Android signing
+        run: |
+          # 解码 keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.jks
+          
+          # 创建 keystore.properties
+          cat > src-tauri/gen/android/keystore.properties << EOF
+          storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=release.jks
+          EOF
+
+      - name: Apply custom build.gradle.kts
+        run: |
+          if [ -f "src-tauri/android/app/build.gradle.kts" ]; then
+            cp src-tauri/android/app/build.gradle.kts src-tauri/gen/android/app/build.gradle.kts
+          fi
+
+      - name: Build signed Android APK
+        run: bun run tauri android build --apk
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Find and rename APK
+      - name: Find APK
         id: find_apk
         run: |
-          APK_PATH=$(find src-tauri/gen/android -name "*.apk" -type f | head -1)
+          APK_PATH=$(find src-tauri/gen/android -path "*/release/*.apk" -type f | head -1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find src-tauri/gen/android -name "*.apk" -type f | head -1)
+          fi
+          
           if [ -n "$APK_PATH" ]; then
             cp "$APK_PATH" ./workplan-android.apk
             echo "apk_found=true" >> $GITHUB_OUTPUT
