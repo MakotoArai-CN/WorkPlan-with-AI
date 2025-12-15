@@ -21,11 +21,11 @@ pub fn set_autostart_registry(enable: bool) -> Result<bool, String> {
 
     if enable {
         let exe_path = get_exe_path()?;
-        key.set_value("WorkPlanwithAI", &exe_path)
+        key.set_value("WorkPlan-with-AI", &exe_path)
             .map_err(|e| format!("无法设置启动项: {}", e))?;
         Ok(true)
     } else {
-        match key.delete_value("WorkPlanwithAI") {
+        match key.delete_value("WorkPlan-with-AI") {
             Ok(_) => Ok(true),
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -46,7 +46,7 @@ pub fn get_autostart_status() -> Result<bool, String> {
         .open_subkey(path)
         .map_err(|e| format!("无法打开注册表: {}", e))?;
 
-    match key.get_value::<String, _>("WorkPlanwithAI") {
+    match key.get_value::<String, _>("WorkPlan-with-AI") {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }

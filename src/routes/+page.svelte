@@ -71,7 +71,7 @@
                         <i class="ph-bold ph-caret-left text-lg"></i> 返回
                     </button>
                     <div class="font-bold text-rose-600 flex items-center gap-1">
-                        <i class="ph-fill ph-sparkle"></i> AI 助手
+                        <i class="ph-fill ph-sparkle"></i> AI Chat
                     </div>
                     <button on:click={() => clearChatHistory()} class="text-slate-400" aria-label="清空聊天">
                         <i class="ph ph-trash text-xl"></i>

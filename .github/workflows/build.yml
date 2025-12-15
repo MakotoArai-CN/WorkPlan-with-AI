@@ -1,0 +1,157 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            target: 'aarch64-apple-darwin'
+          - platform: 'macos-latest'
+            args: '--target x86_64-apple-darwin'
+            target: 'x86_64-apple-darwin'
+          - platform: 'ubuntu-22.04'
+            args: ''
+            target: ''
+          - platform: 'windows-latest'
+            args: ''
+            target: ''
+
+    runs-on: ${{ matrix.platform }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Copy @gpt4free to node_modules (Unix)
+        if: matrix.platform != 'windows-latest'
+        run: |
+          if [ -d "static/@gpt4free" ]; then
+            mkdir -p node_modules/@gpt4free
+            cp -r static/@gpt4free/* node_modules/@gpt4free/
+          fi
+
+      - name: Copy @gpt4free to node_modules (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: powershell
+        run: |
+          if (Test-Path "static\@gpt4free") {
+            New-Item -ItemType Directory -Force -Path "node_modules\@gpt4free"
+            Copy-Item -Recurse -Force "static\@gpt4free\*" "node_modules\@gpt4free\"
+          }
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'WorkPlan ${{ github.ref_name }}'
+          releaseBody: |
+            ## 更新内容
+            请查看 [CHANGELOG](https://github.com/MakotoArai-CN/WorkPlan-with-AI/blob/main/CHANGELOG.md) 获取详细信息。
+            
+            ## 下载说明
+            - **Windows**: 下载 `.msi` 或 `.exe` 文件
+            - **macOS (Intel)**: 下载 `x64.dmg` 文件
+            - **macOS (Apple Silicon)**: 下载 `aarch64.dmg` 文件
+            - **Linux**: 下载 `.deb` 或 `.AppImage` 文件
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  build-android:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Copy @gpt4free to node_modules
+        run: |
+          if [ -d "static/@gpt4free" ]; then
+            mkdir -p node_modules/@gpt4free
+            cp -r static/@gpt4free/* node_modules/@gpt4free/
+          fi
+
+      - name: Install Tauri CLI
+        run: bun add -g @tauri-apps/cli
+
+      - name: Initialize Android project
+        run: bun tauri android init
+
+      - name: Build Android APK
+        run: bun tauri android build --apk
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk

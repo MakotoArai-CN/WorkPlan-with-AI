@@ -62,3 +62,26 @@ body {
 .safe-right {
     padding-right: env(safe-area-inset-right);
 }
+
+@media (max-width: 768px) {
+    html, body {
+        height: 100%;
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+    }
+    
+    #svelte {
+        height: 100%;
+    }
+}
+
+.overscroll-contain {
+    overscroll-behavior: contain;
+}
+
+@supports (-webkit-touch-callout: none) {
+    .h-screen {
+        height: -webkit-fill-available;
+    }
+}
