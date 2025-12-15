@@ -223,7 +223,7 @@ jobs:
         run: bun run tauri android init
 
       - name: Build Android APK
-        run: bun run tauri android build --apk
+        run: bun run tauri android build
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
