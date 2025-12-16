@@ -1202,7 +1202,7 @@
             </button>
             <button
                 on:click={() => {
-                    inputText = "本周未完成的任务";
+                    inputText = "本周未完成的任务有哪些？";
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
@@ -1211,7 +1211,7 @@
             </button>
             <button
                 on:click={() => {
-                    inputText = "明天的任务";
+                    inputText = "明天有什么任务";
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"

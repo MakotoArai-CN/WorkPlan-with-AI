@@ -252,7 +252,7 @@ jobs:
           storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          storeFile=release.jks
+          storeFile=../release.jks
           EOF
 
       - name: Apply custom build.gradle.kts
@@ -317,6 +317,9 @@ jobs:
           else
             COMMITS=$(git log ${PREV_TAG}..HEAD --oneline --pretty=format:"- %s (%h)")
           fi
+          
+          # 过滤掉 @ 提及，用反引号包裹避免触发 GitHub mention
+          COMMITS=$(echo "$COMMITS" | sed 's/@\([a-zA-Z0-9_-]*\)/`@\1`/g')
           
           VERSION="${{ needs.get-version.outputs.version }}"
           REPO="${{ github.repository }}"
