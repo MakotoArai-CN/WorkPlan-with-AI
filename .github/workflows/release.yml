@@ -76,7 +76,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm
 
       - name: Install frontend dependencies
         run: bun install
@@ -86,14 +86,9 @@ jobs:
       - name: Override @gpt4free with custom complete version (Unix)
         if: matrix.platform != 'windows-latest'
         run: |
-          # 先彻底删除官方安装的包（防止残留）
           rm -rf node_modules/@gpt4free
-
-          # 复制自定义完整版本
           if [ -d "static/@gpt4free" ]; then
             cp -r static/@gpt4free node_modules/
-
-            # 如果 static 里直接就是 g4f.dev 文件夹，需要移动到正确位置
             if [ -d "node_modules/@gpt4free/g4f.dev" ]; then
               echo "Already correct structure"
             elif [ -d "node_modules/@gpt4free/*/g4f.dev" ]; then
@@ -108,17 +103,11 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: powershell
         run: |
-          # 删除官方包
           if (Test-Path "node_modules\@gpt4free") {
             Remove-Item -Recurse -Force "node_modules\@gpt4free"
           }
-
-          # 复制自定义版本
           if (Test-Path "static\@gpt4free") {
             Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
-
-            # 如果复制后已经是正确结构（有 g4f.dev 文件夹），无需处理
-            # 如果有多一层嵌套，移动到正确位置
             if (-Not (Test-Path "node_modules\@gpt4free\g4f.dev")) {
               $nested = Get-ChildItem -Path "node_modules\@gpt4free\" -Directory | Where-Object { Test-Path "$_\g4f.dev" }
               if ($nested) {
@@ -129,6 +118,14 @@ jobs:
             Write-Error "static\@gpt4free directory not found!"
             exit 1
           }
+
+      # ==================== 配置 Linux 打包格式 ====================
+
+      - name: Configure Linux bundle targets
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          jq '.bundle.targets = ["deb", "rpm", "appimage"]' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
 
       # ==================== 构建 Tauri 应用 ====================
 
@@ -148,6 +145,7 @@ jobs:
           name: desktop-${{ matrix.target }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
@@ -213,12 +211,43 @@ jobs:
       - name: Initialize Android project
         run: bun run tauri android init
 
+      # ==================== 复制 Android 图标 ====================
+
+      - name: Copy Android icons
+        run: |
+          ANDROID_RES="src-tauri/gen/android/app/src/main/res"
+          ICON_SRC="src-tauri/icons/android"
+          
+          if [ -d "$ICON_SRC" ]; then
+            echo "Copying Android icons from $ICON_SRC"
+            
+            # 复制所有 mipmap 目录
+            for dir in "$ICON_SRC"/mipmap-*; do
+              if [ -d "$dir" ]; then
+                dirname=$(basename "$dir")
+                mkdir -p "$ANDROID_RES/$dirname"
+                cp -rf "$dir"/* "$ANDROID_RES/$dirname/"
+                echo "Copied $dirname"
+              fi
+            done
+            
+            # 如果有 drawable 目录也复制
+            if [ -d "$ICON_SRC/drawable" ]; then
+              mkdir -p "$ANDROID_RES/drawable"
+              cp -rf "$ICON_SRC/drawable"/* "$ANDROID_RES/drawable/"
+              echo "Copied drawable"
+            fi
+            
+            echo "Android icons copied successfully"
+            ls -la "$ANDROID_RES"
+          else
+            echo "Warning: $ICON_SRC directory not found, using default icons"
+          fi
+
       - name: Setup Android signing
         run: |
-          # 解码 keystore
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.jks
           
-          # 创建 keystore.properties
           cat > src-tauri/gen/android/keystore.properties << EOF
           storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -233,7 +262,7 @@ jobs:
           fi
 
       - name: Build signed Android APK
-        run: bun run tauri android build --apk
+        run: bun run tauri android build
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
@@ -293,7 +322,6 @@ jobs:
           REPO="${{ github.repository }}"
           BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
           
-          # 获取应用名称（从 tauri.conf.json）
           APP_NAME=$(jq -r '.productName // .package.productName // "app"' src-tauri/tauri.conf.json | tr ' ' '-')
           
           {
@@ -311,9 +339,10 @@ jobs:
             echo "| [![Windows exe](https://img.shields.io/badge/Windows-exe-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64-setup.exe) | Windows exe 安装包 |"
             echo "| [![Windows msi](https://img.shields.io/badge/Windows-msi-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64_en-US.msi) | Windows msi 安装包 |"
             echo "| [![macOS Intel](https://img.shields.io/badge/macOS-Intel-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64.dmg) | macOS X86 安装包 |"
-            echo "| [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_aarch64.dmg) | macOS Apple SiliconArm64 安装包 |"
+            echo "| [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_aarch64.dmg) | macOS Apple Silicon Arm64 安装包 |"
             echo "| [![Linux AppImage](https://img.shields.io/badge/Linux-AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black)](${BASE_URL}/${APP_NAME}_${VERSION#v}_amd64.AppImage) | Linux 通用安装包 |"
-            echo "| [![Linux deb](https://img.shields.io/badge/Linux-deb-A81D33?style=for-the-badge&logo=debian&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_amd64.deb | Debian 系安装包 |"
+            echo "| [![Linux deb](https://img.shields.io/badge/Linux-deb-A81D33?style=for-the-badge&logo=debian&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_amd64.deb) | Debian/Ubuntu 安装包 |"
+            echo "| [![Linux rpm](https://img.shields.io/badge/Linux-rpm-EE0000?style=for-the-badge&logo=redhat&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}-1.x86_64.rpm) | Fedora/RHEL/openSUSE 安装包 |"
             echo "| [![Android APK](https://img.shields.io/badge/Android-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android.apk) | Android 安装包 |"
             echo ""
             echo "---"
@@ -321,7 +350,7 @@ jobs:
             echo "> 💡 **提示**: 如果不确定下载哪个版本："
             echo "> - **Windows**: 推荐下载 \`.exe\`"
             echo "> - **macOS**: M1/M2/M3 芯片选择 \`Apple Silicon\`，其他选择 \`Intel\`"
-            echo "> - **Linux**: 推荐下载 \`.AppImage\`"
+            echo "> - **Linux**: 推荐下载 \`.AppImage\`，Debian/Ubuntu 用户可选 \`.deb\`，Fedora/RHEL 用户可选 \`.rpm\`"
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
@@ -335,6 +364,7 @@ jobs:
           prerelease: false
           files: |
             artifacts/**/*.deb
+            artifacts/**/*.rpm
             artifacts/**/*.AppImage
             artifacts/**/*.exe
             artifacts/**/*.msi
