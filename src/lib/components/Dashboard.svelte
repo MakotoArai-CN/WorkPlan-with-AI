@@ -97,7 +97,7 @@
         </button>
         <button on:click={() => openModal()}
             class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md shadow-blue-200 flex items-center gap-2">
-            <i class="ph ph-plus-bold"></i>新建
+            <i class="ph ph-plus-circle"></i>新建
         </button>
     </div>
 </header>
