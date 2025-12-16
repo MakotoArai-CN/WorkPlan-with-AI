@@ -178,7 +178,12 @@
                                     {msg.content || ''}
                                 </div>
                                 {#if msg.isStreaming}
-                                    <span class="inline-block w-2 h-4 bg-indigo-500 animate-pulse ml-0.5 align-middle"></span>
+                                    <!-- <span class="inline-block w-2 h-4 bg-indigo-500 animate-pulse ml-0.5 align-middle"></span> -->
+                                     <div class="flex gap-1.5">
+                                        <div class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+                                        <div class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+                                        <div class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+                                    </div>
                                 {/if}
                             </div>
                         {:else if msg.type === 'loading'}
