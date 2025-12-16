@@ -1193,7 +1193,7 @@
         <div class="mt-1.5 flex justify-center gap-2 flex-wrap">
             <button
                 on:click={() => {
-                    inputText = "今天有什么任务";
+                    inputText = "查询今天有什么任务";
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
@@ -1202,16 +1202,16 @@
             </button>
             <button
                 on:click={() => {
-                    inputText = "本周未完成的任务有哪些？";
+                    inputText = "查询本周有什么任务";
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
             >
-                本周待办
+                本周任务
             </button>
             <button
                 on:click={() => {
-                    inputText = "明天有什么任务";
+                    inputText = "查询明天有什么任务";
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
