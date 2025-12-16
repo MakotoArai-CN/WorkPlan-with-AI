@@ -136,6 +136,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
         with:
           args: --target ${{ matrix.target }}
 
@@ -233,6 +236,9 @@ jobs:
         run: bun run tauri android build --apk
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
 
       - name: Find APK
         id: find_apk
