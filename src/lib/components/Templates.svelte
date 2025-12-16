@@ -32,7 +32,7 @@
     </div>
     <button on:click={() => openModal()}
         class="h-9 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-bold shadow-md shadow-purple-200 flex items-center gap-2">
-        <i class="ph ph-plus-circle"></i>新建
+        <i class="ph-bold ph-plus"></i>新建
     </button>
 </header>
 
