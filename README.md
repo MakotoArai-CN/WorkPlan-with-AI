@@ -103,6 +103,8 @@ bun install
 
 3. 配置Supabase：
 
+   > 本项目使用Supabase作为云端数据存储，如果有完全自主可控的云端数据库需要，请自行搭建[Supabase](https://supabase.com/docs)，小白看不懂可以参考这篇博客[手把手自建Supabase服务-墙内](https://ghyghoo8.github.io/2025/03/14/2025-03-14-%E6%89%8B%E6%8A%8A%E6%89%8B%E8%87%AA%E5%BB%BASupabase%E6%9C%8D%E5%8A%A1-%E5%A2%99%E5%86%85/)。
+
    - 打开[Supabase](https://supabase.com/)，注册账号并创建项目，根据Supabase的引导创建你的项目数据库，完成后点击`connect`即可得到数据库连接信息。
    - 点击项目名称，找到`SQL Editor`，填入建表SQL语句，点击`Run`执行建表操作。
 
@@ -203,6 +205,7 @@ src-tauri/
 
 - [ ] 新增多语言支持（超 100 star 就加入 i18 国际化）
 - [ ] 新增右键优化，增加快捷键功能（待定）
+- [ ] 新增表格，支持更多的数据可视化（待定）
 - [x] 优化移动端UI
 - [x] 新增AI 报告生成自定义提示词
 - [x] 添加AI管理任务功能，增删改查任务

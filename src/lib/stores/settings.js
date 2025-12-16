@@ -11,7 +11,7 @@ function getInitialSettings() {
             closeToQuit: false,
             agreementAccepted: false,
             showAgreement: false,
-            appVersion: '0.2.1',
+            appVersion: '0.2.2',
             dailyReportPrompt: '',
             weeklyReportPrompt: ''
         };
@@ -30,7 +30,7 @@ function getInitialSettings() {
                 closeToQuit: parsed.closeToQuit ?? false,
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
-                appVersion: '0.2.1',
+                appVersion: '0.2.2',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || ''
             };
@@ -44,7 +44,7 @@ function getInitialSettings() {
                 closeToQuit: false,
                 agreementAccepted: false,
                 showAgreement: false,
-                appVersion: '0.2.1',
+                appVersion: '0.2.2',
                 dailyReportPrompt: '',
                 weeklyReportPrompt: ''
             };
@@ -60,7 +60,7 @@ function getInitialSettings() {
         closeToQuit: false,
         agreementAccepted: false,
         showAgreement: false,
-        appVersion: '0.2.1',
+        appVersion: '0.2.2',
         dailyReportPrompt: '',
         weeklyReportPrompt: ''
     };
@@ -77,7 +77,7 @@ function createSettingsStore() {
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.2.1' }));
+            update(s => ({ ...s, appVersion: '0.2.2' }));
         }
 
         try {
