@@ -44,7 +44,7 @@
     </div>
     <button on:click={() => openModal()}
         class="h-9 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold shadow-md shadow-teal-200 flex items-center gap-2">
-        <i class="ph ph-plus-bold"></i>新建
+        <i class="ph ph-plus-circle"></i>新建
     </button>
 </header>
 
