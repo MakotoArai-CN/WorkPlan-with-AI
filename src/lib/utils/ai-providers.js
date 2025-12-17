@@ -53,8 +53,8 @@ const PROVIDER_CONFIGS = {
         name: '智谱 GLM',
         endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
         modelsEndpoint: 'https://open.bigmodel.cn/api/paas/v4/models',
-        defaultModels: ['glm-4-plus', 'glm-4', 'glm-4-air', 'glm-4-flash'],
-        defaultModel: 'glm-4-flash',
+        defaultModels: ['glm-4-plus', 'glm-4', 'glm-4-air', 'GLM-4.6V-Flash'],
+        defaultModel: 'GLM-4.6V-Flash',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -315,6 +315,17 @@ const PROVIDER_CONFIGS = {
         docUrl: 'https://novita.ai/docs',
         apiUrl: 'https://novita.ai/dashboard/key'
     },
+    xiaomi: {
+        name: '小米 MiMo',
+        endpoint: 'https://api.xiaomimimo.com/v1/chat/completions',
+        defaultModels: ['mimo-v2-flash', 'mimo-v2-plus'],
+        defaultModel: 'mimo-v2-flash',
+        authType: 'api-key',
+        bodyFormat: 'openai',
+        supportsModelList: false,
+        docUrl: 'https://xiaomi.ai/',
+        apiUrl: 'https://xiaomi.ai/'
+    },
     ollama: {
         name: 'Ollama (本地)',
         endpoint: 'http://localhost:11434/api/chat',
@@ -366,7 +377,7 @@ async function fetchWithTauri(url, options = {}) {
             headers: options.headers || {}
         };
         if (options.body) {
-            fetchOptions.body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+            fetchOptions.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
         }
         const response = await tauriFetch(url, fetchOptions);
         return {
@@ -376,7 +387,15 @@ async function fetchWithTauri(url, options = {}) {
             text: async () => response.text()
         };
     } catch (e) {
-        return window.fetch(url, options);
+        const errorMsg = e.message || String(e);
+        if (errorMsg.includes('not allowed on the configured scope')) {
+            throw new Error('网络权限受限：请确保应用配置允许访问此 API 地址。如果是自定义 API，请检查 Tauri 配置文件。');
+        }
+        if (errorMsg.includes('Failed to fetch') || errorMsg.includes('Network')) {
+            throw new Error('网络请求失败：请检查网络连接或 API 地址是否正确。');
+        }
+        console.error('Tauri fetch failed:', e);
+        throw new Error('请求失败: ' + errorMsg);
     }
 }
 
@@ -397,7 +416,6 @@ async function getBaiduAccessToken(apiKey, secretKey) {
     baiduTokenCache.expireTime = now + (data.expires_in - 300) * 1000;
     return data.access_token;
 }
-
 export async function fetchProviderModels(providerId, apiKey = '') {
     const cacheKey = `${providerId}_${apiKey ? 'auth' : 'noauth'}`;
     if (modelCache[cacheKey] && modelCache[cacheKey].expireTime > Date.now()) {
@@ -542,7 +560,6 @@ function parseStreamChunk(provider, chunk) {
             return chunk.choices?.[0]?.delta?.content || '';
     }
 }
-
 export async function callAI(config, userMessage, systemPrompt) {
     const providerId = config.provider || 'g4f-default';
     if (isG4FProvider(providerId)) {
@@ -591,6 +608,8 @@ export async function callAI(config, userMessage, systemPrompt) {
         headers['Authorization'] = 'Bearer ' + apiKey;
     } else if (provider.authType === 'x-api-key') {
         headers['X-API-Key'] = apiKey;
+    } else if (provider.authType === 'api-key') {
+        headers['api-key'] = apiKey;
     } else if (provider.authType === 'query_key') {
         finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
     }
@@ -649,6 +668,8 @@ export async function callAIWithMessages(config, messages) {
         headers['Authorization'] = 'Bearer ' + apiKey;
     } else if (provider.authType === 'x-api-key') {
         headers['X-API-Key'] = apiKey;
+    } else if (provider.authType === 'api-key') {
+        headers['api-key'] = apiKey;
     } else if (provider.authType === 'query_key') {
         finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
     }
@@ -664,7 +685,6 @@ export async function callAIWithMessages(config, messages) {
     const responseData = await response.json();
     return parseResponse(provider, responseData);
 }
-
 export async function callAIWithMessagesStream(config, messages, onChunk) {
     const providerId = config.provider || 'g4f-default';
     if (isG4FProvider(providerId)) {
@@ -707,29 +727,53 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
         headers['Authorization'] = 'Bearer ' + apiKey;
     } else if (provider.authType === 'x-api-key') {
         headers['X-API-Key'] = apiKey;
+    } else if (provider.authType === 'api-key') {
+        headers['api-key'] = apiKey;
     } else if (provider.authType === 'query_key') {
         finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
     }
     let fullContent = '';
     try {
-        const response = await fetch(finalEndpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestBody)
-        });
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
+        let response;
+        try {
+            const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+            response = await tauriFetch(finalEndpoint, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(requestBody),
+                responseType: 'text'
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
+            }
+        } catch (tauriError) {
+            console.error('Tauri fetch not available, falling back to standard fetch:', tauriError);
+            response = await fetch(finalEndpoint, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(requestBody)
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
+            }
         }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
+
             for (const line of lines) {
                 const trimmedLine = line.trim();
                 if (!trimmedLine || trimmedLine === 'data: [DONE]') continue;

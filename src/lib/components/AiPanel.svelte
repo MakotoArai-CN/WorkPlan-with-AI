@@ -396,6 +396,22 @@
 </script>
 
 <div class="flex flex-col h-full bg-rose-50/30">
+    <div class="h-16 border-b border-rose-100 flex items-center justify-between px-6 bg-white shrink-0">
+        <h3 class="font-bold text-rose-600 flex items-center gap-2">
+            <i class="ph-fill ph-sparkle"></i> AI 助手
+        </h3>
+        <div class="flex items-center gap-2">
+            <button on:click={() => showAiSettings.set(true)}
+                class="text-xs font-bold text-rose-500 hover:text-rose-700 px-2 py-1 rounded hover:bg-rose-100 flex items-center gap-1">
+                <i class="ph ph-gear"></i> 设置
+            </button>
+            <button on:click={() => showAiPanel.set(false)}
+                class="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded hover:bg-slate-100 flex items-center gap-1">
+                <i class="ph-bold ph-arrow-u-up-left"></i> 返回
+            </button>
+        </div>
+    </div>
+
     <div
         bind:this={chatContainer}
         class="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 md:space-y-4 scroll-smooth overscroll-contain"

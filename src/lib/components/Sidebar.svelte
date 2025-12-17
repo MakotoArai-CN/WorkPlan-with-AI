@@ -1,7 +1,7 @@
 <script>
     import { currentView, taskStore, enabledScheduledCount, activeTasks } from '../stores/tasks.js';
     import { showAiPanel } from '../stores/ai.js';
-    import { showConfirm, showAlert } from '../stores/modal.js';
+    import { showConfirm, showAlert, showToast } from '../stores/modal.js';
 
     function switchView(view) {
         currentView.set(view);
@@ -9,27 +9,35 @@
     }
 
     function exportData() {
+        showToast({ message: '正在导出备份...', type: 'info', duration: 1500 });
         const data = taskStore.exportData($taskStore);
         const blob = new Blob([data], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `planpro_backup_${new Date().toISOString().split('T')[0]}.json`;
         a.click();
+        URL.revokeObjectURL(a.href);
+        showToast({ message: '备份导出成功', type: 'success' });
     }
 
     function handleImport(event) {
         const file = event.target.files[0];
         if (!file) return;
+        showToast({ message: '正在导入数据...', type: 'info', duration: 1500 });
         const reader = new FileReader();
         reader.onload = async (e) => {
             const result = taskStore.importData(e.target.result);
             if (result.success) {
-                await showAlert({ title: '导入成功', message: '数据已成功导入！', variant: 'success' });
+                showToast({ message: '数据导入成功', type: 'success' });
             } else {
-                await showAlert({ title: '导入失败', message: result.error, variant: 'danger' });
+                showToast({ message: '导入失败: ' + result.error, type: 'error' });
             }
         };
+        reader.onerror = () => {
+            showToast({ message: '读取文件失败', type: 'error' });
+        };
         reader.readAsText(file);
+        event.target.value = '';
     }
 
     async function logout() {
@@ -42,6 +50,7 @@
         });
         if (confirmed) {
             taskStore.logout();
+            showToast({ message: '已退出登录', type: 'info' });
         }
     }
 
@@ -55,6 +64,7 @@
         });
         if (confirmed) {
             await taskStore.clearAllData($taskStore.accessKey);
+            showToast({ message: '所有数据已清空', type: 'success' });
             location.reload();
         }
     }
@@ -117,7 +127,6 @@
                 <span class="ml-auto bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full">{$activeTasks.length}</span>
             {/if}
         </button>
-
         <button on:click={() => switchView('templates')}
             class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
             class:bg-purple-50={$currentView === 'templates'}
@@ -126,7 +135,6 @@
             class:hover:bg-slate-50={$currentView !== 'templates'}>
             <i class="ph ph-copy text-lg"></i> 任务模板
         </button>
-
         <button on:click={() => switchView('scheduled')}
             class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
             class:bg-teal-50={$currentView === 'scheduled'}
@@ -138,7 +146,6 @@
                 <span class="ml-auto bg-teal-100 text-teal-700 text-[10px] px-2 py-0.5 rounded-full">{$enabledScheduledCount}</span>
             {/if}
         </button>
-
         <button on:click={() => switchView('statistics')}
             class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
             class:bg-indigo-50={$currentView === 'statistics'}
@@ -147,7 +154,14 @@
             class:hover:bg-slate-50={$currentView !== 'statistics'}>
             <i class="ph ph-chart-bar text-lg"></i> 数据统计
         </button>
-
+        <button on:click={() => switchView('notes')}
+            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
+            class:bg-emerald-50={$currentView === 'notes'}
+            class:text-emerald-700={$currentView === 'notes'}
+            class:text-slate-600={$currentView !== 'notes'}
+            class:hover:bg-slate-50={$currentView !== 'notes'}>
+            <i class="ph ph-notebook text-lg"></i> 工作笔记
+        </button>
         <button on:click={() => switchView('aichat')}
             class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
             class:bg-gradient-to-r={$currentView === 'aichat'}
@@ -157,9 +171,15 @@
             class:text-slate-600={$currentView !== 'aichat'}
             class:hover:bg-slate-50={$currentView !== 'aichat'}>
             <i class="ph ph-robot text-lg"></i> AI Chat
-            <span class="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white">New</span>
         </button>
-
+        <button on:click={() => switchView('passwords')}
+            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
+            class:bg-amber-50={$currentView === 'passwords'}
+            class:text-amber-700={$currentView === 'passwords'}
+            class:text-slate-600={$currentView !== 'passwords'}
+            class:hover:bg-slate-50={$currentView !== 'passwords'}>
+            <i class="ph ph-key text-lg"></i> 密码本
+        </button>
         <button on:click={() => switchView('settings')}
             class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
             class:bg-slate-100={$currentView === 'settings'}
