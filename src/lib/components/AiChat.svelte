@@ -8,11 +8,12 @@
         clearAiChatHistory
     } from '../stores/ai.js';
     import { showConfirm } from '../stores/modal.js';
-
+    import MarkdownRenderer from './MarkdownRenderer.svelte';
+    
     let inputText = '';
     let chatContainer;
     let chatStyle = 'default';
-
+    
     const chatStyles = [
         { id: 'default', name: '默认', icon: 'ph-chat-circle', color: 'blue' },
         { id: 'fun', name: '有趣', icon: 'ph-smiley', color: 'yellow' },
@@ -20,7 +21,7 @@
         { id: 'concise', name: '简洁', icon: 'ph-lightning', color: 'green' },
         { id: 'teacher', name: '老师', icon: 'ph-chalkboard-teacher', color: 'orange' }
     ];
-
+    
     function scrollToBottom() {
         if (chatContainer) {
             setTimeout(() => {
@@ -28,7 +29,7 @@
             }, 50);
         }
     }
-
+    
     async function handleSend() {
         if (!inputText.trim() || $isAiLoading) return;
         const text = inputText;
@@ -40,7 +41,7 @@
             console.error('Send failed:', error);
         }
     }
-
+    
     async function handleRetry(index) {
         try {
             await retryChatMessage(index);
@@ -49,7 +50,7 @@
             console.error('Retry failed:', error);
         }
     }
-
+    
     async function handleClear() {
         const confirmed = await showConfirm({
             title: '清空对话',
@@ -62,13 +63,13 @@
             clearAiChatHistory();
         }
     }
-
+    
     function copyMessage(content) {
         if (navigator.clipboard && content) {
             navigator.clipboard.writeText(content);
         }
     }
-
+    
     $: if ($aiChatHistory.length) scrollToBottom();
 </script>
 
@@ -122,27 +123,7 @@
                     <i class="ph-fill ph-sparkle text-3xl md:text-4xl text-indigo-500"></i>
                 </div>
                 <h3 class="text-base md:text-lg font-bold text-slate-700 mb-2">开始对话</h3>
-                <p class="text-xs md:text-sm text-slate-500 max-w-xs px-4">
-                    选择聊天风格，输入您的问题，AI 将为您解答
-                </p>
-                <div class="mt-4 md:mt-6 grid grid-cols-2 gap-2 max-w-xs px-4">
-                    <button on:click={() => { inputText = '你好，介绍一下你自己'; handleSend(); }}
-                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
-                        👋 自我介绍
-                    </button>
-                    <button on:click={() => { inputText = '今天的天气怎么样？'; handleSend(); }}
-                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
-                        🌤️ 聊聊天气
-                    </button>
-                    <button on:click={() => { inputText = '给我讲个笑话'; handleSend(); }}
-                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
-                        😄 讲个笑话
-                    </button>
-                    <button on:click={() => { inputText = '帮我写一首诗'; handleSend(); }}
-                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
-                        ✨ 写首诗
-                    </button>
-                </div>
+                <p class="text-xs md:text-sm text-slate-500 max-w-xs px-4">选择聊天风格，输入您的问题，AI 将为您解答</p>
             </div>
         {:else}
             {#each $aiChatHistory as msg, index}
@@ -162,8 +143,8 @@
                                 <div class="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
                             </div>
                         {:else if msg.type === 'text'}
-                            <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white border border-slate-200 text-slate-700 rounded-tl-none">
-                                <div class="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
+                            <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white border border-slate-200 text-slate-700 rounded-tl-none markdown-message">
+                                <MarkdownRenderer content={msg.content} />
                             </div>
                             <div class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button on:click={() => copyMessage(msg.content)}
@@ -173,13 +154,10 @@
                                 </button>
                             </div>
                         {:else if msg.type === 'streaming'}
-                            <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white border border-slate-200 text-slate-700 rounded-tl-none relative overflow-hidden">
-                                <div class="whitespace-pre-wrap break-words leading-relaxed">
-                                    {msg.content || ''}
-                                </div>
+                            <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white border border-slate-200 text-slate-700 rounded-tl-none relative overflow-hidden markdown-message">
+                                <MarkdownRenderer content={msg.content || ''} />
                                 {#if msg.isStreaming}
-                                    <!-- <span class="inline-block w-2 h-4 bg-indigo-500 animate-pulse ml-0.5 align-middle"></span> -->
-                                     <div class="flex gap-1.5">
+                                    <div class="flex gap-1.5 mt-2">
                                         <div class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
                                         <div class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
                                         <div class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
@@ -206,8 +184,7 @@
                                     </div>
                                     <button on:click={() => handleRetry(index)}
                                         class="self-start px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 flex items-center gap-1 transition">
-                                        <i class="ph ph-arrow-clockwise"></i>
-                                        重试
+                                        <i class="ph ph-arrow-clockwise"></i> 重试
                                     </button>
                                 </div>
                             </div>
@@ -242,10 +219,12 @@
     .safe-bottom {
         padding-bottom: max(5.25rem, env(safe-area-inset-bottom) + 0.5rem);
     }
-    
     @media (min-width: 768px) {
         .safe-bottom {
             padding-bottom: max(1rem, env(safe-area-inset-bottom));
         }
+    }
+    .markdown-message :global(.markdown-content) {
+        font-size: 0.875rem;
     }
 </style>

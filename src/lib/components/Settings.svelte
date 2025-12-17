@@ -3,7 +3,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { onMount } from "svelte";
-
+    
     let checkingUpdate = false;
     let isMobile = false;
 
@@ -54,7 +54,6 @@
         checkingUpdate = true;
         try {
             const data = await invoke("check_update");
-
             if (data.has_update) {
                 const confirmed = await showConfirm({
                     title: "发现新版本",
@@ -197,6 +196,43 @@
             </div>
         </div>
 
+        <div
+            class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
+        >
+            <div
+                class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
+            >
+                <i class="ph ph-chart-bar text-lg"></i> 图表设置
+            </div>
+            <div class="p-4 md:p-6 space-y-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div
+                            class="font-bold text-slate-700 text-sm md:text-base"
+                        >
+                            显示数据图表
+                        </div>
+                        <div class="text-[10px] md:text-xs text-slate-500">
+                            在数据统计中显示图表和可视化
+                        </div>
+                    </div>
+                    <label
+                        class="relative inline-flex items-center cursor-pointer"
+                    >
+                        <input
+                            type="checkbox"
+                            checked={$settingsStore.enableCharts}
+                            on:change={settingsStore.toggleCharts}
+                            class="sr-only peer"
+                        />
+                        <div
+                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"
+                        ></div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
         {#if !isMobile}
             <div
                 class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
@@ -261,6 +297,43 @@
                             </div>
                             <div class="text-[10px] md:text-xs text-slate-500">
                                 关闭窗口时直接退出程序，而不是最小化到托盘
+                            </div>
+                        </div>
+                        <label
+                            class="relative inline-flex items-center cursor-pointer"
+                        >
+                            <input
+                                type="checkbox"
+                                checked={$settingsStore.closeToQuit}
+                                on:change={toggleCloseToQuit}
+                                class="sr-only peer"
+                            />
+                            <div
+                                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"
+                            ></div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        {:else}
+            <div
+                class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
+            >
+                <div
+                    class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
+                >
+                    <i class="ph ph-arrow-u-up-left text-lg"></i> 返回键行为
+                </div>
+                <div class="p-4 md:p-6 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div
+                                class="font-bold text-slate-700 text-sm md:text-base"
+                            >
+                                开启后连按两次退出程序
+                            </div>
+                            <div class="text-[10px] md:text-xs text-slate-500">
+                                关闭后返回键直接挂起到后台，不结束进程
                             </div>
                         </div>
                         <label

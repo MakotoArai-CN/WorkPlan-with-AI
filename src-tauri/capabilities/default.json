@@ -14,6 +14,20 @@
     "shell:allow-execute",
     "http:default",
     "http:allow-fetch",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://localhost:*"
+        },
+        {
+          "url": "http://127.0.0.1:*"
+        }
+      ]
+    },
     "store:default",
     "store:allow-get",
     "store:allow-set",

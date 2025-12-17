@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 
 function createModalStore() {
     const { subscribe, set, update } = writable({
@@ -61,18 +61,18 @@ function createModalStore() {
 }
 
 function createToastStore() {
-    const { subscribe, update } = writable([]);
+    const { subscribe, set, update } = writable([]);
     let toastId = 0;
 
-    return {
+    const store = {
         subscribe,
         show: (options) => {
             const id = ++toastId;
             const toast = {
                 id,
-                message: options.message || '',
-                type: options.type || 'info',
-                duration: options.duration || 3000
+                message: typeof options === 'string' ? options : (options.message || ''),
+                type: typeof options === 'string' ? 'info' : (options.type || 'info'),
+                duration: typeof options === 'string' ? 3000 : (options.duration || 3000)
             };
             update(toasts => [...toasts, toast]);
             if (toast.duration > 0) {
@@ -83,24 +83,26 @@ function createToastStore() {
             return id;
         },
         success: (message, duration = 3000) => {
-            return createToastStore().show({ message, type: 'success', duration });
+            return store.show({ message, type: 'success', duration });
         },
         error: (message, duration = 4000) => {
-            return createToastStore().show({ message, type: 'error', duration });
+            return store.show({ message, type: 'error', duration });
         },
         info: (message, duration = 3000) => {
-            return createToastStore().show({ message, type: 'info', duration });
+            return store.show({ message, type: 'info', duration });
         },
         warning: (message, duration = 3500) => {
-            return createToastStore().show({ message, type: 'warning', duration });
+            return store.show({ message, type: 'warning', duration });
         },
         remove: (id) => {
             update(toasts => toasts.filter(t => t.id !== id));
         },
         clear: () => {
-            update(() => []);
+            set([]);
         }
     };
+
+    return store;
 }
 
 export const modalStore = createModalStore();
@@ -115,14 +117,5 @@ export function showAlert(options) {
 }
 
 export function showToast(options) {
-    const id = Date.now();
-    const toast = {
-        id,
-        message: typeof options === 'string' ? options : options.message || '',
-        type: typeof options === 'string' ? 'info' : (options.type || 'info'),
-        duration: typeof options === 'string' ? 3000 : (options.duration || 3000)
-    };
-    toastStore.subscribe(() => {})();
-    toastStore.show(toast);
-    return id;
+    return toastStore.show(options);
 }
