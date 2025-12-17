@@ -4,6 +4,7 @@ version = "0.2.2"
 description = "WorkPlan with AI - Task Management"
 authors = ["MakotoArai-CN"]
 edition = "2021"
+rust-version = "1.70"
 
 [lib]
 name = "workplan_lib"
@@ -25,18 +26,41 @@ serde_json = "1"
 open = "5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-winreg = { version = "0.52", optional = true }
-
+# Windows 特定依赖
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+windows-sys = { version = "0.52", features = [
+  "Win32_Foundation",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_WindowsAndMessaging"
+]}
+
+# 桌面平台特定依赖（排除 Android 和 iOS）
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+
+# Android 特定依赖
+[target.'cfg(target_os = "android")'.dependencies]
 
 [features]
 default = []
+custom-protocol = ["tauri/custom-protocol"]
 
+# 针对不同目标的优化配置
 [profile.release]
 panic = "abort"
 codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+incremental = false
+
+# Android Release 配置
+[profile.release-android]
+inherits = "release"
+codegen-units = 4
+lto = "thin"
+
+# Windows 32位
+[profile.release-win32]
+inherits = "release"
+opt-level = "z"

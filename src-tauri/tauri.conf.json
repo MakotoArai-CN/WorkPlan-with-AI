@@ -38,17 +38,77 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [],
+    "copyright": "Copyright © 2024 MakotoArai-CN",
+    "category": "Productivity",
+    "shortDescription": "WorkPlan with AI - Task Management",
+    "longDescription": "A powerful task management application powered by AI",
+    "linux": {
+      "appId": "com.makotoarai.workplan",
+      "section": "utils",
+      "priority": "optional",
+      "files": {},
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ],
+        "section": "utils",
+        "priority": "optional"
+      },
+      "rpm": {
+        "release": "1",
+        "epoch": "0"
+      }
+    },
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": null,
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null,
+      "minimumSystemVersion": "10.13"
+    },
     "android": {
-      "minSdkVersion": 24
+      "minSdkVersion": 24,
+      "targetSdkVersion": 34
     },
     "iOS": {
-      "developmentTeam": ""
+      "developmentTeam": "",
+      "minimumSystemVersion": "13.0"
     },
     "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "allowDowngrades": true,
       "wix": null,
       "nsis": {
-        "displayLanguageSelector": true
+        "compression": "lzma",
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": null,
+        "sidebarImage": null,
+        "installMode": "both",
+        "languages": ["English", "SimpChinese", "TradChinese", "Japanese", "Korean"],
+        "startMenuFolder": "WorkPlan",
+        "template": null
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
       }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true,
+      "scope": []
+    },
+    "http": {
+      "scope": ["https://*", "http://*"]
+    },
+    "notification": {
+      "all": true
     }
   }
 }

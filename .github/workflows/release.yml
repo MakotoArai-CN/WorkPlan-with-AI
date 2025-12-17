@@ -7,9 +7,24 @@ on:
     paths:
       - 'src-tauri/tauri.conf.json'
   workflow_dispatch:
+    inputs:
+      skip_android:
+        description: 'Skip Android build'
+        required: false
+        type: boolean
+        default: false
+      skip_ios:
+        description: 'Skip iOS build'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
 
 jobs:
   get-version:
@@ -37,23 +52,28 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-  build-desktop:
+  # ==================== Windows Builds ====================
+  build-windows:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-          - platform: macos-latest
-            target: aarch64-apple-darwin
+          # Windows x64
+          - target: x86_64-pc-windows-msvc
+            arch: x64
+            os: windows-latest
+          # Windows x86 (32-bit)
+          - target: i686-pc-windows-msvc
+            arch: x86
+            os: windows-latest
+          # Windows ARM64
+          - target: aarch64-pc-windows-msvc
+            arch: arm64
+            os: windows-latest
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,36 +91,12 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-
-      - name: Install dependencies (Ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm
+          key: ${{ matrix.target }}
 
       - name: Install frontend dependencies
         run: bun install
 
-      # ==================== 覆盖 @gpt4free ====================
-
-      - name: Override @gpt4free with custom complete version (Unix)
-        if: matrix.platform != 'windows-latest'
-        run: |
-          rm -rf node_modules/@gpt4free
-          if [ -d "static/@gpt4free" ]; then
-            cp -r static/@gpt4free node_modules/
-            if [ -d "node_modules/@gpt4free/g4f.dev" ]; then
-              echo "Already correct structure"
-            elif [ -d "node_modules/@gpt4free/*/g4f.dev" ]; then
-              mv node_modules/@gpt4free/*/g4f.dev node_modules/@gpt4free/g4f.dev
-            fi
-          else
-            echo "Warning: static/@gpt4free directory not found!"
-            exit 1
-          fi
-
-      - name: Override @gpt4free with custom complete version (Windows)
-        if: matrix.platform == 'windows-latest'
+      - name: Override @gpt4free
         shell: powershell
         run: |
           if (Test-Path "node_modules\@gpt4free") {
@@ -108,28 +104,18 @@ jobs:
           }
           if (Test-Path "static\@gpt4free") {
             Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
-            if (-Not (Test-Path "node_modules\@gpt4free\g4f.dev")) {
-              $nested = Get-ChildItem -Path "node_modules\@gpt4free\" -Directory | Where-Object { Test-Path "$_\g4f.dev" }
-              if ($nested) {
-                Move-Item "$($nested.FullName)\g4f.dev" "node_modules\@gpt4free\g4f.dev"
-              }
-            }
-          } else {
-            Write-Error "static\@gpt4free directory not found!"
-            exit 1
           }
 
-      # ==================== 配置 Linux 打包格式 ====================
-
-      - name: Configure Linux bundle targets
-        if: matrix.platform == 'ubuntu-22.04'
+      # ========== Build with embedded WebView (offline installer) ==========
+      - name: Configure for Offline WebView
+        shell: powershell
         run: |
-          jq '.bundle.targets = ["deb", "rpm", "appimage"]' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
-          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
+          $conf = Get-Content "src-tauri/tauri.conf.json" | ConvertFrom-Json
+          $conf.bundle.windows.webviewInstallMode = @{ type = "offlineInstaller" }
+          $conf.bundle.targets = @("nsis")
+          $conf | ConvertTo-Json -Depth 100 | Set-Content "src-tauri/tauri.conf.json"
 
-      # ==================== 构建 Tauri 应用 ====================
-
-      - name: Build Tauri app
+      - name: Build Windows Offline (with WebView)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -139,23 +125,517 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
 
-      - name: Upload artifacts
+      - name: Rename offline installer
+        shell: powershell
+        run: |
+          $files = Get-ChildItem -Path "src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe"
+          foreach ($file in $files) {
+            $newName = $file.Name -replace '\.exe$', '-offline.exe'
+            Rename-Item $file.FullName -NewName $newName
+          }
+
+      # ========== Build with download bootstrapper (minimal) ==========
+      - name: Configure for Download Bootstrapper
+        shell: powershell
+        run: |
+          $conf = Get-Content "src-tauri/tauri.conf.json" | ConvertFrom-Json
+          $conf.bundle.windows.webviewInstallMode = @{ type = "downloadBootstrapper" }
+          $conf.bundle.targets = @("nsis")
+          $conf | ConvertTo-Json -Depth 100 | Set-Content "src-tauri/tauri.conf.json"
+
+      - name: Clean previous build
+        shell: powershell
+        run: |
+          if (Test-Path "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-temp") {
+            Remove-Item -Recurse -Force "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-temp"
+          }
+          # Keep the renamed offline installers, remove temp files
+          Get-ChildItem "src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe" | 
+            Where-Object { $_.Name -notlike "*-offline.exe" } | 
+            Remove-Item -Force
+
+      - name: Build Windows Online (minimal)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+        with:
+          args: --target ${{ matrix.target }}
+
+      # ========== Build MSI ==========
+      - name: Configure for MSI
+        shell: powershell
+        run: |
+          $conf = Get-Content "src-tauri/tauri.conf.json" | ConvertFrom-Json
+          $conf.bundle.targets = @("msi")
+          $conf | ConvertTo-Json -Depth 100 | Set-Content "src-tauri/tauri.conf.json"
+
+      - name: Build Windows MSI
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+        with:
+          args: --target ${{ matrix.target }}
+
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.target }}
+          name: windows-${{ matrix.arch }}
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
-            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
-            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
 
-  build-android:
+  # ==================== macOS Builds ====================
+  build-macos:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Intel
+          - target: x86_64-apple-darwin
+            arch: x64
+            os: macos-13
+          # macOS Apple Silicon
+          - target: aarch64-apple-darwin
+            arch: arm64
+            os: macos-latest
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        run: |
+          rm -rf node_modules/@gpt4free
+          if [ -d "static/@gpt4free" ]; then
+            cp -r static/@gpt4free node_modules/
+          fi
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          args: --target ${{ matrix.target }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
+
+  # ==================== macOS Universal Binary ====================
+  build-macos-universal:
+    needs: [get-version, build-macos]
+    if: needs.get-version.outputs.tag_exists == 'false'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: universal
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        run: |
+          rm -rf node_modules/@gpt4free
+          if [ -d "static/@gpt4free" ]; then
+            cp -r static/@gpt4free node_modules/
+          fi
+
+      - name: Build Universal Binary
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+        with:
+          args: --target universal-apple-darwin
+
+      - name: Upload Universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+
+  # ==================== Linux x86_64 ====================
+  build-linux-x64:
+    needs: get-version
+    if: needs.get-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: linux-x64
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            rpm
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        run: |
+          rm -rf node_modules/@gpt4free
+          if [ -d "static/@gpt4free" ]; then
+            cp -r static/@gpt4free node_modules/
+          fi
+
+      - name: Configure Linux bundle targets
+        run: |
+          jq '.bundle.targets = ["deb", "rpm", "appimage"]' src-tauri/tauri.conf.json > tmp.json
+          mv tmp.json src-tauri/tauri.conf.json
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+        with:
+          args: --target x86_64-unknown-linux-gnu
+
+      - name: Upload Linux x64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+
+  # ==================== Linux ARM64 ====================
+  build-linux-arm64:
+    needs: get-version
+    if: needs.get-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: linux-arm64
+
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            pkg-config \
+            rpm
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        run: |
+          rm -rf node_modules/@gpt4free
+          if [ -d "static/@gpt4free" ]; then
+            cp -r static/@gpt4free node_modules/
+          fi
+
+      - name: Configure for ARM64 cross-compilation
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << 'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+
+          [env]
+          PKG_CONFIG_SYSROOT_DIR = "/usr/aarch64-linux-gnu"
+          PKG_CONFIG_PATH = "/usr/lib/aarch64-linux-gnu/pkgconfig"
+          CC_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-gcc"
+          CXX_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-g++"
+          AR_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-ar"
+          EOF
+
+      - name: Configure Linux bundle targets
+        run: |
+          jq '.bundle.targets = ["deb", "rpm"]' src-tauri/tauri.conf.json > tmp.json
+          mv tmp.json src-tauri/tauri.conf.json
+
+      - name: Build Tauri app for ARM64
+        run: |
+          cd src-tauri
+          cargo build --release --target aarch64-unknown-linux-gnu
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+
+      - name: Upload Linux ARM64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: |
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+        if: always()
+
+  # ==================== Linux ARM32 ====================
+  build-linux-arm32:
+    needs: get-version
+    if: needs.get-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-gnueabihf
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: linux-arm32
+
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-arm-linux-gnueabihf \
+            g++-arm-linux-gnueabihf \
+            libc6-dev-armhf-cross \
+            pkg-config \
+            rpm
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        run: |
+          rm -rf node_modules/@gpt4free
+          if [ -d "static/@gpt4free" ]; then
+            cp -r static/@gpt4free node_modules/
+          fi
+
+      - name: Configure for ARM32 cross-compilation
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << 'EOF'
+          [target.armv7-unknown-linux-gnueabihf]
+          linker = "arm-linux-gnueabihf-gcc"
+
+          [env]
+          CC_armv7_unknown_linux_gnueabihf = "arm-linux-gnueabihf-gcc"
+          CXX_armv7_unknown_linux_gnueabihf = "arm-linux-gnueabihf-g++"
+          AR_armv7_unknown_linux_gnueabihf = "arm-linux-gnueabihf-ar"
+          EOF
+
+      - name: Build Tauri app for ARM32
+        run: |
+          cd src-tauri
+          cargo build --release --target armv7-unknown-linux-gnueabihf
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+
+      - name: Upload Linux ARM32 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm32
+          path: |
+            src-tauri/target/armv7-unknown-linux-gnueabihf/release/bundle/deb/*.deb
+            src-tauri/target/armv7-unknown-linux-gnueabihf/release/bundle/rpm/*.rpm
+        if: always()
+
+  # ==================== Linux i686 (32-bit) ====================
+  build-linux-x86:
+    needs: get-version
+    if: needs.get-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-unknown-linux-gnu
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: linux-x86
+
+      - name: Install 32-bit dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-multilib \
+            g++-multilib \
+            libc6-dev-i386 \
+            pkg-config \
+            rpm
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        run: |
+          rm -rf node_modules/@gpt4free
+          if [ -d "static/@gpt4free" ]; then
+            cp -r static/@gpt4free node_modules/
+          fi
+
+      - name: Configure for i686 compilation
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << 'EOF'
+          [target.i686-unknown-linux-gnu]
+          linker = "gcc"
+          rustflags = ["-C", "link-args=-m32"]
+
+          [env]
+          CFLAGS = "-m32"
+          CXXFLAGS = "-m32"
+          EOF
+
+      - name: Build Tauri app for x86
+        run: |
+          cd src-tauri
+          cargo build --release --target i686-unknown-linux-gnu
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+
+      - name: Upload Linux x86 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86
+          path: |
+            src-tauri/target/i686-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/i686-unknown-linux-gnu/release/bundle/rpm/*.rpm
+        if: always()
+
+  # ==================== Android Build ====================
+  build-android:
+    needs: get-version
+    if: needs.get-version.outputs.tag_exists == 'false' && github.event.inputs.skip_android != 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Individual architecture builds
+          - target: aarch64
+            abi: arm64-v8a
+            rust_target: aarch64-linux-android
+          - target: armv7
+            abi: armeabi-v7a
+            rust_target: armv7-linux-androideabi
+          - target: i686
+            abi: x86
+            rust_target: i686-linux-android
+          - target: x86_64
+            abi: x86_64
+            rust_target: x86_64-linux-android
+
     steps:
       - uses: actions/checkout@v4
 
@@ -168,11 +648,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Add Android targets
-        run: |
-          rustup target add aarch64-linux-android
-          rustup target add armv7-linux-androideabi
-          rustup target add i686-linux-android
-          rustup target add x86_64-linux-android
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: android-${{ matrix.target }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -198,20 +680,15 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      - name: Override @gpt4free with custom complete version
+      - name: Override @gpt4free
         run: |
           rm -rf node_modules/@gpt4free
           if [ -d "static/@gpt4free" ]; then
             cp -r static/@gpt4free node_modules/
-          else
-            echo "Warning: static/@gpt4free directory not found!"
-            exit 1
           fi
 
       - name: Initialize Android project
         run: bun run tauri android init
-
-      # ==================== 复制 Android 图标 ====================
 
       - name: Copy Android icons
         run: |
@@ -219,29 +696,13 @@ jobs:
           ICON_SRC="src-tauri/icons/android"
           
           if [ -d "$ICON_SRC" ]; then
-            echo "Copying Android icons from $ICON_SRC"
-            
-            # 复制所有 mipmap 目录
             for dir in "$ICON_SRC"/mipmap-*; do
               if [ -d "$dir" ]; then
                 dirname=$(basename "$dir")
                 mkdir -p "$ANDROID_RES/$dirname"
                 cp -rf "$dir"/* "$ANDROID_RES/$dirname/"
-                echo "Copied $dirname"
               fi
             done
-            
-            # 如果有 drawable 目录也复制
-            if [ -d "$ICON_SRC/drawable" ]; then
-              mkdir -p "$ANDROID_RES/drawable"
-              cp -rf "$ICON_SRC/drawable"/* "$ANDROID_RES/drawable/"
-              echo "Copied drawable"
-            fi
-            
-            echo "Android icons copied successfully"
-            ls -la "$ANDROID_RES"
-          else
-            echo "Warning: $ICON_SRC directory not found, using default icons"
           fi
 
       - name: Setup Android signing
@@ -255,7 +716,7 @@ jobs:
           storeFile=../release.jks
           EOF
 
-      - name: Apply custom build.gradle.kts with signing config
+      - name: Configure build.gradle.kts for single architecture
         run: |
           cat > src-tauri/gen/android/app/build.gradle.kts << 'GRADLE_EOF'
           import java.util.Properties
@@ -275,15 +736,18 @@ jobs:
           }
 
           android {
-              compileSdk = 36
+              compileSdk = 34
               namespace = "com.makotoarai.workplan"
               defaultConfig {
-                  manifestPlaceholders["usesCleartextTraffic"] = "false"
                   applicationId = "com.makotoarai.workplan"
                   minSdk = 24
-                  targetSdk = 36
+                  targetSdk = 34
                   versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
                   versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+                  
+                  ndk {
+                      abiFilters += listOf("${{ matrix.abi }}")
+                  }
               }
               signingConfigs {
                   create("release") {
@@ -292,7 +756,6 @@ jobs:
                       if (keystorePropertiesFile.exists()) {
                           keystoreProperties.load(FileInputStream(keystorePropertiesFile))
                       }
-
                       keyAlias = keystoreProperties["keyAlias"] as String?
                       keyPassword = keystoreProperties["keyPassword"] as String?
                       storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
@@ -301,16 +764,8 @@ jobs:
               }
               buildTypes {
                   getByName("debug") {
-                      manifestPlaceholders["usesCleartextTraffic"] = "true"
                       isDebuggable = true
-                      isJniDebuggable = true
                       isMinifyEnabled = false
-                      packaging {
-                          jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
-                          jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
-                          jniLibs.keepDebugSymbols.add("*/x86/*.so")
-                          jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
-                      }
                   }
                   getByName("release") {
                       isMinifyEnabled = true
@@ -326,9 +781,6 @@ jobs:
               kotlinOptions {
                   jvmTarget = "1.8"
               }
-              buildFeatures {
-                  buildConfig = true
-              }
           }
 
           rust {
@@ -336,36 +788,28 @@ jobs:
           }
 
           dependencies {
-              implementation("androidx.webkit:webkit:1.14.0")
-              implementation("androidx.appcompat:appcompat:1.7.1")
-              implementation("androidx.activity:activity-ktx:1.10.1")
-              implementation("com.google.android.material:material:1.12.0")
-              testImplementation("junit:junit:4.13.2")
-              androidTestImplementation("androidx.test.ext:junit:1.1.4")
-              androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
+              implementation("androidx.webkit:webkit:1.10.0")
+              implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.android.material:material:1.11.0")
           }
 
           apply(from = "tauri.build.gradle.kts")
           GRADLE_EOF
 
       - name: Build signed Android APK
-        run: bun run tauri android build
+        run: bun run tauri android build --target ${{ matrix.target }}
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
           VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
 
-      - name: Find APK
+      - name: Find and rename APK
         id: find_apk
         run: |
           APK_PATH=$(find src-tauri/gen/android -path "*/release/*.apk" -type f | head -1)
-          if [ -z "$APK_PATH" ]; then
-            APK_PATH=$(find src-tauri/gen/android -name "*.apk" -type f | head -1)
-          fi
-          
           if [ -n "$APK_PATH" ]; then
-            cp "$APK_PATH" ./workplan-android.apk
+            cp "$APK_PATH" ./workplan-android-${{ matrix.abi }}.apk
             echo "apk_found=true" >> $GITHUB_OUTPUT
           else
             echo "apk_found=false" >> $GITHUB_OUTPUT
@@ -375,12 +819,227 @@ jobs:
         if: steps.find_apk.outputs.apk_found == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: workplan-android.apk
+          name: android-${{ matrix.abi }}
+          path: workplan-android-${{ matrix.abi }}.apk
 
+  # ==================== Android Universal APK ====================
+  build-android-universal:
+    needs: get-version
+    if: needs.get-version.outputs.tag_exists == 'false' && github.event.inputs.skip_android != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add all Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add i686-linux-android
+          rustup target add x86_64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: android-universal
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          add-to-path: true
+
+      - name: Set NDK environment
+        run: |
+          echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+          echo "NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        run: |
+          rm -rf node_modules/@gpt4free
+          if [ -d "static/@gpt4free" ]; then
+            cp -r static/@gpt4free node_modules/
+          fi
+
+      - name: Initialize Android project
+        run: bun run tauri android init
+
+      - name: Copy Android icons
+        run: |
+          ANDROID_RES="src-tauri/gen/android/app/src/main/res"
+          ICON_SRC="src-tauri/icons/android"
+          
+          if [ -d "$ICON_SRC" ]; then
+            for dir in "$ICON_SRC"/mipmap-*; do
+              if [ -d "$dir" ]; then
+                dirname=$(basename "$dir")
+                mkdir -p "$ANDROID_RES/$dirname"
+                cp -rf "$dir"/* "$ANDROID_RES/$dirname/"
+              fi
+            done
+          fi
+
+      - name: Setup Android signing
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.jks
+          
+          cat > src-tauri/gen/android/keystore.properties << EOF
+          storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=../release.jks
+          EOF
+
+      - name: Configure build.gradle.kts for universal APK
+        run: |
+          cat > src-tauri/gen/android/app/build.gradle.kts << 'GRADLE_EOF'
+          import java.util.Properties
+          import java.io.FileInputStream
+
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+              id("rust")
+          }
+
+          val tauriProperties = Properties().apply {
+              val propFile = file("tauri.properties")
+              if (propFile.exists()) {
+                  propFile.inputStream().use { load(it) }
+              }
+          }
+
+          android {
+              compileSdk = 34
+              namespace = "com.makotoarai.workplan"
+              defaultConfig {
+                  applicationId = "com.makotoarai.workplan"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
+                  versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+                  
+                  // Include all architectures for universal APK
+                  ndk {
+                      abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                  }
+              }
+              signingConfigs {
+                  create("release") {
+                      val keystorePropertiesFile = rootProject.file("keystore.properties")
+                      val keystoreProperties = Properties()
+                      if (keystorePropertiesFile.exists()) {
+                          keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+                      }
+                      keyAlias = keystoreProperties["keyAlias"] as String?
+                      keyPassword = keystoreProperties["keyPassword"] as String?
+                      storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
+                      storePassword = keystoreProperties["storePassword"] as String?
+                  }
+              }
+              buildTypes {
+                  getByName("debug") {
+                      isDebuggable = true
+                      isMinifyEnabled = false
+                  }
+                  getByName("release") {
+                      isMinifyEnabled = true
+                      isShrinkResources = true
+                      signingConfig = signingConfigs.getByName("release")
+                      proguardFiles(
+                          *fileTree(".") { include("**/*.pro") }
+                              .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
+                              .toList().toTypedArray()
+                      )
+                  }
+              }
+              kotlinOptions {
+                  jvmTarget = "1.8"
+              }
+          }
+
+          rust {
+              rootDirRel = "../../../"
+          }
+
+          dependencies {
+              implementation("androidx.webkit:webkit:1.10.0")
+              implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.android.material:material:1.11.0")
+          }
+
+          apply(from = "tauri.build.gradle.kts")
+          GRADLE_EOF
+
+      - name: Build universal Android APK
+        run: bun run tauri android build
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+
+      - name: Find and rename universal APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find src-tauri/gen/android -path "*/release/*.apk" -type f | head -1)
+          if [ -n "$APK_PATH" ]; then
+            cp "$APK_PATH" ./workplan-android-universal.apk
+            echo "apk_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "apk_found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Universal Android artifact
+        if: steps.find_apk.outputs.apk_found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-universal
+          path: workplan-android-universal.apk
+
+  # ==================== Create Release ====================
   release:
-    needs: [get-version, build-desktop, build-android]
-    if: always() && needs.get-version.outputs.tag_exists == 'false' && (needs.build-desktop.result == 'success' || needs.build-android.result == 'success')
+    needs: [
+      get-version,
+      build-windows,
+      build-macos,
+      build-macos-universal,
+      build-linux-x64,
+      build-linux-arm64,
+      build-linux-arm32,
+      build-linux-x86,
+      build-android,
+      build-android-universal
+    ]
+    if: |
+      always() && 
+      needs.get-version.outputs.tag_exists == 'false' && 
+      (needs.build-windows.result == 'success' || 
+       needs.build-macos.result == 'success' || 
+       needs.build-linux-x64.result == 'success' ||
+       needs.build-android.result == 'success' ||
+       needs.build-android-universal.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -392,8 +1051,8 @@ jobs:
         with:
           path: artifacts
 
-      - name: List artifacts
-        run: find artifacts -type f
+      - name: List all artifacts
+        run: find artifacts -type f | sort
 
       - name: Generate changelog
         id: changelog
@@ -405,14 +1064,13 @@ jobs:
             COMMITS=$(git log ${PREV_TAG}..HEAD --oneline --pretty=format:"- %s (%h)")
           fi
           
-          # 过滤掉 @ 提及，用反引号包裹避免触发 GitHub mention
           COMMITS=$(echo "$COMMITS" | sed 's/@\([a-zA-Z0-9_-]*\)/`@\1`/g')
           
           VERSION="${{ needs.get-version.outputs.version }}"
           REPO="${{ github.repository }}"
           BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
           
-          APP_NAME=$(jq -r '.productName // .package.productName // "app"' src-tauri/tauri.conf.json | tr ' ' '-')
+          APP_NAME=$(jq -r '.productName // "app"' src-tauri/tauri.conf.json | tr ' ' '-')
           
           {
             echo "CHANGELOG<<EOF"
@@ -424,23 +1082,48 @@ jobs:
             echo ""
             echo "## 📦 下载"
             echo ""
-            echo "| 下载 | 说明 |"
-            echo "|:----:|:-----|"
-            echo "| [![Windows exe](https://img.shields.io/badge/Windows-exe-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64-setup.exe) | Windows exe 安装包 |"
-            echo "| [![Windows msi](https://img.shields.io/badge/Windows-msi-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64_en-US.msi) | Windows msi 安装包 |"
-            echo "| [![macOS Intel](https://img.shields.io/badge/macOS-Intel-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64.dmg) | macOS X86 安装包 |"
-            echo "| [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_aarch64.dmg) | macOS Apple Silicon Arm64 安装包 |"
-            echo "| [![Linux AppImage](https://img.shields.io/badge/Linux-AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black)](${BASE_URL}/${APP_NAME}_${VERSION#v}_amd64.AppImage) | Linux 通用安装包 |"
-            echo "| [![Linux deb](https://img.shields.io/badge/Linux-deb-A81D33?style=for-the-badge&logo=debian&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}_amd64.deb) | Debian/Ubuntu 安装包 |"
-            echo "| [![Linux rpm](https://img.shields.io/badge/Linux-rpm-EE0000?style=for-the-badge&logo=redhat&logoColor=white)](${BASE_URL}/${APP_NAME}_${VERSION#v}-1.x86_64.rpm) | Fedora/RHEL/openSUSE 安装包 |"
-            echo "| [![Android APK](https://img.shields.io/badge/Android-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android.apk) | Android 安装包 |"
+            echo "### Windows"
+            echo "| 下载 | 架构 | 说明 |"
+            echo "|:----:|:----:|:-----|"
+            echo "| [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64-setup.exe) | x64 | 64位 (需下载WebView) |"
+            echo "| [![Windows x64 Offline](https://img.shields.io/badge/Windows-x64%20Offline-0078D6?style=for-the-badge&logo=windows)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64-setup-offline.exe) | x64 | 64位 (内置WebView) |"
+            echo "| [![Windows x86](https://img.shields.io/badge/Windows-x86-0078D6?style=for-the-badge&logo=windows)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x86-setup.exe) | x86 | 32位 |"
+            echo "| [![Windows ARM64](https://img.shields.io/badge/Windows-ARM64-0078D6?style=for-the-badge&logo=windows)](${BASE_URL}/${APP_NAME}_${VERSION#v}_arm64-setup.exe) | ARM64 | ARM处理器 |"
+            echo "| [![Windows MSI x64](https://img.shields.io/badge/Windows-MSI%20x64-0078D6?style=for-the-badge&logo=windows)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64_en-US.msi) | x64 | MSI安装包 |"
+            echo ""
+            echo "### macOS"
+            echo "| 下载 | 架构 | 说明 |"
+            echo "|:----:|:----:|:-----|"
+            echo "| [![macOS Universal](https://img.shields.io/badge/macOS-Universal-000000?style=for-the-badge&logo=apple)](${BASE_URL}/${APP_NAME}_${VERSION#v}_universal.dmg) | Universal | Intel + Apple Silicon |"
+            echo "| [![macOS Intel](https://img.shields.io/badge/macOS-Intel-000000?style=for-the-badge&logo=apple)](${BASE_URL}/${APP_NAME}_${VERSION#v}_x64.dmg) | x64 | Intel Mac |"
+            echo "| [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple)](${BASE_URL}/${APP_NAME}_${VERSION#v}_aarch64.dmg) | ARM64 | M1/M2/M3/M4 |"
+            echo ""
+            echo "### Linux"
+            echo "| 下载 | 架构 | 格式 |"
+            echo "|:----:|:----:|:-----|"
+            echo "| [![Linux AppImage x64](https://img.shields.io/badge/Linux-AppImage-FCC624?style=for-the-badge&logo=linux)](${BASE_URL}/${APP_NAME}_${VERSION#v}_amd64.AppImage) | x64 | 通用格式 |"
+            echo "| [![Linux deb x64](https://img.shields.io/badge/Linux-deb%20x64-A81D33?style=for-the-badge&logo=debian)](${BASE_URL}/${APP_NAME}_${VERSION#v}_amd64.deb) | x64 | Debian/Ubuntu |"
+            echo "| [![Linux rpm x64](https://img.shields.io/badge/Linux-rpm%20x64-EE0000?style=for-the-badge&logo=redhat)](${BASE_URL}/${APP_NAME}_${VERSION#v}-1.x86_64.rpm) | x64 | Fedora/RHEL |"
+            echo "| [![Linux deb ARM64](https://img.shields.io/badge/Linux-deb%20ARM64-A81D33?style=for-the-badge&logo=debian)](${BASE_URL}/${APP_NAME}_${VERSION#v}_arm64.deb) | ARM64 | Debian/Ubuntu |"
+            echo "| [![Linux deb ARM32](https://img.shields.io/badge/Linux-deb%20ARM32-A81D33?style=for-the-badge&logo=debian)](${BASE_URL}/${APP_NAME}_${VERSION#v}_armhf.deb) | ARM32 | Debian/Ubuntu |"
+            echo "| [![Linux deb i386](https://img.shields.io/badge/Linux-deb%20i386-A81D33?style=for-the-badge&logo=debian)](${BASE_URL}/${APP_NAME}_${VERSION#v}_i386.deb) | x86 | Debian/Ubuntu |"
+            echo ""
+            echo "### Android"
+            echo "| 下载 | 架构 | 说明 |"
+            echo "|:----:|:----:|:-----|"
+            echo "| [![Android Universal](https://img.shields.io/badge/Android-Universal-3DDC84?style=for-the-badge&logo=android)](${BASE_URL}/workplan-android-universal.apk) | 全架构 | 推荐下载 |"
+            echo "| [![Android ARM64](https://img.shields.io/badge/Android-ARM64-3DDC84?style=for-the-badge&logo=android)](${BASE_URL}/workplan-android-arm64-v8a.apk) | ARM64 | 现代手机 |"
+            echo "| [![Android ARM32](https://img.shields.io/badge/Android-ARM32-3DDC84?style=for-the-badge&logo=android)](${BASE_URL}/workplan-android-armeabi-v7a.apk) | ARM32 | 旧手机 |"
+            echo "| [![Android x86_64](https://img.shields.io/badge/Android-x86__64-3DDC84?style=for-the-badge&logo=android)](${BASE_URL}/workplan-android-x86_64.apk) | x86_64 | 模拟器/平板 |"
+            echo "| [![Android x86](https://img.shields.io/badge/Android-x86-3DDC84?style=for-the-badge&logo=android)](${BASE_URL}/workplan-android-x86.apk) | x86 | 旧模拟器 |"
             echo ""
             echo "---"
             echo ""
-            echo "> 💡 **提示**: 如果不确定下载哪个版本："
-            echo "> - **Windows**: 推荐下载 \`.exe\`"
-            echo "> - **macOS**: M1/M2/M3 芯片选择 \`Apple Silicon\`，其他选择 \`Intel\`"
-            echo "> - **Linux**: 推荐下载 \`.AppImage\`，Debian/Ubuntu 用户可选 \`.deb\`，Fedora/RHEL 用户可选 \`.rpm\`"
+            echo "> 💡 **下载建议**:"
+            echo "> - **Windows**: 现代电脑选 x64，旧电脑选 x86，Surface Pro X 选 ARM64"
+            echo "> - **macOS**: 不确定选 Universal，M系列芯片选 Apple Silicon，老Mac选 Intel"
+            echo "> - **Linux**: 推荐 AppImage，Debian/Ubuntu 用 .deb，Fedora/RHEL 用 .rpm"
+            echo "> - **Android**: 推荐 Universal，也可根据设备架构选择对应版本"
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
