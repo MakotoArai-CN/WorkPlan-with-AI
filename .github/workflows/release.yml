@@ -146,16 +146,15 @@ jobs:
             Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
           }
 
-      - name: Modify Cargo.toml for WebView2 bootstrapper
+      - name: Modify tauri.conf.json for WebView2 bootstrapper
         shell: powershell
         run: |
-          $cargoPath = "src-tauri/Cargo.toml"
-          $content = Get-Content $cargoPath -Raw
-          # 正确合并 features: 将 ["tray-icon"] 改为 ["tray-icon", "windows7-compat"]
-          $content = $content -replace 'tauri = \{ version = "2", features = \["tray-icon"\] \}', 'tauri = { version = "2", features = ["tray-icon", "windows7-compat"] }'
-          Set-Content $cargoPath $content
-          Write-Host "Modified Cargo.toml:"
-          Get-Content $cargoPath
+          $confPath = "src-tauri/tauri.conf.json"
+          $conf = Get-Content $confPath -Raw | ConvertFrom-Json
+          $conf.bundle.windows.nsis | Add-Member -NotePropertyName "webviewInstallMode" -NotePropertyValue @{ type = "downloadBootstrapper" } -Force
+          $conf | ConvertTo-Json -Depth 20 | Set-Content $confPath
+          Write-Host "Modified tauri.conf.json:"
+          Get-Content $confPath
 
       - name: Build with WebView2 bootstrapper
         uses: tauri-apps/tauri-action@v0
@@ -301,15 +300,6 @@ jobs:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - aarch64-linux-android
-          - armv7-linux-androideabi
-          - i686-linux-android
-          - x86_64-linux-android
-
     steps:
       - uses: actions/checkout@v4
 
@@ -321,8 +311,12 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Add Android target
-        run: rustup target add ${{ matrix.target }}
+      - name: Add Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add i686-linux-android
+          rustup target add x86_64-linux-android
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -384,24 +378,6 @@ jobs:
           storeFile=../release.jks
           EOF
 
-      - name: Get ABI filter name
-        id: abi
-        run: |
-          case "${{ matrix.target }}" in
-            aarch64-linux-android)
-              echo "abi=arm64-v8a" >> $GITHUB_OUTPUT
-              ;;
-            armv7-linux-androideabi)
-              echo "abi=armeabi-v7a" >> $GITHUB_OUTPUT
-              ;;
-            i686-linux-android)
-              echo "abi=x86" >> $GITHUB_OUTPUT
-              ;;
-            x86_64-linux-android)
-              echo "abi=x86_64" >> $GITHUB_OUTPUT
-              ;;
-          esac
-
       - name: Apply custom build.gradle.kts
         run: |
           cat > src-tauri/gen/android/app/build.gradle.kts << 'GRADLE_EOF'
@@ -422,13 +398,13 @@ jobs:
           }
 
           android {
-              compileSdk = 35
+              compileSdk = 36
               namespace = "com.makotoarai.workplan"
               defaultConfig {
                   manifestPlaceholders["usesCleartextTraffic"] = "false"
                   applicationId = "com.makotoarai.workplan"
                   minSdk = 24
-                  targetSdk = 35
+                  targetSdk = 36
                   versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
                   versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
               }
@@ -439,6 +415,7 @@ jobs:
                       if (keystorePropertiesFile.exists()) {
                           keystoreProperties.load(FileInputStream(keystorePropertiesFile))
                       }
+
                       keyAlias = keystoreProperties["keyAlias"] as String?
                       keyPassword = keystoreProperties["keyPassword"] as String?
                       storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
@@ -446,18 +423,34 @@ jobs:
                   }
               }
               buildTypes {
+                  getByName("debug") {
+                      manifestPlaceholders["usesCleartextTraffic"] = "true"
+                      isDebuggable = true
+                      isJniDebuggable = true
+                      isMinifyEnabled = false
+                      packaging {
+                          jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
+                          jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
+                          jniLibs.keepDebugSymbols.add("*/x86/*.so")
+                          jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
+                      }
+                  }
                   getByName("release") {
                       isMinifyEnabled = true
                       isShrinkResources = true
                       signingConfig = signingConfigs.getByName("release")
                       proguardFiles(
-                          getDefaultProguardFile("proguard-android-optimize.txt"),
-                          "proguard-rules.pro"
+                          *fileTree(".") { include("**/*.pro") }
+                              .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
+                              .toList().toTypedArray()
                       )
                   }
               }
               kotlinOptions {
-                  jvmTarget = "17"
+                  jvmTarget = "1.8"
+              }
+              buildFeatures {
+                  buildConfig = true
               }
           }
 
@@ -466,42 +459,58 @@ jobs:
           }
 
           dependencies {
-              implementation("androidx.webkit:webkit:1.12.1")
-              implementation("androidx.appcompat:appcompat:1.7.0")
-              implementation("androidx.activity:activity-ktx:1.9.3")
+              implementation("androidx.webkit:webkit:1.14.0")
+              implementation("androidx.appcompat:appcompat:1.7.1")
+              implementation("androidx.activity:activity-ktx:1.10.1")
               implementation("com.google.android.material:material:1.12.0")
+              testImplementation("junit:junit:4.13.2")
+              androidTestImplementation("androidx.test.ext:junit:1.1.4")
+              androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
           }
 
           apply(from = "tauri.build.gradle.kts")
           GRADLE_EOF
 
       - name: Build Android APK
-        run: bun run tauri android build --target ${{ matrix.target }}
+        run: bun run tauri android build --apk --split-per-abi
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
           VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
 
-      - name: Find and rename APK
-        id: find_apk
-        run: |
-          APK_PATH=$(find src-tauri/gen/android -path "*/release/*.apk" -type f | head -1)
-          if [ -n "$APK_PATH" ]; then
-            ARCH_NAME="${{ matrix.target }}"
-            cp "$APK_PATH" "./workplan-android-${ARCH_NAME}.apk"
-            echo "apk_found=true" >> $GITHUB_OUTPUT
-            echo "apk_name=workplan-android-${ARCH_NAME}.apk" >> $GITHUB_OUTPUT
-          else
-            echo "apk_found=false" >> $GITHUB_OUTPUT
-          fi
+      - name: Build Universal APK
+        run: bun run tauri android build
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
 
-      - name: Upload Android artifact
-        if: steps.find_apk.outputs.apk_found == 'true'
+      - name: Collect and rename APKs
+        run: |
+          mkdir -p android-apks
+          find src-tauri/gen/android -path "*/release/*.apk" -type f | while read apk; do
+            filename=$(basename "$apk")
+            if [[ "$filename" == *"arm64-v8a"* ]]; then
+              cp "$apk" "android-apks/workplan-android-arm64-v8a.apk"
+            elif [[ "$filename" == *"armeabi-v7a"* ]]; then
+              cp "$apk" "android-apks/workplan-android-armeabi-v7a.apk"
+            elif [[ "$filename" == *"x86_64"* ]]; then
+              cp "$apk" "android-apks/workplan-android-x86_64.apk"
+            elif [[ "$filename" == *"x86"* ]] && [[ "$filename" != *"x86_64"* ]]; then
+              cp "$apk" "android-apks/workplan-android-x86.apk"
+            elif [[ "$filename" == *"universal"* ]] || [[ "$filename" != *"-"* ]]; then
+              cp "$apk" "android-apks/workplan-android-universal.apk"
+            fi
+          done
+          ls -la android-apks/
+
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-${{ matrix.target }}
-          path: ${{ steps.find_apk.outputs.apk_name }}
+          name: android-apks
+          path: android-apks/*.apk
 
   release:
     needs: [get-version, build-windows, build-windows-webview2, build-linux, build-macos, build-android]
@@ -534,54 +543,39 @@ jobs:
           COMMITS=$(echo "$COMMITS" | sed 's/@\([a-zA-Z0-9_-]*\)/`@\1`/g')
           
           VERSION="${{ needs.get-version.outputs.version }}"
+          VERSION_NUM="${VERSION#v}"
           REPO="${{ github.repository }}"
           BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
           
           {
             echo "CHANGELOG<<EOF"
-            echo "## 🎉 更新日志"
+            echo "## 更新日志"
             echo ""
             echo "$COMMITS"
             echo ""
             echo "---"
             echo ""
-            echo "## 📦 下载链接"
+            echo "## 📦 下载"
             echo ""
-            echo "### Windows"
-            echo "| 架构 | 标准版 | WebView2版 |"
-            echo "|:----:|:------:|:----------:|"
-            echo "| **x64** | [下载 EXE](${BASE_URL}/WorkPlan_${VERSION#v}_x64-setup.exe) | [下载 WebView2](${BASE_URL}/WorkPlan_${VERSION#v}_x64-setup-webview2.exe) |"
-            echo "| **x86** | [下载 EXE](${BASE_URL}/WorkPlan_${VERSION#v}_x86-setup.exe) | - |"
-            echo "| **ARM64** | [下载 EXE](${BASE_URL}/WorkPlan_${VERSION#v}_arm64-setup.exe) | - |"
-            echo ""
-            echo "### macOS"
-            echo "| 架构 | 下载 |"
-            echo "|:----:|:----:|"
-            echo "| **Intel (x64)** | [下载 DMG](${BASE_URL}/WorkPlan_${VERSION#v}_x64.dmg) |"
-            echo "| **Apple Silicon (ARM64)** | [下载 DMG](${BASE_URL}/WorkPlan_${VERSION#v}_aarch64.dmg) |"
-            echo ""
-            echo "### Linux"
-            echo "| 格式 | 下载 |"
-            echo "|:----:|:----:|"
-            echo "| **AppImage** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_amd64.AppImage) |"
-            echo "| **Deb** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_amd64.deb) |"
-            echo "| **RPM** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}-1.x86_64.rpm) |"
-            echo ""
-            echo "### Android"
-            echo "| 架构 | 下载 |"
-            echo "|:----:|:----:|"
-            echo "| **ARM64-v8a** | [下载 APK](${BASE_URL}/workplan-android-aarch64-linux-android.apk) |"
-            echo "| **ARMv7** | [下载 APK](${BASE_URL}/workplan-android-armv7-linux-androideabi.apk) |"
-            echo "| **x86_64** | [下载 APK](${BASE_URL}/workplan-android-x86_64-linux-android.apk) |"
-            echo "| **x86** | [下载 APK](${BASE_URL}/workplan-android-i686-linux-android.apk) |"
+            echo "| 下载 | 说明 |"
+            echo "|:----:|:-----|"
+            echo "| [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64-setup.exe) | Windows x64 安装包 |"
+            echo "| [![Windows x86](https://img.shields.io/badge/Windows-x86-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x86-setup.exe) | Windows x86 安装包 |"
+            echo "| [![Windows ARM64](https://img.shields.io/badge/Windows-ARM64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_arm64-setup.exe) | Windows ARM64 安装包 |"
+            echo "| [![Windows WebView2](https://img.shields.io/badge/Windows-WebView2-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64-setup-webview2.exe) | Windows WebView2 版（旧系统） |"
+            echo "| [![Windows msi](https://img.shields.io/badge/Windows-msi-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64_en-US.msi) | Windows msi 安装包 |"
+            echo "| [![macOS Intel](https://img.shields.io/badge/macOS-Intel-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64.dmg) | macOS Intel 安装包 |"
+            echo "| [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_aarch64.dmg) | macOS Apple Silicon 安装包 |"
+            echo "| [![Linux AppImage](https://img.shields.io/badge/Linux-AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black)](${BASE_URL}/WorkPlan_${VERSION_NUM}_amd64.AppImage) | Linux 通用安装包 |"
+            echo "| [![Linux deb](https://img.shields.io/badge/Linux-deb-A81D33?style=for-the-badge&logo=debian&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_amd64.deb) | Debian/Ubuntu 安装包 |"
+            echo "| [![Linux rpm](https://img.shields.io/badge/Linux-rpm-EE0000?style=for-the-badge&logo=redhat&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}-1.x86_64.rpm) | Fedora/RHEL/openSUSE 安装包 |"
+            echo "| [![Android Universal](https://img.shields.io/badge/Android-Universal-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-universal.apk) | Android 通用安装包 |"
+            echo "| [![Android ARM64](https://img.shields.io/badge/Android-ARM64-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-arm64-v8a.apk) | Android ARM64 安装包 |"
+            echo "| [![Android ARMv7](https://img.shields.io/badge/Android-ARMv7-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-armeabi-v7a.apk) | Android ARMv7 安装包 |"
+            echo "| [![Android x86_64](https://img.shields.io/badge/Android-x86__64-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-x86_64.apk) | Android x86_64 安装包 |"
+            echo "| [![Android x86](https://img.shields.io/badge/Android-x86-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-x86.apk) | Android x86 安装包 |"
             echo ""
             echo "---"
-            echo ""
-            echo "> 💡 **安装提示**"
-            echo "> - **Windows**: 推荐 x64 标准版，Win7 用户选择 WebView2 版"
-            echo "> - **macOS**: M 系列芯片选 ARM64，Intel 芯片选 x64"
-            echo "> - **Linux**: 推荐 AppImage（通用），也可选择对应发行版的包"
-            echo "> - **Android**: 大部分设备选 ARM64-v8a"
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
