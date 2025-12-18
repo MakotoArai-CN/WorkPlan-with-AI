@@ -472,7 +472,7 @@ jobs:
           GRADLE_EOF
 
       - name: Build Android APK
-        run: bun run tauri android build -- --apk --split-per-abi
+        run: bun run tauri android build --split-per-abi
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
@@ -480,7 +480,7 @@ jobs:
           VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
 
       - name: Build Universal APK
-        run: bun run tauri android build -- --apk
+        run: bun run tauri android build
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
