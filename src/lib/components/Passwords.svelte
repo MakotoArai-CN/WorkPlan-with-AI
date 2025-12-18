@@ -34,12 +34,12 @@
     let importProgress = 0;
     let importTotal = 0;
     let showImportProgress = false;
-
     let displayCount = 50;
     let loadingMore = false;
     let loadTrigger;
     let observer;
     let decryptedCache = {};
+    let clickOutsideHandler;
 
     let newPassword = {
         title: '',
@@ -57,8 +57,6 @@
         includeNumbers: true,
         includeSymbols: true
     };
-
-    let clickOutsideHandler;
 
     onMount(() => {
         passwordsStore.load();
@@ -100,7 +98,7 @@
                     loadMore();
                 }
             },
-            { rootMargin: '100px' }
+            { rootMargin: '200px' }
         );
         observer.observe(loadTrigger);
     }
@@ -109,10 +107,9 @@
         if (loadingMore || displayCount >= filteredPasswords.length) return;
         loadingMore = true;
         await tick();
-        setTimeout(() => {
-            displayCount = Math.min(displayCount + 50, filteredPasswords.length);
-            loadingMore = false;
-        }, 100);
+        await new Promise(resolve => setTimeout(resolve, 50));
+        displayCount = Math.min(displayCount + 50, filteredPasswords.length);
+        loadingMore = false;
     }
 
     $: if (loadTrigger && $isPasswordsUnlocked) {
@@ -122,6 +119,7 @@
     $: if (searchQuery || selectedCategory) {
         displayCount = 50;
         decryptedCache = {};
+        showPasswordValue = {};
     }
 
     function getDecryptedPassword(id, encryptedPassword) {
@@ -129,7 +127,9 @@
             return decryptedCache[id];
         }
         const decrypted = passwordsStore.decryptPassword(encryptedPassword);
-        decryptedCache[id] = decrypted;
+        if (decrypted) {
+            decryptedCache[id] = decrypted;
+        }
         return decrypted;
     }
 
@@ -214,7 +214,7 @@
     function openEditModal(password) {
         closeExportMenu();
         editingPassword = { ...password };
-        editingPassword.password = getDecryptedPassword(password.id, password.password);
+        editingPassword.password = getDecryptedPassword(password.id, password.password) || '';
         showEditModal = true;
     }
 
@@ -400,19 +400,11 @@
 
     async function importFromExcel(file) {
         const XLSX = await import('xlsx');
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-                processImportedDataAsync(jsonData);
-            } catch (error) {
-                showToast({ message: 'Excel 解析失败: ' + error.message, type: 'error' });
-            }
-        };
-        reader.readAsArrayBuffer(file);
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+        await processImportedDataAsync(jsonData);
     }
 
     async function importFromCSV(file) {
@@ -517,6 +509,7 @@
             showToast({ message: '没有可导入的数据', type: 'warning' });
             return;
         }
+
         const validEntries = data.filter(item => {
             const title = item.title || item['标题'] || item.Title || item.name || item.Name || '';
             const password = item.password || item['密码'] || item.Password || '';
@@ -529,15 +522,19 @@
             category: item.category || item['分类'] || item.Category || '默认',
             notes: item.notes || item['备注'] || item.Notes || item.note || item.Note || ''
         }));
+
         if (validEntries.length === 0) {
             showToast({ message: '没有有效的密码记录可导入', type: 'warning' });
             return;
         }
+
         importTotal = validEntries.length;
         importProgress = 0;
         showImportProgress = true;
+
         const BATCH_SIZE = 100;
         let imported = 0;
+
         for (let i = 0; i < validEntries.length; i += BATCH_SIZE) {
             const batch = validEntries.slice(i, i + BATCH_SIZE);
             await new Promise(resolve => setTimeout(resolve, 0));
@@ -546,10 +543,12 @@
             importProgress = Math.min(i + BATCH_SIZE, validEntries.length);
             await new Promise(resolve => setTimeout(resolve, 10));
         }
+
         showImportProgress = false;
         importProgress = 0;
         importTotal = 0;
         decryptedCache = {};
+
         if (imported > 0) {
             showToast({ message: `成功导入 ${imported} 条密码记录`, type: 'success' });
         }
@@ -577,6 +576,7 @@
         selectedCategory = category;
         displayCount = 50;
         decryptedCache = {};
+        showPasswordValue = {};
         if (isMobile) showSidebar = false;
     }
 
@@ -598,12 +598,7 @@
     });
 
     $: displayedPasswords = filteredPasswords.slice(0, displayCount);
-
     $: hasMore = displayCount < filteredPasswords.length;
-
-    $: exportPreviewData = selectMode && selectedPasswordIds.size > 0
-        ? passwordsStore.getDecryptedPasswords(Array.from(selectedPasswordIds))
-        : passwordsStore.getDecryptedPasswords();
 
     $: if (typeof window !== 'undefined') {
         if (showExportMenu) {
@@ -805,10 +800,10 @@
                                 </div>
 
                                 <div class="space-y-2 text-sm flex-1">
-                                    <div class="flex items-center gap-2">
+                                    <div class="flex items-center gap-2 h-7">
                                         <i class="ph ph-user text-slate-400 shrink-0"></i>
-                                        <span class="text-slate-600 truncate flex-1" class:text-slate-400={!password.username}>
-                                            {password.username || '未设置用户名'}
+                                        <span class="text-slate-600 truncate flex-1 {!password.username ? 'text-slate-400 italic' : ''}">
+                                            {password.username || '未设置'}
                                         </span>
                                         {#if password.username}
                                             <button on:click={() => copyToClipboard(password.username)}
@@ -818,7 +813,7 @@
                                         {/if}
                                     </div>
 
-                                    <div class="flex items-center gap-2">
+                                    <div class="flex items-center gap-2 h-7">
                                         <i class="ph ph-lock text-slate-400 shrink-0"></i>
                                         <input type={showPasswordValue[password.id] ? 'text' : 'password'}
                                             value={showPasswordValue[password.id] ? (decryptedCache[password.id] || '••••••••') : '••••••••'}
@@ -835,7 +830,7 @@
                                     </div>
 
                                     {#if password.url}
-                                        <div class="flex items-center gap-2">
+                                        <div class="flex items-center gap-2 h-7">
                                             <i class="ph ph-link text-slate-400 shrink-0"></i>
                                             <a href={password.url} target="_blank" rel="noopener noreferrer" 
                                                 class="text-blue-600 hover:underline truncate flex-1 text-xs">

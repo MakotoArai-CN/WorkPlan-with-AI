@@ -9,7 +9,9 @@
         loadModelsForProvider,
         modelsLoading,
         providerModels,
-        getAiProviderInfo
+        getAiProviderInfo,
+        switchProvider,
+        hydrateCurrentProviderConfigWithDefaults
     } from '../stores/ai.js';
     import { settingsStore } from '../stores/settings.js';
     import { showAlert } from '../stores/modal.js';
@@ -26,10 +28,8 @@
 
     const defaultDailyPrompt = `当前时间：{{time}}
 请根据以下任务列表生成一份{{type}}。
-
 【任务列表】
 {{tasks}}
-
 【要求】
 1. 生成简洁专业的日报
 2. 包含：工作概述、已完成事项、进行中事项、工作亮点/问题
@@ -38,23 +38,13 @@
 
     const defaultWeeklyPrompt = `当前时间：{{time}}
 请根据以下任务列表生成一份{{type}}。
-
 【任务列表】
 {{tasks}}
-
 【要求】
 1. 生成简洁专业的周报
 2. 包含：本周概述、已完成事项、进行中事项、下周计划、问题与建议
 3. 使用 Markdown 格式
 4. 语言简练，突出重点`;
-
-    onMount(async () => {
-        providers = await getAiProviders();
-        await loadCurrentProviderInfo();
-        await loadCurrentProviderModels();
-        dailyPrompt = $settingsStore.dailyReportPrompt || '';
-        weeklyPrompt = $settingsStore.weeklyReportPrompt || '';
-    });
 
     async function loadCurrentProviderInfo() {
         currentProvider = await getAiProviderInfo($aiConfig.provider);
@@ -62,11 +52,37 @@
 
     async function loadCurrentProviderModels() {
         const providerId = $aiConfig.provider;
-        const apiKey = $aiConfig.apiKey || '';
-        currentModels = await loadModelsForProvider(providerId, apiKey);
-        if (currentModels.length > 0 && !currentModels.includes($aiConfig.model)) {
-            updateAiConfig({ model: currentModels[0] });
+        if (providerId === 'custom') {
+            currentModels = [];
+            return;
         }
+        const apiKey = $aiConfig.apiKey || '';
+        const models = await loadModelsForProvider(providerId, apiKey);
+        currentModels = models || [];
+
+        if (currentModels.length > 0) {
+            const savedModel = $aiConfig.model;
+            if (!savedModel || savedModel === 'auto' || !currentModels.includes(savedModel)) {
+                updateAiConfig({ model: currentModels[0] });
+            }
+        }
+    }
+
+    onMount(async () => {
+        providers = await getAiProviders();
+        await hydrateCurrentProviderConfigWithDefaults();
+        await loadCurrentProviderInfo();
+        await loadCurrentProviderModels();
+        dailyPrompt = $settingsStore.dailyReportPrompt || '';
+        weeklyPrompt = $settingsStore.weeklyReportPrompt || '';
+    });
+
+    $: if ($showAiSettings) {
+        (async () => {
+            await hydrateCurrentProviderConfigWithDefaults();
+            await loadCurrentProviderInfo();
+            await loadCurrentProviderModels();
+        })();
     }
 
     async function handleTestConnection() {
@@ -98,22 +114,19 @@
     }
 
     function handleClose() {
+        saveAiConfig();
         showAiSettings.set(false);
     }
 
     async function handleProviderChange(e) {
         const providerId = e.target.value;
-        const provider = providers.find(p => p.id === providerId);
-        updateAiConfig({
-            provider: providerId,
-            model: provider?.defaultModel || 'auto'
-        });
+        await switchProvider(providerId);
         await loadCurrentProviderInfo();
         await loadCurrentProviderModels();
     }
 
     async function handleApiKeyChange() {
-        if (currentProvider?.supportsModelList && $aiConfig.apiKey) {
+        if ($aiConfig.provider !== 'custom' && currentProvider?.supportsModelList && $aiConfig.apiKey) {
             await loadCurrentProviderModels();
         }
     }
@@ -135,8 +148,9 @@
         weeklyPrompt = defaultWeeklyPrompt;
     }
 
-    $: needsApiKey = currentProvider && currentProvider.authType !== 'none' && !isG4FProvider($aiConfig.provider);
-    $: displayModels = $providerModels[$aiConfig.provider] || currentModels || currentProvider?.defaultModels || [];
+    $: isCustomProvider = $aiConfig.provider === 'custom';
+    $: needsApiKey = (currentProvider && currentProvider.authType !== 'none' && !isG4FProvider($aiConfig.provider)) || isCustomProvider;
+    $: displayModels = isCustomProvider ? [] : ($providerModels[$aiConfig.provider] || currentModels || currentProvider?.defaultModels || []);
 </script>
 
 {#if $showAiSettings}
@@ -196,7 +210,7 @@
                                 {/each}
                             </optgroup>
                             <optgroup label="国内服务商">
-                                {#each providers.filter(p => ['deepseek', 'zhipu', 'qwen', 'moonshot', 'spark', 'baidu', 'hunyuan', 'yi', 'baichuan', 'minimax', 'stepfun', 'doubao', 'sensetime', 'siliconflow'].includes(p.id)) as provider}
+                                {#each providers.filter(p => ['deepseek', 'zhipu', 'qwen', 'moonshot', 'spark', 'baidu', 'hunyuan', 'yi', 'baichuan', 'minimax', 'stepfun', 'doubao', 'sensetime', 'siliconflow', 'mimo'].includes(p.id)) as provider}
                                     <option value={provider.id}>{provider.name}</option>
                                 {/each}
                             </optgroup>
@@ -222,7 +236,23 @@
                         </div>
                     </div>
 
-                    {#if displayModels.length > 0}
+                    {#if isCustomProvider}
+                        <div>
+                            <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">API 端点</label>
+                            <input bind:value={$aiConfig.customEndpoint} type="url"
+                                placeholder="https://api.example.com/v1/chat/completions"
+                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono">
+                            <div class="text-[10px] text-slate-400 mt-1">
+                                OpenAI 兼容接口，通常以 /v1/chat/completions 结尾
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">模型名称</label>
+                            <input bind:value={$aiConfig.customModel} type="text"
+                                placeholder="输入模型名称"
+                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono">
+                        </div>
+                    {:else if displayModels.length > 0}
                         <div>
                             <div class="flex items-center justify-between mb-2">
                                 <label class="text-xs font-bold text-slate-500 uppercase">模型</label>
@@ -270,15 +300,6 @@
                         </div>
                     {/if}
 
-                    {#if $aiConfig.provider === 'custom'}
-                        <div>
-                            <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">API 端点</label>
-                            <input bind:value={$aiConfig.customEndpoint} type="url"
-                                placeholder="https://api.example.com/v1/chat/completions"
-                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono">
-                        </div>
-                    {/if}
-
                     <div class="bg-slate-50 rounded-lg p-3 md:p-4 flex items-center justify-between flex-wrap gap-2">
                         <span class="text-xs md:text-sm text-slate-600">测试 AI 连接</span>
                         <button on:click={handleTestConnection} disabled={testing}
@@ -312,11 +333,10 @@
                     <div class="space-y-4">
                         <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
                             <div class="font-bold mb-1">可用变量：</div>
-                            <code class="bg-amber-100 px-1 rounded">{'{{time}}'}</code> 当前时间 | 
-                            <code class="bg-amber-100 px-1 rounded">{'{{tasks}}'}</code> 任务列表 | 
+                            <code class="bg-amber-100 px-1 rounded">{'{{time}}'}</code> 当前时间 |
+                            <code class="bg-amber-100 px-1 rounded">{'{{tasks}}'}</code> 任务列表 |
                             <code class="bg-amber-100 px-1 rounded">{'{{type}}'}</code> 报告类型
                         </div>
-
                         <div>
                             <div class="flex items-center justify-between mb-2">
                                 <label class="text-xs font-bold text-slate-500 uppercase">日报提示词模板</label>
@@ -327,7 +347,6 @@
                             <textarea bind:value={dailyPrompt} rows="6" placeholder="留空则使用默认模板..."
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-rose-400 font-mono resize-none"></textarea>
                         </div>
-
                         <div>
                             <div class="flex items-center justify-between mb-2">
                                 <label class="text-xs font-bold text-slate-500 uppercase">周报提示词模板</label>

@@ -29,7 +29,7 @@ const PROVIDER_CONFIGS = {
         name: 'Groq',
         endpoint: 'https://api.groq.com/openai/v1/chat/completions',
         modelsEndpoint: 'https://api.groq.com/openai/v1/models',
-        defaultModels: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+        defaultModels: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
         defaultModel: 'llama-3.3-70b-versatile',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -41,7 +41,7 @@ const PROVIDER_CONFIGS = {
         name: '硅基流动',
         endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
         modelsEndpoint: 'https://api.siliconflow.cn/v1/models',
-        defaultModels: ['Qwen/Qwen2.5-7B-Instruct', 'deepseek-ai/DeepSeek-V2.5'],
+        defaultModels: ['Qwen/Qwen2.5-7B-Instruct', 'deepseek-ai/DeepSeek-V2.5', 'THUDM/glm-4-9b-chat'],
         defaultModel: 'Qwen/Qwen2.5-7B-Instruct',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -53,8 +53,8 @@ const PROVIDER_CONFIGS = {
         name: '智谱 GLM',
         endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
         modelsEndpoint: 'https://open.bigmodel.cn/api/paas/v4/models',
-        defaultModels: ['glm-4-plus', 'glm-4', 'glm-4-air', 'GLM-4.6V-Flash'],
-        defaultModel: 'GLM-4.6V-Flash',
+        defaultModels: ['GLM-4.6V-Flash', 'GLM-4.5-Flash', 'GLM-4.1V-Thinking-Flash', 'GLM-4-Flash-250414', 'GLM-4V-Flash', 'GLM-4.6', 'glm-4-flash', 'glm-4', 'glm-4-plus', 'glm-4-air', 'glm-4-airx', 'glm-4-long', 'glm-4v', 'glm-4v-plus'],
+        defaultModel: 'glm-4-flash',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -65,7 +65,7 @@ const PROVIDER_CONFIGS = {
         name: '阿里通义千问',
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         modelsEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/models',
-        defaultModels: ['qwen-turbo', 'qwen-plus', 'qwen-max'],
+        defaultModels: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-turbo-latest', 'qwen-plus-latest'],
         defaultModel: 'qwen-turbo',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -88,7 +88,7 @@ const PROVIDER_CONFIGS = {
     spark: {
         name: '讯飞星火',
         endpoint: 'https://spark-api-open.xf-yun.com/v1/chat/completions',
-        defaultModels: ['4.0Ultra', 'generalv3.5', 'generalv3'],
+        defaultModels: ['4.0Ultra', 'generalv3.5', 'generalv3', 'lite'],
         defaultModel: 'generalv3.5',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -111,13 +111,25 @@ const PROVIDER_CONFIGS = {
     hunyuan: {
         name: '腾讯混元',
         endpoint: 'https://api.hunyuan.cloud.tencent.com/v1/chat/completions',
-        defaultModels: ['hunyuan-turbo', 'hunyuan-pro', 'hunyuan-standard'],
-        defaultModel: 'hunyuan-turbo',
+        defaultModels: ['hunyuan-turbo', 'hunyuan-pro', 'hunyuan-standard', 'hunyuan-lite'],
+        defaultModel: 'hunyuan-lite',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: false,
         docUrl: 'https://cloud.tencent.com/document/product/1729',
         apiUrl: 'https://console.cloud.tencent.com/cam/capi'
+    },
+    mimo: {
+        name: '小米 MiMo',
+        endpoint: 'https://api.xiaomimimo.com/v1/chat/completions',
+        modelsEndpoint: 'https://api.xiaomimimo.com/v1/models',
+        defaultModels: ['mimo-v2-flash', 'mimo-v2-pro'],
+        defaultModel: 'mimo-v2-flash',
+        authType: 'bearer',
+        bodyFormat: 'openai',
+        supportsModelList: true,
+        docUrl: 'https://dev.mi.com/xiaomihyperos/documentation/doc?docId=AGIServiceApiDoc',
+        apiUrl: 'https://dev.mi.com/platform/personalcenter/apiKey'
     },
     anthropic: {
         name: 'Anthropic Claude',
@@ -147,7 +159,7 @@ const PROVIDER_CONFIGS = {
         name: 'Mistral AI',
         endpoint: 'https://api.mistral.ai/v1/chat/completions',
         modelsEndpoint: 'https://api.mistral.ai/v1/models',
-        defaultModels: ['mistral-large-latest', 'mistral-small-latest', 'open-mistral-7b'],
+        defaultModels: ['mistral-large-latest', 'mistral-small-latest', 'open-mistral-7b', 'codestral-latest'],
         defaultModel: 'mistral-small-latest',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -195,7 +207,7 @@ const PROVIDER_CONFIGS = {
         name: '零一万物',
         endpoint: 'https://api.lingyiwanwu.com/v1/chat/completions',
         modelsEndpoint: 'https://api.lingyiwanwu.com/v1/models',
-        defaultModels: ['yi-lightning', 'yi-large', 'yi-medium'],
+        defaultModels: ['yi-lightning', 'yi-large', 'yi-medium', 'yi-spark'],
         defaultModel: 'yi-lightning',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -206,7 +218,7 @@ const PROVIDER_CONFIGS = {
     baichuan: {
         name: '百川智能',
         endpoint: 'https://api.baichuan-ai.com/v1/chat/completions',
-        defaultModels: ['Baichuan4', 'Baichuan3-Turbo'],
+        defaultModels: ['Baichuan4', 'Baichuan3-Turbo', 'Baichuan2-Turbo'],
         defaultModel: 'Baichuan3-Turbo',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -217,7 +229,7 @@ const PROVIDER_CONFIGS = {
     minimax: {
         name: 'MiniMax',
         endpoint: 'https://api.minimax.chat/v1/text/chatcompletion_v2',
-        defaultModels: ['abab6.5s-chat', 'abab6.5-chat'],
+        defaultModels: ['abab6.5s-chat', 'abab6.5-chat', 'abab5.5-chat'],
         defaultModel: 'abab6.5s-chat',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -315,17 +327,6 @@ const PROVIDER_CONFIGS = {
         docUrl: 'https://novita.ai/docs',
         apiUrl: 'https://novita.ai/dashboard/key'
     },
-    xiaomi: {
-        name: '小米 MiMo',
-        endpoint: 'https://api.xiaomimimo.com/v1/chat/completions',
-        defaultModels: ['mimo-v2-flash', 'mimo-v2-plus'],
-        defaultModel: 'mimo-v2-flash',
-        authType: 'api-key',
-        bodyFormat: 'openai',
-        supportsModelList: false,
-        docUrl: 'https://xiaomi.ai/',
-        apiUrl: 'https://xiaomi.ai/'
-    },
     ollama: {
         name: 'Ollama (本地)',
         endpoint: 'http://localhost:11434/api/chat',
@@ -358,6 +359,7 @@ const PROVIDER_CONFIGS = {
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: false,
+        supportsCustomModel: true,
         docUrl: '',
         apiUrl: ''
     }
@@ -372,29 +374,42 @@ async function fetchWithTauri(url, options = {}) {
     }
     try {
         const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+        const headers = {};
+        if (options.headers) {
+            for (const [key, value] of Object.entries(options.headers)) {
+                if (value !== undefined && value !== null) {
+                    headers[key] = String(value);
+                }
+            }
+        }
         const fetchOptions = {
             method: options.method || 'GET',
-            headers: options.headers || {}
+            headers: headers
         };
         if (options.body) {
-            fetchOptions.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+            if (typeof options.body === 'string') {
+                fetchOptions.body = options.body;
+            } else {
+                fetchOptions.body = JSON.stringify(options.body);
+            }
         }
         const response = await tauriFetch(url, fetchOptions);
         return {
             ok: response.ok,
             status: response.status,
             json: async () => response.json(),
-            text: async () => response.text()
+            text: async () => response.text(),
+            body: response.body
         };
     } catch (e) {
         const errorMsg = e.message || String(e);
+        console.error('Tauri fetch error:', errorMsg);
         if (errorMsg.includes('not allowed on the configured scope')) {
-            throw new Error('网络权限受限：请确保应用配置允许访问此 API 地址。如果是自定义 API，请检查 Tauri 配置文件。');
+            throw new Error('网络权限受限：请确保应用配置允许访问此 API 地址');
         }
-        if (errorMsg.includes('Failed to fetch') || errorMsg.includes('Network')) {
-            throw new Error('网络请求失败：请检查网络连接或 API 地址是否正确。');
+        if (errorMsg.includes('Failed to fetch') || errorMsg.includes('Network') || errorMsg.includes('connect')) {
+            throw new Error('网络请求失败：请检查网络连接或 API 地址是否正确');
         }
-        console.error('Tauri fetch failed:', e);
         throw new Error('请求失败: ' + errorMsg);
     }
 }
@@ -416,6 +431,7 @@ async function getBaiduAccessToken(apiKey, secretKey) {
     baiduTokenCache.expireTime = now + (data.expires_in - 300) * 1000;
     return data.access_token;
 }
+
 export async function fetchProviderModels(providerId, apiKey = '') {
     const cacheKey = `${providerId}_${apiKey ? 'auth' : 'noauth'}`;
     if (modelCache[cacheKey] && modelCache[cacheKey].expireTime > Date.now()) {
@@ -449,29 +465,73 @@ export async function fetchProviderModels(providerId, apiKey = '') {
             return provider.defaultModels;
         }
         const data = await response.json();
-        let models = [];
+        let fetchedModels = [];
         if (providerId === 'ollama' && data.models) {
-            models = data.models.map(m => m.name || m.model);
+            fetchedModels = data.models.map(m => m.name || m.model);
         } else if (providerId === 'google' && data.models) {
-            models = data.models.filter(m => m.name && m.name.includes('gemini')).map(m => m.name.replace('models/', ''));
+            fetchedModels = data.models
+                .filter(m => m.name && m.name.includes('gemini'))
+                .map(m => m.name.replace('models/', ''));
         } else if (providerId === 'cohere' && data.models) {
-            models = data.models.filter(m => m.endpoints && m.endpoints.includes('chat')).map(m => m.name);
+            fetchedModels = data.models
+                .filter(m => m.endpoints && m.endpoints.includes('chat'))
+                .map(m => m.name);
+        } else if (providerId === 'zhipu' && data.data) {
+            fetchedModels = data.data.map(m => m.id || m.name).filter(Boolean);
         } else if (Array.isArray(data.data)) {
-            models = data.data.map(m => m.id || m.name).filter(Boolean);
+            fetchedModels = data.data.map(m => m.id || m.name).filter(Boolean);
         } else if (Array.isArray(data.models)) {
-            models = data.models.map(m => typeof m === 'string' ? m : (m.id || m.name)).filter(Boolean);
+            fetchedModels = data.models.map(m => typeof m === 'string' ? m : (m.id || m.name)).filter(Boolean);
         } else if (Array.isArray(data)) {
-            models = data.map(m => typeof m === 'string' ? m : (m.id || m.name)).filter(Boolean);
+            fetchedModels = data.map(m => typeof m === 'string' ? m : (m.id || m.name)).filter(Boolean);
         }
-        if (models.length > 0) {
-            modelCache[cacheKey] = { models, expireTime: Date.now() + 300000 };
-            return models;
+        if (fetchedModels.length > 0) {
+            const mergedModels = [...new Set([...fetchedModels, ...provider.defaultModels])];
+            modelCache[cacheKey] = { models: mergedModels, expireTime: Date.now() + 300000 };
+            return mergedModels;
         }
         return provider.defaultModels;
     } catch (e) {
         console.error(`Failed to fetch models for ${providerId}:`, e);
         return provider.defaultModels;
     }
+}
+
+function getCachedModels(providerId) {
+    for (const key in modelCache) {
+        if (key.startsWith(providerId + '_') && modelCache[key].expireTime > Date.now()) {
+            return modelCache[key].models || [];
+        }
+    }
+    return [];
+}
+
+function validateModel(provider, model, cachedModels = [], isCustomProvider = false) {
+    if (isCustomProvider) {
+        return model || 'auto';
+    }
+    if (!model || model === 'auto') {
+        return provider.defaultModel || 'auto';
+    }
+    const allModels = [...new Set([...provider.defaultModels, ...cachedModels])];
+    if (allModels.length === 0) {
+        return provider.defaultModel || model;
+    }
+    if (allModels.includes(model)) {
+        return model;
+    }
+    const lowerModel = model.toLowerCase();
+    const matched = allModels.find(m => m.toLowerCase() === lowerModel);
+    if (matched) {
+        return matched;
+    }
+    const partialMatch = allModels.find(m =>
+        m.toLowerCase().includes(lowerModel) || lowerModel.includes(m.toLowerCase())
+    );
+    if (partialMatch) {
+        return partialMatch;
+    }
+    return model;
 }
 
 function buildRequestBody(provider, model, messages, options) {
@@ -560,6 +620,7 @@ function parseStreamChunk(provider, chunk) {
             return chunk.choices?.[0]?.delta?.content || '';
     }
 }
+
 export async function callAI(config, userMessage, systemPrompt) {
     const providerId = config.provider || 'g4f-default';
     if (isG4FProvider(providerId)) {
@@ -574,8 +635,16 @@ export async function callAI(config, userMessage, systemPrompt) {
     }
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    let endpoint = config.customEndpoint || provider.endpoint;
-    const model = config.model || provider.defaultModel;
+    const isCustomProvider = providerId === 'custom';
+    let endpoint = isCustomProvider ? config.customEndpoint : (config.customEndpoint || provider.endpoint);
+    let model;
+    if (isCustomProvider) {
+        model = config.customModel || config.model || 'auto';
+        if (!endpoint) throw new Error('请配置自定义 API 端点');
+    } else {
+        const cachedModels = getCachedModels(providerId);
+        model = validateModel(provider, config.model, cachedModels, false);
+    }
     const apiKey = config.apiKey || '';
     const secretKey = config.secretKey || '';
     if (providerId === 'cloudflare' && config.accountId) {
@@ -598,8 +667,12 @@ export async function callAI(config, userMessage, systemPrompt) {
         stream: false
     });
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-    Object.assign(headers, provider.headers || {});
-    if (config.customHeaders) Object.assign(headers, config.customHeaders);
+    if (provider.headers) {
+        Object.assign(headers, provider.headers);
+    }
+    if (config.customHeaders) {
+        Object.assign(headers, config.customHeaders);
+    }
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
@@ -616,7 +689,7 @@ export async function callAI(config, userMessage, systemPrompt) {
     const response = await fetchWithTauri(finalEndpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify(requestBody)
+        body: requestBody
     });
     if (!response.ok) {
         const errorText = await response.text();
@@ -637,8 +710,16 @@ export async function callAIWithMessages(config, messages) {
     }
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    let endpoint = config.customEndpoint || provider.endpoint;
-    const model = config.model || provider.defaultModel;
+    const isCustomProvider = providerId === 'custom';
+    let endpoint = isCustomProvider ? config.customEndpoint : (config.customEndpoint || provider.endpoint);
+    let model;
+    if (isCustomProvider) {
+        model = config.customModel || config.model || 'auto';
+        if (!endpoint) throw new Error('请配置自定义 API 端点');
+    } else {
+        const cachedModels = getCachedModels(providerId);
+        model = validateModel(provider, config.model, cachedModels, false);
+    }
     const apiKey = config.apiKey || '';
     const secretKey = config.secretKey || '';
     if (providerId === 'cloudflare' && config.accountId) {
@@ -658,8 +739,12 @@ export async function callAIWithMessages(config, messages) {
         stream: false
     });
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-    Object.assign(headers, provider.headers || {});
-    if (config.customHeaders) Object.assign(headers, config.customHeaders);
+    if (provider.headers) {
+        Object.assign(headers, provider.headers);
+    }
+    if (config.customHeaders) {
+        Object.assign(headers, config.customHeaders);
+    }
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
@@ -676,7 +761,7 @@ export async function callAIWithMessages(config, messages) {
     const response = await fetchWithTauri(finalEndpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify(requestBody)
+        body: requestBody
     });
     if (!response.ok) {
         const errorText = await response.text();
@@ -685,6 +770,7 @@ export async function callAIWithMessages(config, messages) {
     const responseData = await response.json();
     return parseResponse(provider, responseData);
 }
+
 export async function callAIWithMessagesStream(config, messages, onChunk) {
     const providerId = config.provider || 'g4f-default';
     if (isG4FProvider(providerId)) {
@@ -696,8 +782,16 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
     }
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    let endpoint = config.customEndpoint || provider.endpoint;
-    const model = config.model || provider.defaultModel;
+    const isCustomProvider = providerId === 'custom';
+    let endpoint = isCustomProvider ? config.customEndpoint : (config.customEndpoint || provider.endpoint);
+    let model;
+    if (isCustomProvider) {
+        model = config.customModel || config.model || 'auto';
+        if (!endpoint) throw new Error('请配置自定义 API 端点');
+    } else {
+        const cachedModels = getCachedModels(providerId);
+        model = validateModel(provider, config.model, cachedModels, false);
+    }
     const apiKey = config.apiKey || '';
     const secretKey = config.secretKey || '';
     if (providerId === 'cloudflare' && config.accountId) {
@@ -717,8 +811,12 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
         stream: true
     });
     const headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' };
-    Object.assign(headers, provider.headers || {});
-    if (config.customHeaders) Object.assign(headers, config.customHeaders);
+    if (provider.headers) {
+        Object.assign(headers, provider.headers);
+    }
+    if (config.customHeaders) {
+        Object.assign(headers, config.customHeaders);
+    }
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
@@ -734,46 +832,24 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
     }
     let fullContent = '';
     try {
-        let response;
-        try {
-            const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-            response = await tauriFetch(finalEndpoint, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(requestBody),
-                responseType: 'text'
-            });
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
-            }
-        } catch (tauriError) {
-            console.error('Tauri fetch not available, falling back to standard fetch:', tauriError);
-            response = await fetch(finalEndpoint, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(requestBody)
-            });
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
-            }
+        const response = await fetch(finalEndpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody)
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
         }
-
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
-
             for (const line of lines) {
                 const trimmedLine = line.trim();
                 if (!trimmedLine || trimmedLine === 'data: [DONE]') continue;
@@ -841,7 +917,8 @@ export async function getProviderList() {
             docUrl: provider.docUrl,
             apiUrl: provider.apiUrl,
             authType: provider.authType,
-            supportsModelList: provider.supportsModelList
+            supportsModelList: provider.supportsModelList,
+            supportsCustomModel: provider.supportsCustomModel || false
         });
     }
     return result;

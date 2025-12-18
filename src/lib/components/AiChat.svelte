@@ -124,6 +124,24 @@
                 </div>
                 <h3 class="text-base md:text-lg font-bold text-slate-700 mb-2">开始对话</h3>
                 <p class="text-xs md:text-sm text-slate-500 max-w-xs px-4">选择聊天风格，输入您的问题，AI 将为您解答</p>
+                <div class="mt-4 md:mt-6 grid grid-cols-2 gap-2 max-w-xs px-4">
+                    <button on:click={() => { inputText = '你好，介绍一下你自己'; handleSend(); }}
+                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
+                        👋 自我介绍
+                    </button>
+                    <button on:click={() => { inputText = '今天的天气怎么样？'; handleSend(); }}
+                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
+                        🌤️ 聊聊天气
+                    </button>
+                    <button on:click={() => { inputText = '给我讲个笑话'; handleSend(); }}
+                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
+                        😄 讲个笑话
+                    </button>
+                    <button on:click={() => { inputText = '帮我写一首诗'; handleSend(); }}
+                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition">
+                        ✨ 写首诗
+                    </button>
+                </div>
             </div>
         {:else}
             {#each $aiChatHistory as msg, index}
