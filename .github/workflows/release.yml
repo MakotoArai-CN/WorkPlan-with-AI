@@ -151,8 +151,11 @@ jobs:
         run: |
           $cargoPath = "src-tauri/Cargo.toml"
           $content = Get-Content $cargoPath -Raw
-          $content = $content -replace 'tauri = \{ version = "2"', 'tauri = { version = "2", features = ["windows7-compat"]'
+          # 正确合并 features: 将 ["tray-icon"] 改为 ["tray-icon", "windows7-compat"]
+          $content = $content -replace 'tauri = \{ version = "2", features = \["tray-icon"\] \}', 'tauri = { version = "2", features = ["tray-icon", "windows7-compat"] }'
           Set-Content $cargoPath $content
+          Write-Host "Modified Cargo.toml:"
+          Get-Content $cargoPath
 
       - name: Build with WebView2 bootstrapper
         uses: tauri-apps/tauri-action@v0
@@ -179,21 +182,7 @@ jobs:
   build-linux:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            arch: amd64
-          - platform: ubuntu-22.04
-            target: aarch64-unknown-linux-gnu
-            arch: arm64
-          - platform: ubuntu-22.04
-            target: armv7-unknown-linux-gnueabihf
-            arch: armhf
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -204,8 +193,6 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -216,15 +203,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm
-
-      - name: Install cross-compilation tools (ARM)
-        if: matrix.target != 'x86_64-unknown-linux-gnu'
-        run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          elif [ "${{ matrix.target }}" = "armv7-unknown-linux-gnueabihf" ]; then
-            sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
-          fi
 
       - name: Install frontend dependencies
         run: bun install
@@ -248,17 +226,15 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
           VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
-        with:
-          args: --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}
+          name: linux-amd64
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
-            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
-            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
 
   build-macos:
     needs: get-version
@@ -408,6 +384,24 @@ jobs:
           storeFile=../release.jks
           EOF
 
+      - name: Get ABI filter name
+        id: abi
+        run: |
+          case "${{ matrix.target }}" in
+            aarch64-linux-android)
+              echo "abi=arm64-v8a" >> $GITHUB_OUTPUT
+              ;;
+            armv7-linux-androideabi)
+              echo "abi=armeabi-v7a" >> $GITHUB_OUTPUT
+              ;;
+            i686-linux-android)
+              echo "abi=x86" >> $GITHUB_OUTPUT
+              ;;
+            x86_64-linux-android)
+              echo "abi=x86_64" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
       - name: Apply custom build.gradle.kts
         run: |
           cat > src-tauri/gen/android/app/build.gradle.kts << 'GRADLE_EOF'
@@ -428,13 +422,13 @@ jobs:
           }
 
           android {
-              compileSdk = 36
+              compileSdk = 35
               namespace = "com.makotoarai.workplan"
               defaultConfig {
                   manifestPlaceholders["usesCleartextTraffic"] = "false"
                   applicationId = "com.makotoarai.workplan"
                   minSdk = 24
-                  targetSdk = 36
+                  targetSdk = 35
                   versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
                   versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
               }
@@ -456,22 +450,25 @@ jobs:
                       isMinifyEnabled = true
                       isShrinkResources = true
                       signingConfig = signingConfigs.getByName("release")
-                      ndk {
-                          abiFilters.add("${{ matrix.target }}")
-                      }
+                      proguardFiles(
+                          getDefaultProguardFile("proguard-android-optimize.txt"),
+                          "proguard-rules.pro"
+                      )
                   }
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
               }
           }
 
           rust {
               rootDirRel = "../../../"
-              targets = listOf("${{ matrix.target }}")
           }
 
           dependencies {
-              implementation("androidx.webkit:webkit:1.14.0")
-              implementation("androidx.appcompat:appcompat:1.7.1")
-              implementation("androidx.activity:activity-ktx:1.10.1")
+              implementation("androidx.webkit:webkit:1.12.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("androidx.activity:activity-ktx:1.9.3")
               implementation("com.google.android.material:material:1.12.0")
           }
 
@@ -479,7 +476,7 @@ jobs:
           GRADLE_EOF
 
       - name: Build Android APK
-        run: bun run tauri android build
+        run: bun run tauri android build --target ${{ matrix.target }}
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
@@ -519,9 +516,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+        continue-on-error: true
 
       - name: List artifacts
-        run: find artifacts -type f
+        run: find artifacts -type f 2>/dev/null || echo "No artifacts found"
 
       - name: Generate changelog
         id: changelog
@@ -563,11 +561,11 @@ jobs:
             echo "| **Apple Silicon (ARM64)** | [下载 DMG](${BASE_URL}/WorkPlan_${VERSION#v}_aarch64.dmg) |"
             echo ""
             echo "### Linux"
-            echo "| 架构 | AppImage | Deb | RPM |"
-            echo "|:----:|:--------:|:---:|:---:|"
-            echo "| **x64** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_amd64.AppImage) | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_amd64.deb) | [下载](${BASE_URL}/WorkPlan_${VERSION#v}-1.x86_64.rpm) |"
-            echo "| **ARM64** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_arm64.AppImage) | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_arm64.deb) | - |"
-            echo "| **ARMv7** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_armhf.AppImage) | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_armhf.deb) | - |"
+            echo "| 格式 | 下载 |"
+            echo "|:----:|:----:|"
+            echo "| **AppImage** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_amd64.AppImage) |"
+            echo "| **Deb** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}_amd64.deb) |"
+            echo "| **RPM** | [下载](${BASE_URL}/WorkPlan_${VERSION#v}-1.x86_64.rpm) |"
             echo ""
             echo "### Android"
             echo "| 架构 | 下载 |"

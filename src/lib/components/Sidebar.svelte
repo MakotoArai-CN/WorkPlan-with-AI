@@ -178,7 +178,7 @@
             class:text-amber-700={$currentView === 'passwords'}
             class:text-slate-600={$currentView !== 'passwords'}
             class:hover:bg-slate-50={$currentView !== 'passwords'}>
-            <i class="ph ph-key text-lg"></i> 密码本
+            <i class="ph ph-key text-lg"></i> 密码管理
         </button>
         <button on:click={() => switchView('settings')}
             class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
