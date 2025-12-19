@@ -178,6 +178,72 @@ jobs:
           name: windows-webview2
           path: src-tauri/target/release/bundle/nsis/*-webview2.exe
 
+  # 离线版本
+  build-windows-webview2-offlineInstaller:
+    needs: get-version
+    if: needs.get-version.outputs.tag_exists == 'false'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Override @gpt4free
+        shell: powershell
+        run: |
+          if (Test-Path "node_modules\@gpt4free") {
+            Remove-Item -Recurse -Force "node_modules\@gpt4free"
+          }
+          if (Test-Path "static\@gpt4free") {
+            Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
+          }
+
+      - name: Modify tauri.conf.json for WebView2 offlineInstaller
+        shell: powershell
+        run: |
+          $confPath = "src-tauri/tauri.conf.json"
+          $conf = Get-Content $confPath -Raw | ConvertFrom-Json
+          $conf.bundle.windows | Add-Member -NotePropertyName "webviewInstallMode" -NotePropertyValue @{ type = "offlineInstaller" } -Force
+          $conf | ConvertTo-Json -Depth 20 | Set-Content $confPath
+          Write-Host "Modified tauri.conf.json:"
+          Get-Content $confPath
+
+      - name: Build with WebView2 offlineInstaller
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+
+      - name: Rename WebView2 offlineInstaller
+        shell: powershell
+        run: |
+          Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | ForEach-Object {
+            $newName = $_.Name -replace '\.exe$', '-webview2-offlineInstaller.exe'
+            Rename-Item $_.FullName $newName
+          }
+
+      - name: Upload WebView2 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-webview2-offlineInstaller
+          path: src-tauri/target/release/bundle/nsis/*-webview2-offlineInstaller.exe
+
   build-linux:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
@@ -492,10 +558,10 @@ jobs:
           mkdir -p android-apks
           find src-tauri/gen/android -path "*/release/*.apk" -type f | while read apk; do
             filename=$(basename "$apk")
-            if [[ "$filename" == *"arm64-v8a"* ]]; then
-              cp "$apk" "android-apks/workplan-android-arm64-v8a.apk"
-            elif [[ "$filename" == *"armeabi-v7a"* ]]; then
-              cp "$apk" "android-apks/workplan-android-armeabi-v7a.apk"
+            if [[ "$filename" == *"arm64"* ]]; then
+              cp "$apk" "android-apks/workplan-android-arm64.apk"
+            elif [[ "$filename" == *"arm"* ]]; then
+              cp "$apk" "android-apks/workplan-android-arm.apk"
             elif [[ "$filename" == *"x86_64"* ]]; then
               cp "$apk" "android-apks/workplan-android-x86_64.apk"
             elif [[ "$filename" == *"x86"* ]] && [[ "$filename" != *"x86_64"* ]]; then
@@ -545,7 +611,7 @@ jobs:
           VERSION="${{ needs.get-version.outputs.version }}"
           VERSION_NUM="${VERSION#v}"
           REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+          BASE_URL="https://kkgithub.com/${REPO}/releases/download/${VERSION}"
           
           {
             echo "CHANGELOG<<EOF"
@@ -563,6 +629,7 @@ jobs:
             echo "| [![Windows x86](https://img.shields.io/badge/Windows-x86-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x86-setup.exe) | Windows x86 安装包 |"
             echo "| [![Windows ARM64](https://img.shields.io/badge/Windows-ARM64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_arm64-setup.exe) | Windows ARM64 安装包 |"
             echo "| [![Windows WebView2](https://img.shields.io/badge/Windows-WebView2-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64-setup-webview2.exe) | Windows WebView2 版（旧系统） |"
+            echo "| [![Windows WebView2 offlineInstaller](https://img.shields.io/badge/Windows-offlineInstaller-0078D6?style=for-the-badge&logo=offlineInstaller&logoColor=white&labelColor=lightgreen)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64-setup-webview2.exe) | Windows WebView2 offlineInstaller（旧系统离线包） |"
             echo "| [![Windows msi](https://img.shields.io/badge/Windows-msi-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64_en-US.msi) | Windows msi 安装包 |"
             echo "| [![macOS Intel](https://img.shields.io/badge/macOS-Intel-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64.dmg) | macOS Intel 安装包 |"
             echo "| [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_aarch64.dmg) | macOS Apple Silicon 安装包 |"
