@@ -1,6 +1,6 @@
 {
   "name": "workplan",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "",
   "type": "module",
   "scripts": {
@@ -44,6 +44,7 @@
     "postcss": "^8.5.6",
     "recharts": "^3.6.0",
     "tailwindcss": "^4.1.18",
+    "vditor": "^3.11.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

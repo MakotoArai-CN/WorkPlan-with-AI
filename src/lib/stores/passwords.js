@@ -12,7 +12,8 @@ function createPasswordsStore() {
         categories: ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
         isUnlocked: false,
         masterPasswordHash: null,
-        rememberSession: false
+        rememberSession: false,
+        initialized: false
     });
 
     let currentMasterPassword = null;
@@ -36,53 +37,49 @@ function createPasswordsStore() {
     function load() {
         if (typeof window === 'undefined') return;
         
+        const currentState = get({ subscribe });
+        if (currentState.initialized && currentState.isUnlocked) {
+            return;
+        }
+
         const masterHash = localStorage.getItem(MASTER_KEY);
         const settings = loadSettings();
 
+        const saved = localStorage.getItem(STORAGE_KEY);
+        let passwords = [];
+        if (saved) {
+            try {
+                passwords = JSON.parse(saved);
+            } catch (e) {
+                console.error('Failed to load passwords:', e);
+            }
+        }
+
+        const sessionData = sessionStorage.getItem(SESSION_KEY);
+        let sessionUnlocked = false;
+        let sessionPassword = null;
+
+        if (settings.rememberSession && sessionData) {
+            try {
+                const session = JSON.parse(sessionData);
+                if (session.hash === masterHash && session.password) {
+                    sessionPassword = session.password;
+                    sessionUnlocked = true;
+                    currentMasterPassword = sessionPassword;
+                }
+            } catch {
+                sessionStorage.removeItem(SESSION_KEY);
+            }
+        }
+
         set({
-            passwords: [],
+            passwords,
             categories: ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
-            isUnlocked: false,
+            isUnlocked: sessionUnlocked,
             masterPasswordHash: masterHash,
-            rememberSession: settings.rememberSession || false
+            rememberSession: settings.rememberSession || false,
+            initialized: true
         });
-
-        setTimeout(() => {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            let passwords = [];
-            if (saved) {
-                try {
-                    passwords = JSON.parse(saved);
-                } catch (e) {
-                    console.error('Failed to load passwords:', e);
-                }
-            }
-
-            const sessionData = sessionStorage.getItem(SESSION_KEY);
-            let sessionUnlocked = false;
-            let sessionPassword = null;
-            if (settings.rememberSession && sessionData) {
-                try {
-                    const session = JSON.parse(sessionData);
-                    if (session.hash === masterHash && session.password) {
-                        sessionPassword = session.password;
-                        sessionUnlocked = true;
-                    }
-                } catch {
-                    sessionStorage.removeItem(SESSION_KEY);
-                }
-            }
-
-            update(s => ({
-                ...s,
-                passwords,
-                isUnlocked: sessionUnlocked
-            }));
-
-            if (sessionUnlocked && sessionPassword) {
-                currentMasterPassword = sessionPassword;
-            }
-        }, 0);
     }
 
     function save(state) {
@@ -128,6 +125,36 @@ function createPasswordsStore() {
             const state = get({ subscribe });
             return !!state.masterPasswordHash;
         },
+        isSessionValid: () => {
+            const state = get({ subscribe });
+            if (!state.rememberSession) return false;
+            if (state.isUnlocked && currentMasterPassword) return true;
+            const sessionData = sessionStorage.getItem(SESSION_KEY);
+            if (!sessionData) return false;
+            try {
+                const session = JSON.parse(sessionData);
+                return session.hash === state.masterPasswordHash && !!session.password;
+            } catch {
+                return false;
+            }
+        },
+        restoreSession: () => {
+            const state = get({ subscribe });
+            if (!state.rememberSession) return false;
+            const sessionData = sessionStorage.getItem(SESSION_KEY);
+            if (!sessionData) return false;
+            try {
+                const session = JSON.parse(sessionData);
+                if (session.hash === state.masterPasswordHash && session.password) {
+                    currentMasterPassword = session.password;
+                    update(s => ({ ...s, isUnlocked: true }));
+                    return true;
+                }
+            } catch {
+                sessionStorage.removeItem(SESSION_KEY);
+            }
+            return false;
+        },
         setMasterPassword: (password) => update(s => {
             const hash = hashPassword(password);
             currentMasterPassword = password;
@@ -147,8 +174,11 @@ function createPasswordsStore() {
             return false;
         },
         lock: () => {
-            currentMasterPassword = null;
-            clearSession();
+            const state = get({ subscribe });
+            if (!state.rememberSession) {
+                currentMasterPassword = null;
+                clearSession();
+            }
             update(s => ({ ...s, isUnlocked: false }));
         },
         setRememberSession: (value) => update(s => {
@@ -241,7 +271,8 @@ function createPasswordsStore() {
                 categories: ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
                 isUnlocked: false,
                 masterPasswordHash: null,
-                rememberSession: false
+                rememberSession: false,
+                initialized: false
             });
         },
         getDecryptedPasswords: (ids = null) => {
