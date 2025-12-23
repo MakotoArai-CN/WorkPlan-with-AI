@@ -1,6 +1,6 @@
 [package]
 name = "workplan"
-version = "0.2.3"
+version = "0.2.4"
 description = "WorkPlan with AI - Task Management"
 authors = ["MakotoArai-CN"]
 edition = "2021"

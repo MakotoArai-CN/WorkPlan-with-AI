@@ -392,6 +392,44 @@
         return formatDateOnly(dateStr);
     }
 
+        function handleSubtaskConfirm(task, subtaskChanges, msgIndex) {
+        let newSubtasks = [...(task.subtasks || [])];
+        
+        for (const change of subtaskChanges) {
+            if (change.action === 'add') {
+                newSubtasks.push({ title: change.new_title, status: 'todo' });
+            } else if (change.action === 'delete') {
+                newSubtasks = newSubtasks.filter(s => s.title !== change.old_title);
+            } else if (change.action === 'update') {
+                newSubtasks = newSubtasks.map(s => 
+                    s.title === change.old_title 
+                        ? { ...s, title: change.new_title }
+                        : s
+                );
+            } else if (change.action === 'toggle') {
+                newSubtasks = newSubtasks.map(s => 
+                    s.title === change.old_title 
+                        ? { ...s, status: s.status === 'done' ? 'todo' : 'done' }
+                        : s
+                );
+            }
+        }
+        
+        taskStore.updateTask(task.id, { subtasks: newSubtasks });
+        
+        chatHistory.update(h => {
+            const newHistory = [...h];
+            newHistory[msgIndex] = {
+                role: 'assistant',
+                type: 'text',
+                content: `已完成对 "${task.title}" 的子任务操作`
+            };
+            return newHistory;
+        });
+        
+        scrollToBottom();
+    }
+
     $: if ($chatHistory.length) scrollToBottom();
 </script>
 
@@ -1173,6 +1211,58 @@
                                         {/if}
                                     </div>
                                 {/each}
+                            </div>
+                        </div>
+                                        {:else if msg.type === 'subtask_confirm'}
+                        <div class="mt-1">
+                            <div class="mb-2 font-bold text-purple-600 text-xs md:text-sm flex items-center gap-1">
+                                <i class="ph ph-list-checks"></i>
+                                {msg.message}
+                            </div>
+                            <div class="bg-purple-50 border border-purple-200 rounded-lg p-2.5 mb-3 text-left">
+                                <div class="font-bold text-slate-800 text-xs mb-2">
+                                    任务: {msg.task.title}
+                                </div>
+                                <div class="text-[10px] space-y-1">
+                                    {#each msg.subtaskChanges as change, idx}
+                                        <div class="flex items-center gap-1 p-1 bg-white rounded border border-purple-100">
+                                            {#if change.action === 'add'}
+                                                <span class="text-green-600 font-bold">+ 添加:</span>
+                                                <span class="text-slate-700">{change.new_title}</span>
+                                            {:else if change.action === 'delete'}
+                                                <span class="text-red-600 font-bold">- 删除:</span>
+                                                <span class="text-slate-400 line-through">{change.old_title}</span>
+                                            {:else if change.action === 'update'}
+                                                <span class="text-amber-600 font-bold">✏ 修改:</span>
+                                                <span class="text-slate-400 line-through">{change.old_title}</span>
+                                                <i class="ph ph-arrow-right text-purple-400"></i>
+                                                <span class="text-slate-700">{change.new_title}</span>
+                                            {:else if change.action === 'toggle'}
+                                                <span class="text-blue-600 font-bold">◐ 切换状态:</span>
+                                                <span class="text-slate-700">{change.old_title}</span>
+                                            {/if}
+                                        </div>
+                                    {/each}
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button
+                                    on:click={() => handleSubtaskConfirm(msg.task, msg.subtaskChanges, index)}
+                                    class="flex-1 bg-purple-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-purple-700 flex items-center justify-center gap-1"
+                                    disabled={msg.confirmed}>
+                                    {#if msg.confirmed}
+                                        <i class="ph-bold ph-check"></i> 已执行
+                                    {:else}
+                                        <i class="ph ph-check"></i> 确认执行
+                                    {/if}
+                                </button>
+                                {#if !msg.confirmed}
+                                    <button
+                                        on:click={() => removeAiMessage(index)}
+                                        class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200">
+                                        取消
+                                    </button>
+                                {/if}
                             </div>
                         </div>
                     {/if}

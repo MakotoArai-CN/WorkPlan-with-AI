@@ -1,13 +1,14 @@
 <script>
     import { renderMarkdown, isMarkdown } from '../utils/markdown.js';
-    import { onMount } from 'svelte';
-    
+    import { onMount, afterUpdate } from 'svelte';
+    import { showToast } from '../stores/modal.js';
+
     export let content = '';
     export let inline = false;
-    
+
     let renderedContent = '';
     let container;
-    
+
     $: {
         if (isMarkdown(content)) {
             renderedContent = renderMarkdown(content);
@@ -15,24 +16,67 @@
             renderedContent = null;
         }
     }
-    
+
+    function addCopyButtons() {
+        if (!container) return;
+        const codeBlocks = container.querySelectorAll('pre');
+        codeBlocks.forEach(pre => {
+            if (pre.querySelector('.code-copy-btn')) return;
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-block-wrapper';
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(pre);
+            
+            const btn = document.createElement('button');
+            btn.className = 'code-copy-btn';
+            btn.innerHTML = '<i class="ph ph-copy"></i>';
+            btn.title = '复制代码';
+            btn.onclick = async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const code = pre.querySelector('code');
+                const text = code ? code.textContent : pre.textContent;
+                try {
+                    await navigator.clipboard.writeText(text);
+                    btn.innerHTML = '<i class="ph ph-check"></i>';
+                    btn.classList.add('copied');
+                    showToast({ message: '代码已复制', type: 'success', duration: 1500 });
+                    setTimeout(() => {
+                        btn.innerHTML = '<i class="ph ph-copy"></i>';
+                        btn.classList.remove('copied');
+                    }, 2000);
+                } catch {
+                    showToast({ message: '复制失败', type: 'error' });
+                }
+            };
+            wrapper.appendChild(btn);
+        });
+    }
+
     onMount(() => {
         const style = document.createElement('link');
         style.rel = 'stylesheet';
         style.href = 'https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css';
         document.head.appendChild(style);
-        
+
         const katexStyle = document.createElement('link');
         katexStyle.rel = 'stylesheet';
         katexStyle.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
         document.head.appendChild(katexStyle);
-        
+
+        addCopyButtons();
+
         return () => {
             if (style.parentNode) style.parentNode.removeChild(style);
             if (katexStyle.parentNode) katexStyle.parentNode.removeChild(katexStyle);
         };
     });
-    
+
+    afterUpdate(() => {
+        addCopyButtons();
+    });
+
     $: isPlainText = !renderedContent;
 </script>
 
@@ -51,6 +95,49 @@
 {/if}
 
 <style>
+    :global(.code-block-wrapper) {
+        position: relative;
+    }
+
+    :global(.code-copy-btn) {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 32px;
+        height: 32px;
+        border: none;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.9);
+        color: #64748b;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: all 0.2s ease;
+        z-index: 10;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    :global(.code-block-wrapper:hover .code-copy-btn) {
+        opacity: 1;
+    }
+
+    :global(.code-copy-btn:hover) {
+        background: #ffffff;
+        color: #3b82f6;
+        transform: scale(1.05);
+    }
+
+    :global(.code-copy-btn.copied) {
+        background: #22c55e;
+        color: white;
+    }
+
+    :global(.code-copy-btn i) {
+        font-size: 16px;
+    }
+
     :global(.markdown-content) {
         line-height: 1.6;
         color: #1e293b;

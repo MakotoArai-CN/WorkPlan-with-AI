@@ -372,6 +372,32 @@ const PAST_TIME_KEYWORDS = [
     '去年', '前几天', '早些时候'
 ];
 
+const SUBTASK_KEYWORDS = [
+    '子任务', '子步骤', '步骤', '小任务', '分解', '拆分',
+    'subtask', 'step', 'sub-task'
+];
+
+const SUBTASK_ADD_KEYWORDS = ['添加子任务', '新增子任务', '加个子任务', '添加步骤', '新增步骤'];
+const SUBTASK_DELETE_KEYWORDS = ['删除子任务', '移除子任务', '去掉子任务', '删除步骤'];
+const SUBTASK_UPDATE_KEYWORDS = ['修改子任务', '更改子任务', '改子任务', '修改步骤'];
+
+function detectSubtaskOperation(text) {
+    const lowerText = text.toLowerCase();
+    for (const kw of SUBTASK_ADD_KEYWORDS) {
+        if (lowerText.includes(kw)) return 'add_subtask';
+    }
+    for (const kw of SUBTASK_DELETE_KEYWORDS) {
+        if (lowerText.includes(kw)) return 'delete_subtask';
+    }
+    for (const kw of SUBTASK_UPDATE_KEYWORDS) {
+        if (lowerText.includes(kw)) return 'update_subtask';
+    }
+    for (const kw of SUBTASK_KEYWORDS) {
+        if (lowerText.includes(kw)) return 'subtask_general';
+    }
+    return null;
+}
+
 function detectOperationType(text) {
     const lowerText = text.toLowerCase();
     let deleteScore = 0;
@@ -508,9 +534,28 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     if (!text.trim()) return;
 
     const currentConfig = getEffectiveConfig();
+    const subtaskOperation = detectSubtaskOperation(text);
     const needsApiKey = !isG4FProvider(currentConfig.provider) &&
         currentConfig.provider !== 'ollama' &&
         currentConfig.provider !== 'lmstudio';
+
+    const checkDuplicateWithTime = (taskTitle, existingTasks, dateInfo) => {
+        const lowerTitle = taskTitle.toLowerCase();
+        const matchingTasks = existingTasks.filter(t => 
+            t.title.toLowerCase().includes(lowerTitle) || 
+            lowerTitle.includes(t.title.toLowerCase())
+        );
+        
+        if (matchingTasks.length === 0) return { hasDuplicate: false };
+        
+        const incompleteDuplicates = matchingTasks.filter(t => t.status !== 'done');
+        if (incompleteDuplicates.length === 0) return { hasDuplicate: false };
+        
+        return {
+            hasDuplicate: true,
+            duplicateTasks: incompleteDuplicates
+        };
+    };
 
     if (needsApiKey && !currentConfig.apiKey) {
         showAiSettings.set(true);
@@ -543,7 +588,9 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
 
         const relevantTasks = filterTasksByTimeScope(existingTasks, timeScope, dateInfo);
 
-        if (operationType === 'mixed') {
+        if (subtaskOperation) {
+            result = await analyzeSubtaskIntent(text, existingTasks, dateInfo, currentConfig, callAI);
+        } else if (operationType === 'mixed') {
             result = await analyzeMixedIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
         } else if (operationType === 'delete') {
             result = await analyzeDeleteIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
@@ -625,6 +672,7 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
         ? `\n\n【现有任务列表（用于避免重复）】\n${existingTasks.map(t => formatFullTaskForAI(t)).join('\n')}`
         : '';
     const systemPrompt = `你是一个智能任务管理助手。请根据用户的自然语言描述创建任务。
+
 【当前时间信息】
 - 现在时间: ${nowStr}
 - 今天: ${todayStr} (${dateInfo.weekdayName})
@@ -632,6 +680,7 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
 - 后天: ${dayAfterTomorrowStr}
 - 本周: ${formatDateForAI(dateInfo.thisWeek.start)} 至 ${formatDateForAI(dateInfo.thisWeek.end)}
 ${existingTasksStr}
+
 【重要规则】
 1. 如果用户描述包含多个不同的任务（不同时间或不同事项），必须拆分成多个独立任务对象
 2. 如果单个任务较复杂（包含多个步骤），需要创建子任务（subtasks）
@@ -639,13 +688,23 @@ ${existingTasksStr}
    - "上午" = 09:00, "中午" = 12:00, "下午" = 14:00, "傍晚" = 17:00, "晚上" = 19:00
    - 如果用户说"8点到10点"，date设为开始时间，deadline设为结束时间
    - 默认创建的是当前时间往后的任务，除非用户明确提到过去的时间
-4. 检查是否与现有任务重复，如果内容相似则在备注中说明
-5. 严格只返回纯 JSON 格式，不要包含任何 markdown 标记或解释文字
+
+【同名任务处理规则】
+1. 如果现有任务列表中存在同名或相似名称的任务：
+   - 如果现有任务已完成（done），则可以创建新任务
+   - 如果现有任务未完成但时间不同，仍然创建新任务
+   - 如果现有任务未完成且时间相同，在note中说明"与现有任务时间重复"
+2. 不要因为存在同名任务就拒绝创建，要根据时间判断
+
+4. 严格只返回纯 JSON 格式，不要包含任何 markdown 标记或解释文字
+
 【输出格式】
 单任务:
 {"title":"任务标题","date":"YYYY-MM-DDTHH:mm","deadline":"YYYY-MM-DDTHH:mm或空字符串","priority":"normal|urgent|critical","note":"备注","subtasks":[{"title":"子任务名","status":"todo"}]}
+
 多任务:
 {"tasks":[{...},{...}]}
+
 【priority说明】
 - normal: 普通任务
 - urgent: 用户强调"紧急"、"重要"、"优先"
@@ -690,6 +749,93 @@ ${existingTasksStr}
     } catch (e) {
         console.error('Failed to parse AI response:', e, aiResponse);
         return null;
+    }
+}
+
+async function analyzeSubtaskIntent(userText, allTasks, dateInfo, config, callAI) {
+    if (!allTasks || allTasks.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '当前没有任何任务可以操作子任务。'
+        };
+    }
+
+    const nowStr = getFormattedDateTime();
+    const taskList = allTasks.map(t => formatFullTaskForAI(t)).join('\n');
+
+    const systemPrompt = `你是一个智能任务管理助手。用户想要对任务的子任务进行操作。
+
+【当前时间】${nowStr}
+【今天】${formatDateForAI(dateInfo.today)}
+【明天】${formatDateForAI(dateInfo.tomorrow)}
+
+【所有任务列表（含子任务详情）】
+${taskList}
+
+【子任务操作类型】
+- add: 添加新子任务
+- delete: 删除指定子任务
+- update: 修改子任务内容
+- toggle: 切换子任务完成状态
+
+【输出格式】
+严格只返回 JSON：
+{
+  "task_id": "要操作的任务完整ID",
+  "operation": "add|delete|update|toggle",
+  "subtask_changes": [
+    {
+      "action": "add|delete|update|toggle",
+      "index": 0,
+      "old_title": "原子任务名（删除/修改时需要）",
+      "new_title": "新子任务名（添加/修改时需要）",
+      "status": "todo|done"
+    }
+  ],
+  "message": "操作说明"
+}
+
+【重要】
+1. task_id 必须是完整的任务ID
+2. 删除和修改时需要提供 old_title 来精确匹配
+3. index 从0开始，用于指定子任务位置
+4. 如果找不到匹配的任务或子任务，返回 {"task_id": "", "message": "未找到..."}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) {
+        return { role: 'assistant', type: 'text', content: '无法理解您的子任务操作请求。' };
+    }
+
+    try {
+        const cleanJsonStr = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+        const jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            return { role: 'assistant', type: 'text', content: 'AI 返回了无效的格式，请重试。' };
+        }
+
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        if (!parsed.task_id || !parsed.subtask_changes || parsed.subtask_changes.length === 0) {
+            return { role: 'assistant', type: 'text', content: parsed.message || '未找到匹配的任务或子任务。' };
+        }
+
+        const task = allTasks.find(t => t.id === parsed.task_id || t.id.endsWith(parsed.task_id));
+        if (!task) {
+            return { role: 'assistant', type: 'text', content: '未找到指定的任务。' };
+        }
+
+        return {
+            role: 'assistant',
+            type: 'subtask_confirm',
+            task: JSON.parse(JSON.stringify(task)),
+            subtaskChanges: parsed.subtask_changes,
+            message: parsed.message || `确认对 "${task.title}" 的子任务进行操作？`
+        };
+
+    } catch (e) {
+        console.error('Failed to parse subtask response:', e, aiResponse);
+        return { role: 'assistant', type: 'text', content: '解析子任务操作失败，请重新描述。' };
     }
 }
 
@@ -1382,4 +1528,14 @@ export async function getCurrentProvider() {
     const config = get(aiConfig);
     const { getProviderInfo } = await import('../utils/ai-providers.js');
     return getProviderInfo(config.provider);
+}
+
+export function confirmSubtaskOperation(index) {
+    chatHistory.update(h => {
+        const newHistory = [...h];
+        if (newHistory[index] && newHistory[index].type === 'subtask_confirm') {
+            newHistory[index].confirmed = true;
+        }
+        return newHistory;
+    });
 }

@@ -336,6 +336,7 @@ const PROVIDER_CONFIGS = {
         authType: 'none',
         bodyFormat: 'ollama',
         supportsModelList: true,
+        supportsCustomEndpoint: true,
         docUrl: 'https://ollama.com/',
         apiUrl: ''
     },
@@ -348,6 +349,7 @@ const PROVIDER_CONFIGS = {
         authType: 'none',
         bodyFormat: 'openai',
         supportsModelList: true,
+        supportsCustomEndpoint: true,
         docUrl: 'https://lmstudio.ai/',
         apiUrl: ''
     },
@@ -360,6 +362,7 @@ const PROVIDER_CONFIGS = {
         bodyFormat: 'openai',
         supportsModelList: false,
         supportsCustomModel: true,
+        supportsCustomEndpoint: true,
         docUrl: '',
         apiUrl: ''
     }
@@ -432,7 +435,7 @@ async function getBaiduAccessToken(apiKey, secretKey) {
     return data.access_token;
 }
 
-export async function fetchProviderModels(providerId, apiKey = '') {
+export async function fetchProviderModels(providerId, apiKey = '', customEndpoint = '') {
     const cacheKey = `${providerId}_${apiKey ? 'auth' : 'noauth'}`;
     if (modelCache[cacheKey] && modelCache[cacheKey].expireTime > Date.now()) {
         return modelCache[cacheKey].models;
@@ -448,15 +451,29 @@ export async function fetchProviderModels(providerId, apiKey = '') {
         }
     }
     const provider = PROVIDER_CONFIGS[providerId];
-    if (!provider || !provider.supportsModelList || !provider.modelsEndpoint) {
+    if (!provider || !provider.supportsModelList) {
         return provider ? provider.defaultModels : [];
     }
+
+    let modelsEndpoint = provider.modelsEndpoint;
+    if (customEndpoint && provider.supportsCustomEndpoint) {
+        if (providerId === 'ollama') {
+            modelsEndpoint = customEndpoint.replace('/api/chat', '/api/tags');
+        } else if (providerId === 'lmstudio') {
+            modelsEndpoint = customEndpoint.replace('/v1/chat/completions', '/v1/models');
+        }
+    }
+
+    if (!modelsEndpoint) {
+        return provider.defaultModels;
+    }
+
     try {
         const headers = { 'Accept': 'application/json' };
         if (apiKey && provider.authType === 'bearer') {
             headers['Authorization'] = 'Bearer ' + apiKey;
         }
-        let endpoint = provider.modelsEndpoint;
+        let endpoint = modelsEndpoint;
         if (provider.authType === 'query_key' && apiKey) {
             endpoint += '?key=' + encodeURIComponent(apiKey);
         }
@@ -621,6 +638,17 @@ function parseStreamChunk(provider, chunk) {
     }
 }
 
+function isLocalProvider(providerId) {
+    return providerId === 'ollama' || providerId === 'lmstudio';
+}
+
+function getEffectiveEndpoint(provider, providerId, config) {
+    if (config.customEndpoint) {
+        return config.customEndpoint;
+    }
+    return provider.endpoint;
+}
+
 export async function callAI(config, userMessage, systemPrompt) {
     const providerId = config.provider || 'g4f-default';
     if (isG4FProvider(providerId)) {
@@ -636,7 +664,8 @@ export async function callAI(config, userMessage, systemPrompt) {
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
     const isCustomProvider = providerId === 'custom';
-    let endpoint = isCustomProvider ? config.customEndpoint : (config.customEndpoint || provider.endpoint);
+    const isLocal = isLocalProvider(providerId);
+    let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
     if (isCustomProvider) {
         model = config.customModel || config.model || 'auto';
@@ -657,7 +686,8 @@ export async function callAI(config, userMessage, systemPrompt) {
         endpoint = endpoint.replace('{model}', model);
     }
     if (!endpoint) throw new Error('未配置 API 端点');
-    if (!apiKey && provider.authType !== 'none') throw new Error('未配置 API Key');
+    const requiresApiKey = provider.authType !== 'none' && !isLocal && !isCustomProvider;
+    if (requiresApiKey && !apiKey) throw new Error('未配置 API Key');
     const messages = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: userMessage });
@@ -677,13 +707,13 @@ export async function callAI(config, userMessage, systemPrompt) {
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
         finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
-    } else if (provider.authType === 'bearer') {
+    } else if (provider.authType === 'bearer' && apiKey) {
         headers['Authorization'] = 'Bearer ' + apiKey;
-    } else if (provider.authType === 'x-api-key') {
+    } else if (provider.authType === 'x-api-key' && apiKey) {
         headers['X-API-Key'] = apiKey;
-    } else if (provider.authType === 'api-key') {
+    } else if (provider.authType === 'api-key' && apiKey) {
         headers['api-key'] = apiKey;
-    } else if (provider.authType === 'query_key') {
+    } else if (provider.authType === 'query_key' && apiKey) {
         finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
     }
     const response = await fetchWithTauri(finalEndpoint, {
@@ -711,7 +741,8 @@ export async function callAIWithMessages(config, messages) {
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
     const isCustomProvider = providerId === 'custom';
-    let endpoint = isCustomProvider ? config.customEndpoint : (config.customEndpoint || provider.endpoint);
+    const isLocal = isLocalProvider(providerId);
+    let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
     if (isCustomProvider) {
         model = config.customModel || config.model || 'auto';
@@ -732,7 +763,8 @@ export async function callAIWithMessages(config, messages) {
         endpoint = endpoint.replace('{model}', model);
     }
     if (!endpoint) throw new Error('未配置 API 端点');
-    if (!apiKey && provider.authType !== 'none') throw new Error('未配置 API Key');
+    const requiresApiKey = provider.authType !== 'none' && !isLocal && !isCustomProvider;
+    if (requiresApiKey && !apiKey) throw new Error('未配置 API Key');
     const requestBody = buildRequestBody(provider, model, messages, {
         temperature: config.temperature || 0.7,
         maxTokens: config.maxTokens || 2048,
@@ -749,13 +781,13 @@ export async function callAIWithMessages(config, messages) {
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
         finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
-    } else if (provider.authType === 'bearer') {
+    } else if (provider.authType === 'bearer' && apiKey) {
         headers['Authorization'] = 'Bearer ' + apiKey;
-    } else if (provider.authType === 'x-api-key') {
+    } else if (provider.authType === 'x-api-key' && apiKey) {
         headers['X-API-Key'] = apiKey;
-    } else if (provider.authType === 'api-key') {
+    } else if (provider.authType === 'api-key' && apiKey) {
         headers['api-key'] = apiKey;
-    } else if (provider.authType === 'query_key') {
+    } else if (provider.authType === 'query_key' && apiKey) {
         finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
     }
     const response = await fetchWithTauri(finalEndpoint, {
@@ -783,7 +815,8 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
     const isCustomProvider = providerId === 'custom';
-    let endpoint = isCustomProvider ? config.customEndpoint : (config.customEndpoint || provider.endpoint);
+    const isLocal = isLocalProvider(providerId);
+    let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
     if (isCustomProvider) {
         model = config.customModel || config.model || 'auto';
@@ -804,7 +837,8 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
         endpoint = endpoint.replace('{model}', model);
     }
     if (!endpoint) throw new Error('未配置 API 端点');
-    if (!apiKey && provider.authType !== 'none') throw new Error('未配置 API Key');
+    const requiresApiKey = provider.authType !== 'none' && !isLocal && !isCustomProvider;
+    if (requiresApiKey && !apiKey) throw new Error('未配置 API Key');
     const requestBody = buildRequestBody(provider, model, messages, {
         temperature: config.temperature || 0.7,
         maxTokens: config.maxTokens || 2048,
@@ -821,13 +855,13 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
         finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
-    } else if (provider.authType === 'bearer') {
+    } else if (provider.authType === 'bearer' && apiKey) {
         headers['Authorization'] = 'Bearer ' + apiKey;
-    } else if (provider.authType === 'x-api-key') {
+    } else if (provider.authType === 'x-api-key' && apiKey) {
         headers['X-API-Key'] = apiKey;
-    } else if (provider.authType === 'api-key') {
+    } else if (provider.authType === 'api-key' && apiKey) {
         headers['api-key'] = apiKey;
-    } else if (provider.authType === 'query_key') {
+    } else if (provider.authType === 'query_key' && apiKey) {
         finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
     }
     let fullContent = '';
@@ -918,7 +952,8 @@ export async function getProviderList() {
             apiUrl: provider.apiUrl,
             authType: provider.authType,
             supportsModelList: provider.supportsModelList,
-            supportsCustomModel: provider.supportsCustomModel || false
+            supportsCustomModel: provider.supportsCustomModel || false,
+            supportsCustomEndpoint: provider.supportsCustomEndpoint || false
         });
     }
     return result;
