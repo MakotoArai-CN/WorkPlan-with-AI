@@ -12,11 +12,13 @@ function getInitialSettings() {
             closeToQuit: false,
             agreementAccepted: false,
             showAgreement: false,
-            appVersion: '0.2.4',
+            autoSaveApiKey: false,
+            appVersion: '0.2.5',
             dailyReportPrompt: '',
             weeklyReportPrompt: ''
         };
     }
+
     const saved = localStorage.getItem('planpro_system_settings');
     if (saved) {
         try {
@@ -31,27 +33,19 @@ function getInitialSettings() {
                 closeToQuit: parsed.closeToQuit ?? false,
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
-                appVersion: '0.2.4',
+                autoSaveApiKey: parsed.autoSaveApiKey ?? false,
+                appVersion: '0.2.5',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || ''
             };
         } catch {
-            return {
-                enableNotification: true,
-                autoStart: false,
-                autoStartLoading: false,
-                notificationAvailable: false,
-                enableAiSummary: true,
-                enableCharts: true,
-                closeToQuit: false,
-                agreementAccepted: false,
-                showAgreement: false,
-                appVersion: '0.2.4',
-                dailyReportPrompt: '',
-                weeklyReportPrompt: ''
-            };
+            return getDefaultSettings();
         }
     }
+    return getDefaultSettings();
+}
+
+function getDefaultSettings() {
     return {
         enableNotification: true,
         autoStart: false,
@@ -62,7 +56,8 @@ function getInitialSettings() {
         closeToQuit: false,
         agreementAccepted: false,
         showAgreement: false,
-        appVersion: '0.2.4',
+        autoSaveApiKey: false,
+        appVersion: '0.2.5',
         dailyReportPrompt: '',
         weeklyReportPrompt: ''
     };
@@ -70,39 +65,6 @@ function getInitialSettings() {
 
 function createSettingsStore() {
     const { subscribe, set, update } = writable(getInitialSettings());
-
-    async function init() {
-        if (typeof window === 'undefined') return;
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const version = await invoke('get_app_version');
-            update(s => ({ ...s, appVersion: version }));
-        } catch {
-            update(s => ({ ...s, appVersion: '0.2.4' }));
-        }
-        try {
-            const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
-            const granted = await isPermissionGranted();
-            update(s => ({ ...s, notificationAvailable: granted }));
-            if (!granted) {
-                const permission = await requestPermission();
-                update(s => ({ ...s, notificationAvailable: permission === 'granted' }));
-            }
-        } catch {
-            update(s => ({ ...s, notificationAvailable: false }));
-        }
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const status = await invoke('get_autostart_status');
-            update(s => ({ ...s, autoStart: status }));
-        } catch {
-            update(s => ({ ...s, autoStart: false }));
-        }
-        const current = get({ subscribe });
-        if (current.closeToQuit) {
-            syncCloseToQuit(true);
-        }
-    }
 
     function save(state) {
         if (typeof window === 'undefined') return;
@@ -112,6 +74,7 @@ function createSettingsStore() {
             enableCharts: state.enableCharts,
             closeToQuit: state.closeToQuit,
             agreementAccepted: state.agreementAccepted,
+            autoSaveApiKey: state.autoSaveApiKey,
             dailyReportPrompt: state.dailyReportPrompt,
             weeklyReportPrompt: state.weeklyReportPrompt
         }));
@@ -123,6 +86,43 @@ function createSettingsStore() {
             await invoke('set_close_to_quit', { value });
         } catch (e) {
             console.error('Failed to sync closeToQuit:', e);
+        }
+    }
+
+    async function init() {
+        if (typeof window === 'undefined') return;
+
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const version = await invoke('get_app_version');
+            update(s => ({ ...s, appVersion: version }));
+        } catch {
+            update(s => ({ ...s, appVersion: '0.2.5' }));
+        }
+
+        try {
+            const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
+            let granted = await isPermissionGranted();
+            if (!granted) {
+                const permission = await requestPermission();
+                granted = permission === 'granted';
+            }
+            update(s => ({ ...s, notificationAvailable: granted }));
+        } catch {
+            update(s => ({ ...s, notificationAvailable: false }));
+        }
+
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const status = await invoke('get_autostart_status');
+            update(s => ({ ...s, autoStart: status }));
+        } catch {
+            update(s => ({ ...s, autoStart: false }));
+        }
+
+        const current = get({ subscribe });
+        if (current.closeToQuit) {
+            syncCloseToQuit(true);
         }
     }
 
@@ -141,6 +141,11 @@ function createSettingsStore() {
         }),
         toggleCharts: () => update(s => {
             const newState = { ...s, enableCharts: !s.enableCharts };
+            save(newState);
+            return newState;
+        }),
+        toggleAutoSaveApiKey: () => update(s => {
+            const newState = { ...s, autoSaveApiKey: !s.autoSaveApiKey };
             save(newState);
             return newState;
         }),
@@ -184,8 +189,7 @@ function createSettingsStore() {
         },
         showTaskNotification: async (tasks) => {
             const state = get({ subscribe });
-            if (!state.enableNotification || !state.notificationAvailable) return;
-            if (!tasks || tasks.length === 0) return;
+            if (!state.enableNotification || !state.notificationAvailable || !tasks?.length) return;
             try {
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
                 const titles = tasks.slice(0, 5).map(t => t.title).join('、');
@@ -215,10 +219,8 @@ function createSettingsStore() {
         }),
         showAgreementModal: () => update(s => ({ ...s, showAgreement: true })),
         hideAgreementModal: () => update(s => ({ ...s, showAgreement: false })),
-        isAgreementAccepted: () => {
-            const state = get({ subscribe });
-            return state.agreementAccepted;
-        }
+        isAgreementAccepted: () => get({ subscribe }).agreementAccepted,
+        isAutoSaveApiKeyEnabled: () => get({ subscribe }).autoSaveApiKey
     };
 }
 

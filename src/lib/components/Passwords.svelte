@@ -449,11 +449,42 @@
     }
 
     async function importFromExcel(file) {
-        const XLSX = await import("xlsx");
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: "array" });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+        const ExcelJS = await import("exceljs");
+        const workbook = new ExcelJS.Workbook();
+        const buffer = await file.arrayBuffer();
+        await workbook.xlsx.load(buffer);
+
+        const worksheet = workbook.worksheets[0];
+        if (!worksheet) {
+            showToast({ message: "Excel 文件为空", type: "error" });
+            return;
+        }
+
+        const jsonData = [];
+        const headers = [];
+
+        worksheet.eachRow((row, rowNumber) => {
+            if (rowNumber === 1) {
+                row.eachCell((cell, colNumber) => {
+                    headers[colNumber - 1] = String(cell.value || "");
+                });
+            } else {
+                const rowData = {};
+                row.eachCell((cell, colNumber) => {
+                    const header = headers[colNumber - 1];
+                    if (header) {
+                        rowData[header] =
+                            cell.value !== null && cell.value !== undefined
+                                ? String(cell.value)
+                                : "";
+                    }
+                });
+                if (Object.keys(rowData).length > 0) {
+                    jsonData.push(rowData);
+                }
+            }
+        });
+
         await processImportedDataAsync(jsonData);
     }
 

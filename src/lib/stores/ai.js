@@ -184,7 +184,6 @@ export function loadAiConfig() {
 
 export function saveAiConfig() {
     if (typeof window === 'undefined') return;
-
     const current = get(aiConfig);
     const providerId = current.provider || 'g4f-default';
     const providerConfigsUpdated = mergeProviderConfigs(current.providerConfigs, providerId, current);
@@ -198,11 +197,66 @@ export function saveAiConfig() {
         weeklyReportPrompt: current.weeklyReportPrompt,
         providerConfigs: providerConfigsUpdated
     };
-
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
     aiConfig.update(c => ({ ...c, providerConfigs: providerConfigsUpdated }));
+    saveApiKeyToPasswords(providerId, current);
 }
 
+async function saveApiKeyToPasswords(providerId, config) {
+    if (typeof window === 'undefined') return;
+    
+    const settingsStr = localStorage.getItem('planpro_system_settings');
+    if (!settingsStr) return;
+    
+    try {
+        const settings = JSON.parse(settingsStr);
+        if (!settings.autoSaveApiKey) return;
+    } catch {
+        return;
+    }
+
+    const apiKey = config.apiKey;
+    if (!apiKey || !apiKey.trim()) return;
+
+    try {
+        const { passwordsStore, isPasswordsUnlocked } = await import('./passwords.js');
+        const { get: storeGet } = await import('svelte/store');
+        
+        const unlocked = storeGet(isPasswordsUnlocked);
+        if (!unlocked) return;
+
+        const { getProviderInfo } = await import('../utils/ai-providers.js');
+        const providerInfo = getProviderInfo(providerId);
+        const providerName = providerInfo?.name || providerId;
+
+        const existingPasswords = storeGet(passwordsStore).passwords;
+        const existingEntry = existingPasswords.find(p => 
+            p.category === 'API密钥' && 
+            p.title === `${providerName} API Key`
+        );
+
+        if (existingEntry) {
+            const decrypted = passwordsStore.decryptPassword(existingEntry.password);
+            if (decrypted !== apiKey) {
+                passwordsStore.updatePassword(existingEntry.id, {
+                    password: apiKey,
+                    notes: `由 AI 设置自动同步\n更新时间: ${new Date().toLocaleString()}`
+                });
+            }
+        } else {
+            passwordsStore.addPassword({
+                title: `${providerName} API Key`,
+                username: providerId,
+                password: apiKey,
+                url: providerInfo?.apiUrl || '',
+                category: 'API密钥',
+                notes: `由 AI 设置自动同步\n创建时间: ${new Date().toLocaleString()}`
+            });
+        }
+    } catch (e) {
+        console.warn('Failed to save API key to passwords:', e);
+    }
+}
 export function saveAiChatHistory() {
     if (typeof window === 'undefined') return;
     const history = get(aiChatHistory);

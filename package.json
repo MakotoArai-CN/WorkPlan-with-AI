@@ -1,6 +1,6 @@
 {
   "name": "workplan",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "",
   "type": "module",
   "scripts": {
@@ -11,12 +11,7 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
     "tauri": "tauri",
     "tauri:build": "tauri build",
-    "tauri:dev": "tauri dev",
-    "tauri:build-linux": "tauri build --platform linux",
-    "tauri:build-windows": "tauri build --platform windows",
-    "tauri:build-macos": "tauri build --platform macos",
-    "tauri:build-android": "tauri build --platform android",
-    "tauri:build-ios": "tauri build --platform ios"
+    "tauri:dev": "tauri dev"
   },
   "license": "MIT",
   "dependencies": {
@@ -32,6 +27,7 @@
     "chart.js": "^4.5.1",
     "crypto-js": "^4.2.0",
     "dompurify": "^3.3.1",
+    "exceljs": "^4.4.0",
     "highlight.js": "^11.11.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
@@ -44,8 +40,7 @@
     "postcss": "^8.5.6",
     "recharts": "^3.6.0",
     "tailwindcss": "^4.1.18",
-    "vditor": "^3.11.2",
-    "xlsx": "^0.18.5"
+    "vditor": "^3.11.2"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

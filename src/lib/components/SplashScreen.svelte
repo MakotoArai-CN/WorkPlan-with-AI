@@ -7,8 +7,11 @@
 
     let visible = true;
     let progress = 0;
+    let mounted = false;
 
     onMount(() => {
+        mounted = true;
+        
         const interval = setInterval(() => {
             progress += 2;
             if (progress >= 100) {
@@ -29,7 +32,7 @@
 </script>
 
 {#if visible}
-    <div class="splash-screen" transition:fade={{ duration: 300 }}>
+    <div class="splash-screen" class:mounted transition:fade={{ duration: 300 }}>
         <div class="splash-content" in:scale={{ duration: 400, start: 0.8 }}>
             <div class="logo-container">
                 <div class="logo">
@@ -59,6 +62,12 @@
         align-items: center;
         justify-content: center;
         background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #60a5fa 100%);
+        opacity: 0;
+        transition: opacity 0.1s ease;
+    }
+
+    .splash-screen.mounted {
+        opacity: 1;
     }
 
     .splash-content {
