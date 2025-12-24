@@ -4,13 +4,13 @@
     import '@phosphor-icons/web/regular';
     import '@phosphor-icons/web/bold';
     import '@phosphor-icons/web/fill';
-    import { taskStore, activeTasks } from '$lib/stores/tasks.js';
+    import { taskStore, activeTasks, currentView, activeTask } from '$lib/stores/tasks.js';
     import { settingsStore } from '$lib/stores/settings.js';
-    import { loadAiConfig } from '$lib/stores/ai.js';
+    import { loadAiConfig, showAiPanel } from '$lib/stores/ai.js';
     import { notesStore } from '$lib/stores/notes.js';
     import { passwordsStore } from '$lib/stores/passwords.js';
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
-    import { setupAndroidBackHandler, handleBackPress, showExitToast } from '$lib/stores/navigation.js';
+    import { setupAndroidBackHandler, handleBackPress, showExitToast, popNavigation, getNavigationDepth, canGoBack } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
     import { get } from 'svelte/store';
 
@@ -53,7 +53,6 @@
 
             unlistenUpdate = await listen('tray-check-update', async () => {
                 const { invoke } = await import('@tauri-apps/api/core');
-                const settings = get(settingsStore);
                 try {
                     const data = await invoke('check_update');
                     if (data && data.has_update) {
@@ -83,10 +82,28 @@
         }
 
         const closeToQuit = get(settingsStore).closeToQuit;
-        
         unlistenBack = await setupAndroidBackHandler(closeToQuit, {
             onSecondaryBack: (view) => {
-                console.log('Returned from:', view);
+                const currentViewValue = get(currentView);
+                const aiPanelOpen = get(showAiPanel);
+                const activeTaskValue = get(activeTask);
+
+                if (aiPanelOpen && currentViewValue !== 'aichat' && currentViewValue !== 'notes') {
+                    showAiPanel.set(false);
+                    return;
+                }
+
+                if (activeTaskValue) {
+                    activeTask.set(null);
+                    return;
+                }
+
+                const mainViews = ['dashboard', 'templates', 'scheduled', 'notes', 'more'];
+                if (!mainViews.includes(currentViewValue)) {
+                    currentView.set('more');
+                } else if (currentViewValue !== 'dashboard') {
+                    currentView.set('dashboard');
+                }
             },
             onExit: async () => {
                 try {
@@ -98,8 +115,9 @@
             },
             onMinimize: async () => {
                 try {
-                    const { appWindow } = await import('@tauri-apps/api/window');
-                    await appWindow.minimize();
+                    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+                    const win = getCurrentWindow();
+                    await win.minimize();
                 } catch {
                     console.log('Minimize not available');
                 }
@@ -132,10 +150,21 @@
 
 {#if $showExitToast}
     <div class="fixed bottom-20 left-0 right-0 z-[102] flex justify-center pointer-events-none">
-        <div class="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium">
+        <div class="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in">
             再按一次退出应用
         </div>
     </div>
 {/if}
 
 <slot />
+
+<style>
+    @keyframes fade-in {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    :global(.animate-fade-in) {
+        animation: fade-in 0.2s ease-out;
+    }
+</style>

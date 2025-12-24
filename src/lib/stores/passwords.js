@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import { encrypt, decrypt, hashPassword, verifyPassword } from '../utils/crypto.js';
+import { encrypt, decrypt, hashPassword, verifyPassword, generateSessionToken, encryptSessionData, decryptSessionData } from '../utils/crypto.js';
 
 const STORAGE_KEY = 'planpro_passwords';
 const MASTER_KEY = 'planpro_master_hash';
@@ -17,6 +17,7 @@ function createPasswordsStore() {
     });
 
     let currentMasterPassword = null;
+    let sessionToken = null;
     let saveTimer = null;
 
     function loadSettings() {
@@ -36,15 +37,12 @@ function createPasswordsStore() {
 
     function load() {
         if (typeof window === 'undefined') return;
-        
         const currentState = get({ subscribe });
         if (currentState.initialized && currentState.isUnlocked) {
             return;
         }
-
         const masterHash = localStorage.getItem(MASTER_KEY);
         const settings = loadSettings();
-
         const saved = localStorage.getItem(STORAGE_KEY);
         let passwords = [];
         if (saved) {
@@ -55,17 +53,16 @@ function createPasswordsStore() {
             }
         }
 
-        const sessionData = sessionStorage.getItem(SESSION_KEY);
+        const encryptedSession = sessionStorage.getItem(SESSION_KEY);
         let sessionUnlocked = false;
-        let sessionPassword = null;
-
-        if (settings.rememberSession && sessionData) {
+        
+        if (settings.rememberSession && encryptedSession && masterHash) {
             try {
-                const session = JSON.parse(sessionData);
-                if (session.hash === masterHash && session.password) {
-                    sessionPassword = session.password;
+                const sessionData = decryptSessionData(encryptedSession, masterHash);
+                if (sessionData && sessionData.token && sessionData.key) {
+                    sessionToken = sessionData.token;
+                    currentMasterPassword = sessionData.key;
                     sessionUnlocked = true;
-                    currentMasterPassword = sessionPassword;
                 }
             } catch {
                 sessionStorage.removeItem(SESSION_KEY);
@@ -108,14 +105,20 @@ function createPasswordsStore() {
     function saveSession(password, hash) {
         if (typeof window === 'undefined') return;
         const state = get({ subscribe });
-        if (state.rememberSession) {
-            sessionStorage.setItem(SESSION_KEY, JSON.stringify({ password, hash }));
+        if (state.rememberSession && password && hash) {
+            sessionToken = generateSessionToken();
+            const sessionData = { token: sessionToken, key: password };
+            const encrypted = encryptSessionData(sessionData, hash);
+            if (encrypted) {
+                sessionStorage.setItem(SESSION_KEY, encrypted);
+            }
         }
     }
 
     function clearSession() {
         if (typeof window === 'undefined') return;
         sessionStorage.removeItem(SESSION_KEY);
+        sessionToken = null;
     }
 
     return {
@@ -128,12 +131,14 @@ function createPasswordsStore() {
         isSessionValid: () => {
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
-            if (state.isUnlocked && currentMasterPassword) return true;
-            const sessionData = sessionStorage.getItem(SESSION_KEY);
-            if (!sessionData) return false;
+            if (state.isUnlocked && currentMasterPassword && sessionToken) return true;
+            
+            const encryptedSession = sessionStorage.getItem(SESSION_KEY);
+            if (!encryptedSession || !state.masterPasswordHash) return false;
+            
             try {
-                const session = JSON.parse(sessionData);
-                return session.hash === state.masterPasswordHash && !!session.password;
+                const sessionData = decryptSessionData(encryptedSession, state.masterPasswordHash);
+                return !!(sessionData && sessionData.token && sessionData.key);
             } catch {
                 return false;
             }
@@ -141,12 +146,15 @@ function createPasswordsStore() {
         restoreSession: () => {
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
-            const sessionData = sessionStorage.getItem(SESSION_KEY);
-            if (!sessionData) return false;
+            
+            const encryptedSession = sessionStorage.getItem(SESSION_KEY);
+            if (!encryptedSession || !state.masterPasswordHash) return false;
+            
             try {
-                const session = JSON.parse(sessionData);
-                if (session.hash === state.masterPasswordHash && session.password) {
-                    currentMasterPassword = session.password;
+                const sessionData = decryptSessionData(encryptedSession, state.masterPasswordHash);
+                if (sessionData && sessionData.token && sessionData.key) {
+                    sessionToken = sessionData.token;
+                    currentMasterPassword = sessionData.key;
                     update(s => ({ ...s, isUnlocked: true }));
                     return true;
                 }
@@ -177,6 +185,7 @@ function createPasswordsStore() {
             const state = get({ subscribe });
             if (!state.rememberSession) {
                 currentMasterPassword = null;
+                sessionToken = null;
                 clearSession();
             }
             update(s => ({ ...s, isUnlocked: false }));
@@ -260,6 +269,7 @@ function createPasswordsStore() {
         }),
         clearAll: () => {
             currentMasterPassword = null;
+            sessionToken = null;
             clearSession();
             if (typeof window !== 'undefined') {
                 localStorage.removeItem(STORAGE_KEY);

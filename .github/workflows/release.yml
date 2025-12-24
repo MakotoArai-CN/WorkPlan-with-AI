@@ -611,7 +611,7 @@ jobs:
           VERSION="${{ needs.get-version.outputs.version }}"
           VERSION_NUM="${VERSION#v}"
           REPO="${{ github.repository }}"
-          BASE_URL="https://kkgithub.com/${REPO}/releases/download/${VERSION}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
           
           {
             echo "CHANGELOG<<EOF"
@@ -637,8 +637,8 @@ jobs:
             echo "| [![Linux deb](https://img.shields.io/badge/Linux-deb-A81D33?style=for-the-badge&logo=debian&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_amd64.deb) | Debian/Ubuntu 安装包 |"
             echo "| [![Linux rpm](https://img.shields.io/badge/Linux-rpm-EE0000?style=for-the-badge&logo=redhat&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}-1.x86_64.rpm) | Fedora/RHEL/openSUSE 安装包 |"
             echo "| [![Android Universal](https://img.shields.io/badge/Android-Universal-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-universal.apk) | Android 通用安装包 |"
-            echo "| [![Android ARM64](https://img.shields.io/badge/Android-ARM64-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-arm64-v8a.apk) | Android ARM64 安装包 |"
-            echo "| [![Android ARMv7](https://img.shields.io/badge/Android-ARMv7-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-armeabi-v7a.apk) | Android ARMv7 安装包 |"
+            echo "| [![Android ARM64](https://img.shields.io/badge/Android-ARM64-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-arm64.apk) | Android ARM64 安装包 |"
+            echo "| [![Android ARMv7](https://img.shields.io/badge/Android-ARM-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-arm.apk) | Android ARMv7 安装包 |"
             echo "| [![Android x86_64](https://img.shields.io/badge/Android-x86__64-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-x86_64.apk) | Android x86_64 安装包 |"
             echo "| [![Android x86](https://img.shields.io/badge/Android-x86-3DDC84?style=for-the-badge&logo=android&logoColor=white)](${BASE_URL}/workplan-android-x86.apk) | Android x86 安装包 |"
             echo ""

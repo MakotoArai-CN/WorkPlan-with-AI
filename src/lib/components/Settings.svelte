@@ -1,11 +1,13 @@
 <script>
     import { settingsStore } from "../stores/settings.js";
+    import { taskStore } from "../stores/tasks.js";
     import { invoke } from "@tauri-apps/api/core";
-    import { showAlert, showConfirm } from "../stores/modal.js";
+    import { showAlert, showConfirm, showToast } from "../stores/modal.js";
     import { onMount } from "svelte";
-    
+
     let checkingUpdate = false;
     let isMobile = false;
+    let fileInput;
 
     onMount(() => {
         isMobile =
@@ -90,6 +92,72 @@
     function showAgreement() {
         settingsStore.showAgreementModal();
     }
+
+    function exportData() {
+        showToast({ message: '正在导出备份...', type: 'info', duration: 1500 });
+        const state = { 
+            tasks: $taskStore.tasks, 
+            templates: $taskStore.templates, 
+            scheduledTasks: $taskStore.scheduledTasks 
+        };
+        const data = JSON.stringify(state, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `planpro_backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        showToast({ message: '备份导出成功', type: 'success' });
+    }
+
+    function handleImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        showToast({ message: '正在导入数据...', type: 'info', duration: 1500 });
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const result = taskStore.importData(e.target.result);
+            if (result.success) {
+                showToast({ message: '数据导入成功', type: 'success' });
+            } else {
+                showToast({ message: '导入失败: ' + result.error, type: 'error' });
+            }
+        };
+        reader.onerror = () => {
+            showToast({ message: '读取文件失败', type: 'error' });
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+    }
+
+    async function logout() {
+        const confirmed = await showConfirm({
+            title: '切换账号',
+            message: '确定要退出当前 Key 吗？',
+            confirmText: '确定退出',
+            cancelText: '取消',
+            variant: 'warning'
+        });
+        if (confirmed) {
+            taskStore.logout();
+            showToast({ message: '已退出登录', type: 'info' });
+        }
+    }
+
+    async function clearData() {
+        const confirmed = await showConfirm({
+            title: '删除所有数据',
+            message: `警告：此操作将永久删除 [${$taskStore.accessKey}] 的所有数据，且无法恢复！`,
+            confirmText: '确认删除',
+            cancelText: '取消',
+            variant: 'danger'
+        });
+        if (confirmed) {
+            await taskStore.clearAllData($taskStore.accessKey);
+            showToast({ message: '所有数据已清空', type: 'success' });
+            location.reload();
+        }
+    }
 </script>
 
 <div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
@@ -111,46 +179,29 @@
         style="-webkit-overflow-scrolling: touch;"
     >
         {#if $settingsStore.notificationAvailable}
-            <div
-                class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
-            >
-                <div
-                    class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
-                >
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
                     <i class="ph ph-bell text-lg"></i> 通知设置
                 </div>
                 <div class="p-4 md:p-6 space-y-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <div
-                                class="font-bold text-slate-700 text-sm md:text-base"
-                            >
-                                系统通知
-                            </div>
-                            <div class="text-[10px] md:text-xs text-slate-500">
-                                开机后提醒今日任务
-                            </div>
+                            <div class="font-bold text-slate-700 text-sm md:text-base">系统通知</div>
+                            <div class="text-[10px] md:text-xs text-slate-500">开机后提醒今日任务</div>
                         </div>
-                        <label
-                            class="relative inline-flex items-center cursor-pointer"
-                        >
+                        <label class="relative inline-flex items-center cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={$settingsStore.enableNotification}
                                 on:change={settingsStore.toggleNotification}
                                 class="sr-only peer"
                             />
-                            <div
-                                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
-                            ></div>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
                     </div>
                     {#if $settingsStore.enableNotification}
                         <div class="pl-4 border-l-2 border-blue-100">
-                            <button
-                                on:click={testNotification}
-                                class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1"
-                            >
+                            <button on:click={testNotification} class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1">
                                 <i class="ph ph-play"></i> 测试通知
                             </button>
                         </div>
@@ -159,104 +210,79 @@
             </div>
         {/if}
 
-        <div
-            class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
-        >
-            <div
-                class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
-            >
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
                 <i class="ph ph-sparkle text-lg"></i> AI 功能
             </div>
             <div class="p-4 md:p-6 space-y-4">
                 <div class="flex items-center justify-between">
                     <div>
-                        <div
-                            class="font-bold text-slate-700 text-sm md:text-base"
-                        >
-                            AI 报告生成
-                        </div>
-                        <div class="text-[10px] md:text-xs text-slate-500">
-                            在数据统计中使用 AI 生成日报/周报
-                        </div>
+                        <div class="font-bold text-slate-700 text-sm md:text-base">AI 报告生成</div>
+                        <div class="text-[10px] md:text-xs text-slate-500">在数据统计中使用 AI 生成日报/周报</div>
                     </div>
-                    <label
-                        class="relative inline-flex items-center cursor-pointer"
-                    >
+                    <label class="relative inline-flex items-center cursor-pointer">
                         <input
                             type="checkbox"
                             checked={$settingsStore.enableAiSummary}
                             on:change={settingsStore.toggleAiSummary}
                             class="sr-only peer"
                         />
-                        <div
-                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"
-                        ></div>
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-bold text-slate-700 text-sm md:text-base">自动保存 API Key</div>
+                        <div class="text-[10px] md:text-xs text-slate-500">将 AI 配置的 API Key 自动同步到密码本</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={$settingsStore.autoSaveApiKey}
+                            on:change={settingsStore.toggleAutoSaveApiKey}
+                            class="sr-only peer"
+                        />
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                     </label>
                 </div>
             </div>
         </div>
 
-        <div
-            class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
-        >
-            <div
-                class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
-            >
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
                 <i class="ph ph-chart-bar text-lg"></i> 图表设置
             </div>
             <div class="p-4 md:p-6 space-y-4">
                 <div class="flex items-center justify-between">
                     <div>
-                        <div
-                            class="font-bold text-slate-700 text-sm md:text-base"
-                        >
-                            显示数据图表
-                        </div>
-                        <div class="text-[10px] md:text-xs text-slate-500">
-                            在数据统计中显示图表和可视化
-                        </div>
+                        <div class="font-bold text-slate-700 text-sm md:text-base">显示数据图表</div>
+                        <div class="text-[10px] md:text-xs text-slate-500">在数据统计中显示图表和可视化</div>
                     </div>
-                    <label
-                        class="relative inline-flex items-center cursor-pointer"
-                    >
+                    <label class="relative inline-flex items-center cursor-pointer">
                         <input
                             type="checkbox"
                             checked={$settingsStore.enableCharts}
                             on:change={settingsStore.toggleCharts}
                             class="sr-only peer"
                         />
-                        <div
-                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"
-                        ></div>
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                     </label>
                 </div>
             </div>
         </div>
 
         {#if !isMobile}
-            <div
-                class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
-            >
-                <div
-                    class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
-                >
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
                     <i class="ph ph-power text-lg"></i> 启动设置
                 </div>
                 <div class="p-4 md:p-6 space-y-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <div
-                                class="font-bold text-slate-700 text-sm md:text-base"
-                            >
-                                开机自启动
-                            </div>
-                            <div class="text-[10px] md:text-xs text-slate-500">
-                                登录系统时自动启动程序
-                            </div>
+                            <div class="font-bold text-slate-700 text-sm md:text-base">开机自启动</div>
+                            <div class="text-[10px] md:text-xs text-slate-500">登录系统时自动启动程序</div>
                         </div>
-                        <label
-                            class="relative inline-flex items-center cursor-pointer"
-                        >
+                        <label class="relative inline-flex items-center cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={$settingsStore.autoStart}
@@ -264,147 +290,118 @@
                                 disabled={$settingsStore.autoStartLoading}
                                 class="sr-only peer"
                             />
-                            <div
-                                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600 peer-disabled:opacity-50"
-                            ></div>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600 peer-disabled:opacity-50"></div>
                         </label>
                     </div>
                     {#if $settingsStore.autoStartLoading}
-                        <div
-                            class="text-xs text-slate-500 flex items-center gap-2"
-                        >
+                        <div class="text-xs text-slate-500 flex items-center gap-2">
                             <i class="ph ph-spinner animate-spin"></i> 正在配置...
                         </div>
                     {/if}
                 </div>
             </div>
 
-            <div
-                class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
-            >
-                <div
-                    class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
-                >
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
                     <i class="ph ph-x-circle text-lg"></i> 窗口行为
                 </div>
                 <div class="p-4 md:p-6 space-y-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <div
-                                class="font-bold text-slate-700 text-sm md:text-base"
-                            >
-                                关闭时彻底退出
-                            </div>
-                            <div class="text-[10px] md:text-xs text-slate-500">
-                                关闭窗口时直接退出程序，而不是最小化到托盘
-                            </div>
+                            <div class="font-bold text-slate-700 text-sm md:text-base">关闭时彻底退出</div>
+                            <div class="text-[10px] md:text-xs text-slate-500">关闭窗口时直接退出程序，而不是最小化到托盘</div>
                         </div>
-                        <label
-                            class="relative inline-flex items-center cursor-pointer"
-                        >
+                        <label class="relative inline-flex items-center cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={$settingsStore.closeToQuit}
                                 on:change={toggleCloseToQuit}
                                 class="sr-only peer"
                             />
-                            <div
-                                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"
-                            ></div>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
                         </label>
                     </div>
                 </div>
             </div>
         {:else}
-            <div
-                class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
-            >
-                <div
-                    class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
-                >
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
                     <i class="ph ph-arrow-u-up-left text-lg"></i> 返回键行为
                 </div>
                 <div class="p-4 md:p-6 space-y-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <div
-                                class="font-bold text-slate-700 text-sm md:text-base"
-                            >
-                                开启后连按两次退出程序
-                            </div>
-                            <div class="text-[10px] md:text-xs text-slate-500">
-                                关闭后返回键直接挂起到后台，不结束进程
-                            </div>
+                            <div class="font-bold text-slate-700 text-sm md:text-base">连按两次退出程序</div>
+                            <div class="text-[10px] md:text-xs text-slate-500">关闭后返回键直接挂起到后台，不结束进程</div>
                         </div>
-                        <label
-                            class="relative inline-flex items-center cursor-pointer"
-                        >
+                        <label class="relative inline-flex items-center cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={$settingsStore.closeToQuit}
                                 on:change={toggleCloseToQuit}
                                 class="sr-only peer"
                             />
-                            <div
-                                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"
-                            ></div>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
                         </label>
                     </div>
                 </div>
             </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
+                    <i class="ph ph-database text-lg"></i> 系统管理
+                </div>
+                <div class="p-4 md:p-6 space-y-3">
+                    <div class="grid grid-cols-2 gap-3">
+                        <button on:click={exportData}
+                            class="flex items-center justify-center gap-2 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 transition">
+                            <i class="ph ph-download-simple text-lg"></i> 备份
+                        </button>
+                        <button on:click={() => fileInput.click()}
+                            class="flex items-center justify-center gap-2 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 transition">
+                            <i class="ph ph-upload-simple text-lg"></i> 恢复
+                        </button>
+                    </div>
+                    <button on:click={logout}
+                        class="w-full flex items-center justify-center gap-2 py-3 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg text-sm font-bold text-orange-600 transition">
+                        <i class="ph-bold ph-sign-out text-lg"></i> 切换账号
+                    </button>
+                    <button on:click={clearData}
+                        class="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition">
+                        <i class="ph ph-trash text-lg"></i> 删库跑路
+                    </button>
+                    <input type="file" bind:this={fileInput} on:change={handleImport} class="hidden" accept=".json">
+                </div>
+            </div>
         {/if}
 
-        <div
-            class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden"
-        >
-            <div
-                class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2"
-            >
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 font-bold text-slate-700 flex items-center gap-2">
                 <i class="ph ph-info text-lg"></i> 关于
             </div>
             <div class="p-4 md:p-6 space-y-4">
                 <div class="flex items-center gap-3 md:gap-4">
-                    <div
-                        class="w-12 h-12 md:w-16 md:h-16 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg"
-                    >
-                        <i
-                            class="ph-bold ph-check-square-offset text-2xl md:text-3xl"
-                        ></i>
+                    <div class="w-12 h-12 md:w-16 md:h-16 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                        <i class="ph-bold ph-check-square-offset text-2xl md:text-3xl"></i>
                     </div>
                     <div class="flex-1">
-                        <h3 class="text-lg md:text-xl font-bold text-slate-800">
-                            WorkPlan with AI
-                        </h3>
-                        <div class="text-xs md:text-sm text-slate-500">
-                            版本 {$settingsStore.appVersion}
-                        </div>
+                        <h3 class="text-lg md:text-xl font-bold text-slate-800">WorkPlan with AI</h3>
+                        <div class="text-xs md:text-sm text-slate-500">版本 {$settingsStore.appVersion}</div>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2 md:gap-3">
-                    <button
-                        on:click={openGithub}
-                        class="flex items-center justify-center gap-2 py-2.5 md:py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs md:text-sm font-bold text-slate-700 transition"
-                    >
+                    <button on:click={openGithub}
+                        class="flex items-center justify-center gap-2 py-2.5 md:py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs md:text-sm font-bold text-slate-700 transition">
                         <i class="ph ph-github-logo text-lg"></i> GitHub
                     </button>
-                    <button
-                        on:click={checkUpdate}
-                        disabled={checkingUpdate}
-                        class="flex items-center justify-center gap-2 py-2.5 md:py-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs md:text-sm font-bold text-blue-700 transition disabled:opacity-50"
-                    >
-                        <i
-                            class="ph text-lg"
-                            class:ph-spinner={checkingUpdate}
-                            class:animate-spin={checkingUpdate}
-                            class:ph-download-simple={!checkingUpdate}
-                        ></i>
+                    <button on:click={checkUpdate} disabled={checkingUpdate}
+                        class="flex items-center justify-center gap-2 py-2.5 md:py-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs md:text-sm font-bold text-blue-700 transition disabled:opacity-50">
+                        <i class="ph text-lg" class:ph-spinner={checkingUpdate} class:animate-spin={checkingUpdate} class:ph-download-simple={!checkingUpdate}></i>
                         {checkingUpdate ? "检查中..." : "检查更新"}
                     </button>
                 </div>
-                <button
-                    on:click={showAgreement}
-                    class="w-full flex items-center justify-center gap-2 py-2.5 md:py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs md:text-sm font-bold text-slate-600 transition"
-                >
+                <button on:click={showAgreement}
+                    class="w-full flex items-center justify-center gap-2 py-2.5 md:py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs md:text-sm font-bold text-slate-600 transition">
                     <i class="ph ph-scroll text-lg"></i> 查看用户协议与隐私政策
                 </button>
             </div>

@@ -1,11 +1,11 @@
 <script>
     import { onMount, tick } from "svelte";
+    import { get } from 'svelte/store';
     import { taskStore, currentView, activeTask } from '$lib/stores/tasks.js';
     import { showAiPanel, showAiSettings, clearChatHistory } from '$lib/stores/ai.js';
     import ContextMenu from '$lib/components/ContextMenu.svelte';
     import { settingsStore } from '$lib/stores/settings.js';
-    import { pushNavigation, popNavigation, getNavigationDepth } from '$lib/stores/navigation.js';
-
+    import { pushNavigation, popNavigation, getNavigationDepth, handleBackPress, showExitToast, initializeNavigation } from '$lib/stores/navigation.js';
     import SplashScreen from '$lib/components/SplashScreen.svelte';
     import LoginModal from '$lib/components/LoginModal.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
@@ -30,15 +30,26 @@
     let editTask = null;
     let isMobile = false;
     let appReady = false;
+    let showSplash = false;
 
     $: needsAgreement = !$settingsStore.agreementAccepted;
 
-    onMount(() => {
+    onMount(async () => {
         isMobile = window.innerWidth < 768 || 
             /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        initializeNavigation('dashboard');
+        
+        // 仅在应用首次启动时显示开屏动画（使用sessionStorage标记）
+        if (!sessionStorage.getItem('planpro_app_loaded')) {
+            sessionStorage.setItem('planpro_app_loaded', 'true');
+            showSplash = true;
+        } else {
+            appReady = true;
+        }
     });
 
     function handleSplashComplete() {
+        showSplash = false;
         appReady = true;
     }
 
@@ -79,11 +90,23 @@
         currentView.set('statistics');
         pushNavigation('statistics');
     }
+
+    function handleAiPanelBack() {
+        showAiPanel.set(false);
+        const depth = getNavigationDepth();
+        if (depth > 1) {
+            popNavigation();
+        }
+    }
+
+    function handleTaskDetailBack() {
+        activeTask.set(null);
+    }
 </script>
 
-{#if !appReady}
+{#if showSplash}
     <SplashScreen duration={1500} onComplete={handleSplashComplete} />
-{:else}
+{:else if appReady}
     <div class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800 safe-area-container">
         {#if needsAgreement}
             <AgreementModal isFirstTime={true} />
@@ -97,14 +120,12 @@
                     on:generateReport={handleGenerateReport}
                 />
             {/if}
-
             <Sidebar />
-
             <main class="flex-1 flex flex-col relative bg-[#f1f5f9] min-w-0 border-r border-slate-200 pb-14 md:pb-0">
                 {#if $currentView === 'dashboard'}
                     <Dashboard {openModal} />
                 {:else if $currentView === 'aichat'}
-                    <AiChat />
+                    <AiChat onBack={handleAiPanelBack} />
                 {:else if $currentView === 'templates'}
                     <Templates {openModal} />
                 {:else if $currentView === 'scheduled'}
@@ -121,7 +142,6 @@
                     <MoreMenu />
                 {/if}
             </main>
-
             {#if $currentView !== 'aichat' && $currentView !== 'notes'}
                 <TaskDetail {openModal}>
                     <svelte:fragment slot="ai-panel">
@@ -129,18 +149,16 @@
                     </svelte:fragment>
                 </TaskDetail>
             {/if}
-
             <MobileTaskDetail {openModal} />
-
             {#if $showAiPanel && $currentView !== 'aichat' && $currentView !== 'notes'}
                 <div class="md:hidden fixed inset-0 z-50 bg-white flex flex-col safe-area-container">
                     <div class="h-14 border-b border-rose-100 flex items-center justify-between px-4 bg-white shrink-0 mobile-header">
-                        <button on:click={() => { showAiPanel.set(false); popNavigation(); }} 
+                        <button on:click={handleAiPanelBack} 
                             class="text-slate-500 flex items-center gap-1 font-bold">
                             <i class="ph-bold ph-caret-left text-lg"></i> 返回
                         </button>
                         <div class="font-bold text-rose-600 flex items-center gap-1">
-                            <i class="ph-fill ph-sparkle"></i> AI Chat
+                            <i class="ph-fill ph-sparkle"></i> AI 助手
                         </div>
                         <button on:click={() => clearChatHistory()} class="text-slate-400" aria-label="清空聊天">
                             <i class="ph ph-trash text-xl"></i>
@@ -149,13 +167,19 @@
                     <AiPanel />
                 </div>
             {/if}
-
             <MobileNav />
-
             <TaskModal bind:show={showModal} {editTask} on:close={closeModal} />
             <AiSettings />
             <AgreementModal isFirstTime={false} />
         {/if}
+    </div>
+{/if}
+
+{#if $showExitToast}
+    <div class="fixed bottom-20 left-0 right-0 z-[102] flex justify-center pointer-events-none">
+        <div class="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium">
+            再按一次退出应用
+        </div>
     </div>
 {/if}
 
@@ -164,15 +188,12 @@
         margin: 0;
         padding: 0;
     }
-
     .safe-area-container {
         padding-top: env(safe-area-inset-top);
     }
-
     .mobile-header {
         margin-top: env(safe-area-inset-top);
     }
-
     @supports (padding-top: env(safe-area-inset-top)) {
         .safe-area-container {
             padding-top: env(safe-area-inset-top);

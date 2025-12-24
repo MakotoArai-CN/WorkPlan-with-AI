@@ -3,7 +3,7 @@ import CryptoJS from 'crypto-js';
 const SALT_LENGTH = 16;
 const IV_LENGTH = 16;
 const KEY_SIZE = 256;
-const ITERATIONS = 10000;
+const ITERATIONS = 310000;
 
 function generateSalt() {
     return CryptoJS.lib.WordArray.random(SALT_LENGTH).toString();
@@ -16,7 +16,8 @@ function generateIV() {
 function deriveKey(password, salt) {
     return CryptoJS.PBKDF2(password, salt, {
         keySize: KEY_SIZE / 32,
-        iterations: ITERATIONS
+        iterations: ITERATIONS,
+        hasher: CryptoJS.algo.SHA256
     });
 }
 
@@ -64,11 +65,31 @@ export function decrypt(ciphertext, password) {
 }
 
 export function hashPassword(password) {
-    return CryptoJS.SHA256(password).toString();
+    const salt = CryptoJS.lib.WordArray.random(16).toString();
+    const hash = CryptoJS.PBKDF2(password, salt, {
+        keySize: 256 / 32,
+        iterations: ITERATIONS,
+        hasher: CryptoJS.algo.SHA256
+    }).toString();
+    return salt + ':' + hash;
 }
 
-export function verifyPassword(password, hash) {
-    return hashPassword(password) === hash;
+export function verifyPassword(password, storedHash) {
+    if (!storedHash || !password) return false;
+    const parts = storedHash.split(':');
+    if (parts.length === 1) {
+        return CryptoJS.SHA256(password).toString() === storedHash;
+    }
+    if (parts.length === 2) {
+        const [salt, hash] = parts;
+        const computedHash = CryptoJS.PBKDF2(password, salt, {
+            keySize: 256 / 32,
+            iterations: ITERATIONS,
+            hasher: CryptoJS.algo.SHA256
+        }).toString();
+        return computedHash === hash;
+    }
+    return false;
 }
 
 export function generatePassword(length = 16, options = {}) {
@@ -91,4 +112,30 @@ export function generatePassword(length = 16, options = {}) {
         password += chars[randomValues[i] % chars.length];
     }
     return password;
+}
+
+export function generateSessionToken() {
+    return CryptoJS.lib.WordArray.random(32).toString();
+}
+
+export function encryptSessionData(data, masterHash) {
+    if (!data || !masterHash) return null;
+    try {
+        const jsonStr = JSON.stringify(data);
+        const encrypted = CryptoJS.AES.encrypt(jsonStr, masterHash).toString();
+        return encrypted;
+    } catch (e) {
+        return null;
+    }
+}
+
+export function decryptSessionData(encryptedData, masterHash) {
+    if (!encryptedData || !masterHash) return null;
+    try {
+        const decrypted = CryptoJS.AES.decrypt(encryptedData, masterHash);
+        const jsonStr = decrypted.toString(CryptoJS.enc.Utf8);
+        return JSON.parse(jsonStr);
+    } catch (e) {
+        return null;
+    }
 }
