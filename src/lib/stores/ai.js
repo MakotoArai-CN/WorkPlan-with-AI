@@ -589,6 +589,9 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
 
     const currentConfig = getEffectiveConfig();
     const subtaskOperation = detectSubtaskOperation(text);
+    const lowerText = text.toLowerCase();
+    const createKeywords = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
+    const isExplicitCreate = createKeywords.some(kw => lowerText.includes(kw));
     const needsApiKey = !isG4FProvider(currentConfig.provider) &&
         currentConfig.provider !== 'ollama' &&
         currentConfig.provider !== 'lmstudio';
@@ -644,6 +647,8 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
 
         if (subtaskOperation) {
             result = await analyzeSubtaskIntent(text, existingTasks, dateInfo, currentConfig, callAI);
+        } else if (isExplicitCreate) {
+            result = await analyzeCreateIntent(text, existingTasks, dateInfo, currentConfig, callAI);
         } else if (operationType === 'mixed') {
             result = await analyzeMixedIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
         } else if (operationType === 'delete') {
@@ -722,9 +727,11 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
     const todayStr = formatDateForAI(dateInfo.today);
     const tomorrowStr = formatDateForAI(dateInfo.tomorrow);
     const dayAfterTomorrowStr = formatDateForAI(dateInfo.dayAfterTomorrow);
+
     const existingTasksStr = existingTasks.length > 0
-        ? `\n\n【现有任务列表（用于避免重复）】\n${existingTasks.map(t => formatFullTaskForAI(t)).join('\n')}`
+        ? `\n\n【现有任务列表（仅供参考，不影响新增）】\n${existingTasks.map(t => formatFullTaskForAI(t)).join('\n')}`
         : '';
+
     const systemPrompt = `你是一个智能任务管理助手。请根据用户的自然语言描述创建任务。
 
 【当前时间信息】
@@ -735,24 +742,25 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
 - 本周: ${formatDateForAI(dateInfo.thisWeek.start)} 至 ${formatDateForAI(dateInfo.thisWeek.end)}
 ${existingTasksStr}
 
-【重要规则】
+【核心规则 - 必须遵守】
+1. 这是一个新增任务的请求，必须创建新任务，绝对不能修改现有任务
+2. 即使现有任务中存在同名或相似的任务，也必须创建新任务
+3. 用户说"新增"、"添加"、"创建"时，一定是新建任务，不是修改
+4. 不要尝试去匹配或修改任何现有任务
+
+【任务拆分规则】
 1. 如果用户描述包含多个不同的任务（不同时间或不同事项），必须拆分成多个独立任务对象
 2. 如果单个任务较复杂（包含多个步骤），需要创建子任务（subtasks）
-3. 时间解析规则：
-   - "上午" = 09:00, "中午" = 12:00, "下午" = 14:00, "傍晚" = 17:00, "晚上" = 19:00
-   - 如果用户说"8点到10点"，date设为开始时间，deadline设为结束时间
-   - 默认创建的是当前时间往后的任务，除非用户明确提到过去的时间
 
-【同名任务处理规则】
-1. 如果现有任务列表中存在同名或相似名称的任务：
-   - 如果现有任务已完成（done），则可以创建新任务
-   - 如果现有任务未完成但时间不同，仍然创建新任务
-   - 如果现有任务未完成且时间相同，在note中说明"与现有任务时间重复"
-2. 不要因为存在同名任务就拒绝创建，要根据时间判断
-
-4. 严格只返回纯 JSON 格式，不要包含任何 markdown 标记或解释文字
+【时间解析规则】
+- "上午" = 09:00, "中午" = 12:00, "下午" = 14:00, "傍晚" = 17:00, "晚上" = 19:00
+- 如果用户说"8点到10点"，date设为开始时间，deadline设为结束时间
+- 默认创建的是当前时间往后的任务，除非用户明确提到过去的时间
+- "下周一到下周五" 表示需要创建多个任务，每天一个
 
 【输出格式】
+严格只返回纯 JSON 格式，不要包含任何 markdown 标记或解释文字
+
 单任务:
 {"title":"任务标题","date":"YYYY-MM-DDTHH:mm","deadline":"YYYY-MM-DDTHH:mm或空字符串","priority":"normal|urgent|critical","note":"备注","subtasks":[{"title":"子任务名","status":"todo"}]}
 
@@ -763,14 +771,17 @@ ${existingTasksStr}
 - normal: 普通任务
 - urgent: 用户强调"紧急"、"重要"、"优先"
 - critical: 用户强调"特急"、"非常紧急"、"最优先"`;
+
     const aiResponse = await callAI(config, userText, systemPrompt);
     if (!aiResponse) return null;
+
     try {
         const cleanJsonStr = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
         const jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
         const jsonStr = jsonMatch ? jsonMatch[0] : cleanJsonStr;
         const parsed = JSON.parse(jsonStr);
         const today = formatDateForAI(dateInfo.today);
+
         if (parsed.tasks && Array.isArray(parsed.tasks)) {
             const tasks = parsed.tasks.map((t, idx) => ({
                 id: (Date.now() + idx).toString(),
@@ -787,6 +798,7 @@ ${existingTasksStr}
             }));
             return { tasks };
         }
+
         return {
             id: Date.now().toString(),
             title: parsed.title || '未命名任务',

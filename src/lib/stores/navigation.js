@@ -1,10 +1,15 @@
 import { writable, get } from 'svelte/store';
+import { registerBackEvent } from "@kingsword/tauri-plugin-mobile-onbackpressed-listener";
 
 export const navigationStack = writable([]);
 export const lastBackPress = writable(0);
 export const showExitToast = writable(false);
 
 const DOUBLE_BACK_THRESHOLD = 2000;
+
+// 用于防止重复注册监听器
+let isBackListenerRegistered = false;
+let backListener = null;
 
 export function pushNavigation(view) {
     navigationStack.update(stack => {
@@ -89,27 +94,34 @@ export async function setupAndroidBackHandler(closeToQuit, callbacks) {
     const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (!isMobile) return () => {};
 
+    // 防止重复注册
+    if (isBackListenerRegistered) {
+        return async () => {
+            if (backListener) {
+                await backListener.unregister();
+                backListener = null;
+                isBackListenerRegistered = false;
+            }
+        };
+    }
+
     try {
-        const { listen } = await import('@tauri-apps/api/event');
+        isBackListenerRegistered = true;
         
-        const unlisten = await listen('back-pressed', (event) => {
+        backListener = await registerBackEvent(() => {
             handleBackPress(closeToQuit, callbacks);
         });
 
-        let unlistenBack = () => {};
-        try {
-            unlistenBack = await listen('tauri://back', () => {
-                handleBackPress(closeToQuit, callbacks);
-            });
-        } catch {
-        }
-
-        return () => {
-            unlisten();
-            unlistenBack();
+        return async () => {
+            if (backListener) {
+                await backListener.unregister();
+                backListener = null;
+                isBackListenerRegistered = false;
+            }
         };
     } catch (e) {
         console.log('Back button handler not available:', e);
+        isBackListenerRegistered = false;
         return () => {};
     }
 }

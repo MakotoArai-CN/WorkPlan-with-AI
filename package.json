@@ -1,6 +1,6 @@
 {
   "name": "workplan",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "",
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@kingsword/tauri-plugin-mobile-onbackpressed-listener": "npm:@jsr/kingsword__tauri-plugin-mobile-onbackpressed-listener",
     "@phosphor-icons/web": "^2.1.2",
     "@supabase/supabase-js": "^2.87.1",
     "@tauri-apps/api": "^2",

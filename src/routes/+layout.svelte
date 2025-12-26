@@ -38,11 +38,9 @@
 
         try {
             const { listen } = await import('@tauri-apps/api/event');
-            
             unlistenNotification = await listen('tray-notification-toggle', () => {
                 settingsStore.toggleNotification();
             });
-
             unlistenAutostart = await listen('tray-autostart-toggle', async () => {
                 try {
                     await settingsStore.toggleAutoStart();
@@ -50,7 +48,6 @@
                     console.error(e);
                 }
             });
-
             unlistenUpdate = await listen('tray-check-update', async () => {
                 const { invoke } = await import('@tauri-apps/api/core');
                 try {
@@ -73,7 +70,6 @@
                     console.error(e);
                 }
             });
-
             unlistenAbout = await listen('tray-open-about', () => {
                 settingsStore.showAgreementModal();
             });
@@ -135,6 +131,14 @@
             taskStore.checkScheduled();
         }, 60000);
 
+        // 关闭启动屏幕，显示主窗口
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('close_splashscreen');
+        } catch (e) {
+            console.log('Splashscreen close not available:', e);
+        }
+
         return () => {
             unlistenNotification();
             unlistenAutostart();
@@ -163,7 +167,6 @@
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
     }
-    
     :global(.animate-fade-in) {
         animation: fade-in 0.2s ease-out;
     }

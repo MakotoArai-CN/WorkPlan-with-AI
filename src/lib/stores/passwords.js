@@ -55,7 +55,7 @@ function createPasswordsStore() {
 
         const encryptedSession = sessionStorage.getItem(SESSION_KEY);
         let sessionUnlocked = false;
-        
+
         if (settings.rememberSession && encryptedSession && masterHash) {
             try {
                 const sessionData = decryptSessionData(encryptedSession, masterHash);
@@ -132,10 +132,10 @@ function createPasswordsStore() {
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
             if (state.isUnlocked && currentMasterPassword && sessionToken) return true;
-            
+
             const encryptedSession = sessionStorage.getItem(SESSION_KEY);
             if (!encryptedSession || !state.masterPasswordHash) return false;
-            
+
             try {
                 const sessionData = decryptSessionData(encryptedSession, state.masterPasswordHash);
                 return !!(sessionData && sessionData.token && sessionData.key);
@@ -146,10 +146,10 @@ function createPasswordsStore() {
         restoreSession: () => {
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
-            
+
             const encryptedSession = sessionStorage.getItem(SESSION_KEY);
             if (!encryptedSession || !state.masterPasswordHash) return false;
-            
+
             try {
                 const sessionData = decryptSessionData(encryptedSession, state.masterPasswordHash);
                 if (sessionData && sessionData.token && sessionData.key) {
@@ -284,6 +284,49 @@ function createPasswordsStore() {
                 rememberSession: false,
                 initialized: false
             });
+        },
+        changeMasterPassword: (oldPassword, newPassword) => {
+            const state = get({ subscribe });
+
+            if (!verifyPassword(oldPassword, state.masterPasswordHash)) {
+                return { success: false, error: '原密码错误' };
+            }
+
+            if (!newPassword || newPassword.length < 8) {
+                return { success: false, error: '新密码至少需要8个字符' };
+            }
+
+            const decryptedPasswords = state.passwords.map(p => ({
+                ...p,
+                password: decrypt(p.password, oldPassword) || ''
+            }));
+
+            const newHash = hashPassword(newPassword);
+
+            const reEncryptedPasswords = decryptedPasswords.map(p => ({
+                ...p,
+                password: encrypt(p.password, newPassword),
+                updatedAt: new Date().toISOString()
+            }));
+
+            currentMasterPassword = newPassword;
+
+            update(s => {
+                const newState = {
+                    ...s,
+                    passwords: reEncryptedPasswords,
+                    masterPasswordHash: newHash
+                };
+                saveImmediate(newState);
+                return newState;
+            });
+
+            clearSession();
+            if (state.rememberSession) {
+                saveSession(newPassword, newHash);
+            }
+
+            return { success: true };
         },
         getDecryptedPasswords: (ids = null) => {
             const state = get({ subscribe });

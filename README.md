@@ -161,21 +161,73 @@ bun run tauri build
 ## 📁 项目结构
 
 ```bash
-src/
-├── lib/
-│   ├── stores/          # Svelte stores 状态管理
-│   │   ├── ai.js        # AI相关状态
-│   │   ├── modal.js     # 模态框状态
-│   │   ├── settings.js  # 设置状态
-│   │   └── tasks.js     # 任务状态管理
-│   └── utils/
-│       └── ai-providers.js  # AI提供商配置
-├── routes/              # 页面路由
-└── app.css              # 全局样式
-src-tauri/
-├── src/                 # Rust源码
-├── Cargo.toml           # Rust依赖配置
-└── tauri.conf.json      # Tauri配置
+WorkPlan-with-ai/
+├── src/
+│   ├── lib/
+│   │   ├── components/
+│   │   │   ├── AgreementModal.svelte
+│   │   │   ├── AiChat.svelte
+│   │   │   ├── AiPanel.svelte
+│   │   │   ├── AiSettings.svelte
+│   │   │   ├── Charts.svelte
+│   │   │   ├── ContextMenu.svelte
+│   │   │   ├── Dashboard.svelte
+│   │   │   ├── GanttChart.svelte
+│   │   │   ├── GlobalModal.svelte
+│   │   │   ├── LoginModal.svelte
+│   │   │   ├── MarkdownRenderer.svelte
+│   │   │   ├── MobileNav.svelte
+│   │   │   ├── MobileTaskDetail.svelte
+│   │   │   ├── MoreMenu.svelte
+│   │   │   ├── Notes.svelte
+│   │   │   ├── Passwords.svelte
+│   │   │   ├── Scheduled.svelte
+│   │   │   ├── Settings.svelte
+│   │   │   ├── Sidebar.svelte
+│   │   │   ├── SplashScreen.svelte
+│   │   │   ├── Statistics.svelte
+│   │   │   ├── TaskCard.svelte
+│   │   │   ├── TaskDetail.svelte
+│   │   │   ├── TaskModal.svelte
+│   │   │   └── Templates.svelte
+│   │   ├── stores/
+│   │   │   ├── ai.js
+│   │   │   ├── modal.js
+│   │   │   ├── navigation.js
+│   │   │   ├── notes.js
+│   │   │   ├── passwords.js
+│   │   │   ├── settings.js
+│   │   │   └── tasks.js
+│   │   └── utils/
+│   │       ├── ai-providers.js
+│   │       ├── crypto.js
+│   │       ├── export.js
+│   │       ├── g4f-client.js
+│   │       └── markdown.js
+│   ├── routes/
+│   │   ├── +error.svelte
+│   │   ├── +layout.js
+│   │   ├── +layout.svelte
+│   │   ├── +page.js
+│   │   └── +page.svelte
+│   ├── app.css
+│   └── app.html
+├── src-tauri/
+│   ├── capabilities/
+│   │   └── default.json
+│   ├── src/
+│   │   ├── autostart.rs
+│   │   ├── lib.rs
+│   │   └── main.rs
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+├── .env.example
+├── README.md
+├── jsconfig.json
+├── package.json
+├── postcss.config.js
+├── svelte.config.js
+└── vite.config.js
 ```
 
 ## 🤝 贡献指南
