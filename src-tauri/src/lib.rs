@@ -4,7 +4,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, RunEvent, WindowEvent,
 };
-
 use tauri_plugin_opener::OpenerExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -20,10 +19,8 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
             .filter_map(|s| s.parse::<u32>().ok())
             .collect()
     };
-
     let current_parts = parse_version(current);
     let latest_parts = parse_version(latest);
-
     for i in 0..std::cmp::max(current_parts.len(), latest_parts.len()) {
         let c = current_parts.get(i).unwrap_or(&0);
         let l = latest_parts.get(i).unwrap_or(&0);
@@ -46,14 +43,11 @@ async fn check_update() -> Result<serde_json::Value, String> {
         .send()
         .await
         .map_err(|e| e.to_string())?;
-
     if response.status().is_success() {
         let data: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        
         let current_version = env!("CARGO_PKG_VERSION");
         let latest_version = data["tag_name"].as_str().unwrap_or("");
         let has_update = is_newer_version(current_version, latest_version);
-        
         Ok(serde_json::json!({
             "has_update": has_update,
             "current_version": current_version,
@@ -70,7 +64,6 @@ async fn set_autostart(enable: bool) -> Result<bool, String> {
     {
         autostart::set_autostart_registry(enable)
     }
-
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = enable;
@@ -84,7 +77,6 @@ async fn get_autostart_status() -> Result<bool, String> {
     {
         autostart::get_autostart_status()
     }
-
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         Ok(false)
@@ -125,6 +117,20 @@ fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[tauri::command]
+async fn close_splashscreen(app: tauri::AppHandle) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if let Some(splashscreen) = app.get_webview_window("splashscreen") {
+            let _ = splashscreen.close();
+        }
+        if let Some(main_window) = app.get_webview_window("main") {
+            let _ = main_window.show();
+            let _ = main_window.set_focus();
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -142,7 +148,8 @@ pub fn run() {
             open_releases,
             set_close_to_quit,
             get_close_to_quit,
-            exit_app
+            exit_app,
+            close_splashscreen
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -157,7 +164,6 @@ pub fn run() {
                 MenuItem::with_id(app, "autostart", "开机自启", true, None::<&str>)?;
             let about = MenuItem::with_id(app, "about", "关于程序", true, None::<&str>)?;
             let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)?;
-
             let menu = Menu::with_items(
                 app,
                 &[
@@ -169,7 +175,6 @@ pub fn run() {
                     &quit,
                 ],
             )?;
-
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -221,7 +226,6 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-
             Ok(())
         });
 

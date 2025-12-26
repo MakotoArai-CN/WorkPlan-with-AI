@@ -13,7 +13,7 @@ function getInitialSettings() {
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.2.5',
+            appVersion: '0.2.6',
             dailyReportPrompt: '',
             weeklyReportPrompt: ''
         };
@@ -34,7 +34,7 @@ function getInitialSettings() {
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.2.5',
+                appVersion: '0.2.6',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || ''
             };
@@ -57,7 +57,7 @@ function getDefaultSettings() {
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.2.5',
+        appVersion: '0.2.6',
         dailyReportPrompt: '',
         weeklyReportPrompt: ''
     };
@@ -97,7 +97,7 @@ function createSettingsStore() {
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.2.5' }));
+            update(s => ({ ...s, appVersion: '0.2.6' }));
         }
 
         try {

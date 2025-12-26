@@ -46,6 +46,10 @@
     let observer;
     let decryptedCache = {};
     let clickOutsideHandler;
+    let showChangeMasterPasswordModal = false;
+let oldMasterPassword = "";
+let newMasterPassword = "";
+let confirmNewMasterPassword = "";
 
     let newPassword = {
         title: "",
@@ -366,6 +370,61 @@
     function closeExportMenu() {
         showExportMenu = false;
     }
+
+    function openChangeMasterPasswordModal() {
+    closeExportMenu();
+    oldMasterPassword = "";
+    newMasterPassword = "";
+    confirmNewMasterPassword = "";
+    showChangeMasterPasswordModal = true;
+}
+
+async function handleChangeMasterPassword() {
+    if (!oldMasterPassword) {
+        showAlert({
+            title: "请输入原密码",
+            message: "请输入当前的主密码",
+            variant: "warning",
+        });
+        return;
+    }
+
+    if (newMasterPassword.length < 8) {
+        showAlert({
+            title: "密码太短",
+            message: "新密码至少需要8个字符",
+            variant: "warning",
+        });
+        return;
+    }
+
+    if (newMasterPassword !== confirmNewMasterPassword) {
+        showAlert({
+            title: "密码不匹配",
+            message: "两次输入的新密码不一致",
+            variant: "warning",
+        });
+        return;
+    }
+
+    const result = passwordsStore.changeMasterPassword(oldMasterPassword, newMasterPassword);
+    
+    if (result.success) {
+        showChangeMasterPasswordModal = false;
+        oldMasterPassword = "";
+        newMasterPassword = "";
+        confirmNewMasterPassword = "";
+        decryptedCache = {};
+        showPasswordValue = {};
+        showToast({ message: "主密码修改成功", type: "success" });
+    } else {
+        showAlert({
+            title: "修改失败",
+            message: result.error,
+            variant: "danger",
+        });
+    }
+}
 
     function toggleExportMenu(event) {
         event?.stopPropagation();
@@ -847,6 +906,13 @@
                                     class="ph ph-download text-lg text-purple-600"
                                 ></i> 导入密码
                             </button>
+                            <button
+    on:click={openChangeMasterPasswordModal}
+    class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+>
+    <i class="ph ph-password text-lg text-blue-600"></i>
+    修改主密码
+</button>
                             <hr class="my-1 border-slate-100" />
                             <button
                                 on:click={toggleRememberSession}
@@ -1569,6 +1635,74 @@
                     class="flex-1 py-2.5 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
                 >
                     保存
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+{#if showChangeMasterPasswordModal}
+    <div
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3
+                class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
+            >
+                <i class="ph-fill ph-password text-blue-600"></i> 修改主密码
+            </h3>
+            <div class="space-y-3">
+                <div>
+                    <label
+                        class="text-xs font-bold text-slate-500 uppercase mb-1 block"
+                        >原密码</label
+                    >
+                    <input
+                        type="password"
+                        bind:value={oldMasterPassword}
+                        placeholder="输入当前主密码"
+                        class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-400"
+                    />
+                </div>
+                <div>
+                    <label
+                        class="text-xs font-bold text-slate-500 uppercase mb-1 block"
+                        >新密码（至少8位）</label
+                    >
+                    <input
+                        type="password"
+                        bind:value={newMasterPassword}
+                        placeholder="输入新密码"
+                        class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-400"
+                    />
+                </div>
+                <div>
+                    <label
+                        class="text-xs font-bold text-slate-500 uppercase mb-1 block"
+                        >确认新密码</label
+                    >
+                    <input
+                        type="password"
+                        bind:value={confirmNewMasterPassword}
+                        on:keydown={(e) =>
+                            e.key === "Enter" && handleChangeMasterPassword()}
+                        placeholder="再次输入新密码"
+                        class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-400"
+                    />
+                </div>
+            </div>
+            <div class="flex gap-3 mt-4">
+                <button
+                    on:click={() => (showChangeMasterPasswordModal = false)}
+                    class="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
+                >
+                    取消
+                </button>
+                <button
+                    on:click={handleChangeMasterPassword}
+                    class="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700"
+                >
+                    确认修改
                 </button>
             </div>
         </div>

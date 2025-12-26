@@ -91,7 +91,6 @@
             vditorInstance.destroy();
         }
         const Vditor = (await import("vditor")).default;
-
         vditorInstance = new Vditor(vditorContainer, {
             height: "100%",
             mode: "ir",
@@ -100,6 +99,7 @@
             placeholder: "开始输入内容...支持 Markdown 格式",
             cache: { enable: false },
             value: editContent,
+            tab: "\t", // 添加此行：按 Tab 插入制表符
             toolbarConfig: {
                 pin: true,
                 hide: false,
