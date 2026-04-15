@@ -1,7 +1,8 @@
 <script>
     import { currentView } from '../stores/tasks.js';
     import { pushNavigation } from '../stores/navigation.js';
-    
+    import { _ } from 'svelte-i18n';
+
     function navigateTo(view) {
         currentView.set(view);
         pushNavigation(view);
@@ -11,8 +12,8 @@
 <div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
     <header class="h-14 md:h-16 bg-white/90 backdrop-blur px-4 md:px-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0">
         <div>
-            <h2 class="text-base md:text-lg font-bold text-slate-800">更多功能</h2>
-            <div class="text-[10px] md:text-xs text-slate-500">选择功能模块</div>
+            <h2 class="text-base md:text-lg font-bold text-slate-800">{$_('nav.more')}</h2>
+            <div class="text-[10px] md:text-xs text-slate-500">{$_('more.subtitle') || ''}</div>
         </div>
     </header>
 
@@ -23,8 +24,8 @@
                 <i class="ph-fill ph-chart-bar text-2xl text-indigo-600"></i>
             </div>
             <div class="flex-1 text-left">
-                <div class="font-bold text-slate-800">数据统计</div>
-                <div class="text-xs text-slate-500">查看任务统计和甘特图</div>
+                <div class="font-bold text-slate-800">{$_('nav.statistics')}</div>
+                <div class="text-xs text-slate-500">{$_('more.statistics_desc') || ''}</div>
             </div>
             <i class="ph-bold ph-caret-right text-slate-300"></i>
         </button>
@@ -35,8 +36,8 @@
                 <i class="ph-fill ph-robot text-2xl text-indigo-600"></i>
             </div>
             <div class="flex-1 text-left">
-                <div class="font-bold text-slate-800">AI Chat</div>
-                <div class="text-xs text-slate-500">智能对话助手</div>
+                <div class="font-bold text-slate-800">{$_('ai_chat.title')}</div>
+                <div class="text-xs text-slate-500">{$_('ai_chat.subtitle')}</div>
             </div>
             <i class="ph-bold ph-caret-right text-slate-300"></i>
         </button>
@@ -47,8 +48,8 @@
                 <i class="ph-fill ph-key text-2xl text-amber-600"></i>
             </div>
             <div class="flex-1 text-left">
-                <div class="font-bold text-slate-800">密码记录本</div>
-                <div class="text-xs text-slate-500">加密管理密码</div>
+                <div class="font-bold text-slate-800">{$_('passwords.title')}</div>
+                <div class="text-xs text-slate-500">{$_('more.passwords_desc') || ''}</div>
             </div>
             <i class="ph-bold ph-caret-right text-slate-300"></i>
         </button>
@@ -59,8 +60,8 @@
                 <i class="ph-fill ph-gear text-2xl text-slate-600"></i>
             </div>
             <div class="flex-1 text-left">
-                <div class="font-bold text-slate-800">系统设置</div>
-                <div class="text-xs text-slate-500">应用配置与管理</div>
+                <div class="font-bold text-slate-800">{$_('settings.title')}</div>
+                <div class="text-xs text-slate-500">{$_('settings.subtitle')}</div>
             </div>
             <i class="ph-bold ph-caret-right text-slate-300"></i>
         </button>

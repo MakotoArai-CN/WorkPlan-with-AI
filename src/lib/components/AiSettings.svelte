@@ -16,7 +16,10 @@
     import { settingsStore } from "../stores/settings.js";
     import { showAlert } from "../stores/modal.js";
     import { onMount } from "svelte";
-    import { isG4FProvider } from "../utils/g4f-client.js";
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
+
+    function t(key, opts) { return get(_)(key, opts); }
 
     let testing = false;
     let providers = [];
@@ -26,25 +29,9 @@
     let dailyPrompt = "";
     let weeklyPrompt = "";
 
-    const defaultDailyPrompt = `当前时间：{{time}}
-请根据以下任务列表生成一份{{type}}。
-【任务列表】
-{{tasks}}
-【要求】
-1. 生成简洁专业的日报
-2. 包含：工作概述、已完成事项、进行中事项、工作亮点/问题
-3. 使用 Markdown 格式
-4. 语言简练，突出重点`;
+    const defaultDailyPrompt = t('ai_settings_page.default_daily_prompt');
 
-    const defaultWeeklyPrompt = `当前时间：{{time}}
-请根据以下任务列表生成一份{{type}}。
-【任务列表】
-{{tasks}}
-【要求】
-1. 生成简洁专业的周报
-2. 包含：本周概述、已完成事项、进行中事项、下周计划、问题与建议
-3. 使用 Markdown 格式
-4. 语言简练，突出重点`;
+    const defaultWeeklyPrompt = t('ai_settings_page.default_weekly_prompt');
 
     async function loadCurrentProviderInfo() {
         currentProvider = await getAiProviderInfo($aiConfig.provider);
@@ -90,25 +77,26 @@
     }
 
     async function handleTestConnection() {
+        const t = get(_);
         testing = true;
         try {
             const result = await testAiConnection();
             if (result.success) {
                 await showAlert({
-                    title: "连接成功",
-                    message: "AI 响应：" + result.response,
+                    title: t('ai_settings_page.ok'),
+                    message: result.response,
                     variant: "success",
                 });
             } else {
                 await showAlert({
-                    title: "连接失败",
+                    title: t('ai_settings_page.fail'),
                     message: result.message,
                     variant: "danger",
                 });
             }
         } catch (error) {
             await showAlert({
-                title: "测试出错",
+                title: t('common.error'),
                 message: error.message,
                 variant: "danger",
             });
@@ -118,6 +106,7 @@
     }
 
     async function handleSave() {
+        const t = get(_);
         saveAiConfig();
         settingsStore.setDailyReportPrompt(dailyPrompt);
         settingsStore.setWeeklyReportPrompt(weeklyPrompt);
@@ -127,8 +116,8 @@
         });
         showAiSettings.set(false);
         await showAlert({
-            title: "保存成功",
-            message: "AI 配置已保存",
+            title: t('ai_settings_page.save_ok'),
+            message: t('ai_settings_page.save_msg'),
             variant: "success",
         });
     }
@@ -174,13 +163,12 @@
 
     $: isCustomProvider = $aiConfig.provider === "custom";
     $: needsApiKey = (() => {
-        if (isG4FProvider($aiConfig.provider)) return false;
         if (
             $aiConfig.provider === "ollama" ||
             $aiConfig.provider === "lmstudio"
         )
             return false;
-        if (isCustomProvider) return false; // 自定义接口不强制要求
+        if (isCustomProvider) return false; // custom provider doesn't require key
         return currentProvider && currentProvider.authType !== "none";
     })();
     $: displayModels = isCustomProvider
@@ -209,7 +197,7 @@
                 <h3
                     class="font-bold text-base md:text-lg text-rose-700 flex items-center gap-2"
                 >
-                    <i class="ph-fill ph-sparkle"></i> AI 配置
+                    <i class="ph-fill ph-sparkle"></i> {$_('ai_settings_page.title')}
                 </h3>
                 <button
                     on:click={handleClose}
@@ -230,7 +218,7 @@
                     class:border-transparent={activeTab !== "basic"}
                     class:text-slate-500={activeTab !== "basic"}
                 >
-                    基础设置
+                    {$_('ai_settings_page.tab_basic')}
                 </button>
                 <button
                     on:click={() => (activeTab = "advanced")}
@@ -240,7 +228,7 @@
                     class:border-transparent={activeTab !== "advanced"}
                     class:text-slate-500={activeTab !== "advanced"}
                 >
-                    高级参数
+                    {$_('ai_settings_page.tab_advanced')}
                 </button>
                 <button
                     on:click={() => (activeTab = "prompts")}
@@ -250,7 +238,7 @@
                     class:border-transparent={activeTab !== "prompts"}
                     class:text-slate-500={activeTab !== "prompts"}
                 >
-                    提示词模板
+                    {$_('ai_settings_page.tab_prompts')}
                 </button>
             </div>
 
@@ -261,35 +249,28 @@
                     <div>
                         <label
                             class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                            >AI 厂商</label
+                            >{$_('ai_settings_page.provider')}</label
                         >
                         <select
                             value={$aiConfig.provider}
                             on:change={handleProviderChange}
                             class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
                         >
-                            <optgroup label="G4F 免费服务">
-                                {#each providers.filter( (p) => p.id.startsWith("g4f"), ) as provider}
+                            <optgroup label={$_('ai_settings_page.group_international')}>
+                                {#each providers.filter((p) => ["openai", "anthropic", "google", "mistral", "cohere", "perplexity", "together", "fireworks", "openrouter", "groq", "huggingface", "novita", "cloudflare"].includes(p.id)) as provider}
                                     <option value={provider.id}
                                         >{provider.name}</option
                                     >
                                 {/each}
                             </optgroup>
-                            <optgroup label="国际服务商">
-                                {#each providers.filter((p) => !p.id.startsWith("g4f") && ["openai", "anthropic", "google", "mistral", "cohere", "perplexity", "together", "fireworks", "openrouter", "groq", "huggingface", "novita", "cloudflare"].includes(p.id)) as provider}
-                                    <option value={provider.id}
-                                        >{provider.name}</option
-                                    >
-                                {/each}
-                            </optgroup>
-                            <optgroup label="国内服务商">
+                            <optgroup label={$_('ai_settings_page.group_domestic')}>
                                 {#each providers.filter( (p) => ["deepseek", "zhipu", "qwen", "moonshot", "spark", "baidu", "hunyuan", "yi", "baichuan", "minimax", "stepfun", "doubao", "sensetime", "siliconflow", "mimo"].includes(p.id), ) as provider}
                                     <option value={provider.id}
                                         >{provider.name}</option
                                     >
                                 {/each}
                             </optgroup>
-                            <optgroup label="本地部署">
+                            <optgroup label={$_('ai_settings_page.group_local')}>
                                 {#each providers.filter( (p) => ["ollama", "lmstudio", "custom"].includes(p.id), ) as provider}
                                     <option value={provider.id}
                                         >{provider.name}</option
@@ -304,7 +285,7 @@
                                     target="_blank"
                                     class="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1"
                                 >
-                                    <i class="ph ph-book-open"></i> 文档
+                                    <i class="ph ph-book-open"></i> {$_('ai_settings_page.docs')}
                                 </a>
                             {/if}
                             {#if currentProvider?.apiUrl}
@@ -313,7 +294,7 @@
                                         openApiUrl(currentProvider.apiUrl)}
                                     class="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 font-bold"
                                 >
-                                    <i class="ph ph-key"></i> 获取 Key
+                                    <i class="ph ph-key"></i> {$_('ai_settings_page.get_key')}
                                 </button>
                             {/if}
                         </div>
@@ -323,7 +304,7 @@
                         <div>
                             <label
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                                >API 端点</label
+                                >{$_('ai_settings_page.custom_endpoint')}</label
                             >
                             <input
                                 bind:value={$aiConfig.customEndpoint}
@@ -332,19 +313,18 @@
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
                             <div class="text-[10px] text-slate-400 mt-1">
-                                OpenAI 兼容接口，通常以 /v1/chat/completions
-                                结尾
+                                {$_('ai_settings_page.custom_endpoint_hint')}
                             </div>
                         </div>
                         <div>
                             <label
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                                >模型名称</label
+                                >{$_('ai_settings_page.custom_model')}</label
                             >
                             <input
                                 bind:value={$aiConfig.customModel}
                                 type="text"
-                                placeholder="输入模型名称"
+                                placeholder={$_('ai_settings_page.custom_model_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
                         </div>
@@ -353,8 +333,8 @@
                             <label
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                             >
-                                API 地址
-                                <span class="text-rose-400">（可自定义）</span>
+                                {$_('ai_settings_page.local_addr')}
+                                <span class="text-rose-400">{$_('ai_settings_page.local_addr_custom')}</span>
                             </label>
                             <input
                                 bind:value={$aiConfig.customEndpoint}
@@ -366,11 +346,9 @@
                             />
                             <div class="text-[10px] text-slate-400 mt-1">
                                 {#if $aiConfig.provider === "ollama"}
-                                    默认:
-                                    http://localhost:11434/api/chat，如部署在其他地址请修改
+                                    {$_('ai_settings_page.local_hint_ollama')}
                                 {:else}
-                                    默认:
-                                    http://localhost:1234/v1/chat/completions，如部署在其他地址请修改
+                                    {$_('ai_settings_page.local_hint_lmstudio')}
                                 {/if}
                             </div>
                         </div>
@@ -379,7 +357,7 @@
                             <div class="flex items-center justify-between mb-2">
                                 <label
                                     class="text-xs font-bold text-slate-500 uppercase"
-                                    >模型</label
+                                    >{$_('ai_settings_page.model')}</label
                                 >
                                 {#if currentProvider?.supportsModelList}
                                     <button
@@ -391,7 +369,7 @@
                                             class="ph ph-arrows-clockwise"
                                             class:animate-spin={$modelsLoading}
                                         ></i>
-                                        {$modelsLoading ? "加载中..." : "刷新"}
+                                        {$modelsLoading ? $_('ai_settings_page.loading') : $_('ai_settings_page.refresh')}
                                     </button>
                                 {/if}
                             </div>
@@ -404,7 +382,7 @@
                                 {/each}
                             </select>
                             <div class="text-[10px] text-slate-400 mt-1">
-                                共 {displayModels.length} 个可用模型
+                                {$_('ai_settings_page.models_count', { values: { count: displayModels.length } })}
                             </div>
                         </div>
                     {/if}
@@ -419,7 +397,7 @@
                                 bind:value={$aiConfig.apiKey}
                                 on:blur={handleApiKeyChange}
                                 type="password"
-                                placeholder="请输入 API Key"
+                                placeholder={$_('ai_settings_page.api_key_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
                         </div>
@@ -434,7 +412,7 @@
                             <input
                                 bind:value={$aiConfig.secretKey}
                                 type="password"
-                                placeholder="请输入 Secret Key"
+                                placeholder={$_('ai_settings_page.secret_key_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
                         </div>
@@ -459,7 +437,7 @@
                         class="bg-slate-50 rounded-lg p-3 md:p-4 flex items-center justify-between flex-wrap gap-2"
                     >
                         <span class="text-xs md:text-sm text-slate-600"
-                            >测试 AI 连接</span
+                            >{$_('ai_settings_page.test')}</span
                         >
                         <button
                             on:click={handleTestConnection}
@@ -471,7 +449,7 @@
                             {:else}
                                 <i class="ph ph-plug"></i>
                             {/if}
-                            {testing ? "测试中..." : "测试"}
+                            {testing ? $_('ai_settings_page.testing') : $_('ai_settings_page.test')}
                         </button>
                     </div>
                 {:else if activeTab === "advanced"}
@@ -489,7 +467,7 @@
                                 class="w-full border border-slate-200 rounded px-2 py-1.5 text-sm"
                             />
                             <div class="text-[10px] text-slate-400 mt-1">
-                                控制回复的随机性 (0-2)
+                                {$_('ai_settings_page.rand_hint')}
                             </div>
                         </div>
                         <div>
@@ -504,7 +482,7 @@
                                 class="w-full border border-slate-200 rounded px-2 py-1.5 text-sm"
                             />
                             <div class="text-[10px] text-slate-400 mt-1">
-                                最大输出长度
+                                {$_('ai_settings_page.max_tokens')}
                             </div>
                         </div>
                     </div>
@@ -513,36 +491,28 @@
                         <div
                             class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800"
                         >
-                            <div class="font-bold mb-1">可用变量：</div>
-                            <code class="bg-amber-100 px-1 rounded"
-                                >{"{{time}}"}</code
-                            >
-                            当前时间 |
-                            <code class="bg-amber-100 px-1 rounded"
-                                >{"{{tasks}}"}</code
-                            >
-                            任务列表 |
-                            <code class="bg-amber-100 px-1 rounded"
-                                >{"{{type}}"}</code
-                            > 报告类型
+                            <div class="font-bold mb-1">{$_('ai_settings_page.vars_hint')}</div>
+                            <code class="bg-amber-100 px-1 rounded font-bold text-amber-900">{'{'}{'{'}{"time"}{'}'}{'}'}</code>
+                            <code class="bg-amber-100 px-1 rounded font-bold text-amber-900 ml-1">{'{'}{'{'}{"tasks"}{'}'}{'}'}</code>
+                            <code class="bg-amber-100 px-1 rounded font-bold text-amber-900 ml-1">{'{'}{'{'}{"type"}{'}'}{'}' }</code>
                         </div>
                         <div>
                             <div class="flex items-center justify-between mb-2">
                                 <label
                                     class="text-xs font-bold text-slate-500 uppercase"
-                                    >日报提示词模板</label
+                                    >{$_('ai_settings_page.daily_prompt')}</label
                                 >
                                 <button
                                     on:click={resetDailyPrompt}
                                     class="text-xs text-blue-500 hover:text-blue-700"
                                 >
-                                    使用默认模板
+                                    {$_('ai_settings_page.use_default')}
                                 </button>
                             </div>
                             <textarea
                                 bind:value={dailyPrompt}
                                 rows="6"
-                                placeholder="留空则使用默认模板..."
+                                placeholder={$_('ai_settings_page.prompt_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-rose-400 font-mono resize-none"
                             ></textarea>
                         </div>
@@ -550,19 +520,19 @@
                             <div class="flex items-center justify-between mb-2">
                                 <label
                                     class="text-xs font-bold text-slate-500 uppercase"
-                                    >周报提示词模板</label
+                                    >{$_('ai_settings_page.weekly_prompt')}</label
                                 >
                                 <button
                                     on:click={resetWeeklyPrompt}
                                     class="text-xs text-blue-500 hover:text-blue-700"
                                 >
-                                    使用默认模板
+                                    {$_('ai_settings_page.use_default')}
                                 </button>
                             </div>
                             <textarea
                                 bind:value={weeklyPrompt}
                                 rows="6"
-                                placeholder="留空则使用默认模板..."
+                                placeholder={$_('ai_settings_page.prompt_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-rose-400 font-mono resize-none"
                             ></textarea>
                         </div>
@@ -576,12 +546,12 @@
                 <button
                     on:click={handleClose}
                     class="px-3 md:px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-xs md:text-sm"
-                    >取消</button
+                    >{$_('ai_settings_page.cancel')}</button
                 >
                 <button
                     on:click={handleSave}
                     class="px-4 md:px-6 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 text-xs md:text-sm font-bold shadow"
-                    >保存配置</button
+                    >{$_('ai_settings_page.save')}</button
                 >
             </div>
         </div>

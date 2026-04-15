@@ -12,6 +12,8 @@
     import { exportToCSV, exportToEncryptedJSON } from "../utils/export.js";
     import { onMount, onDestroy, tick } from "svelte";
     import CryptoJS from "crypto-js";
+    import { _ } from 'svelte-i18n';
+    import { get as getI18n } from 'svelte/store';
 
     let masterPassword = "";
     let confirmPassword = "";
@@ -22,7 +24,7 @@
     let showEditModal = false;
     let showExportModal = false;
     let searchQuery = "";
-    let selectedCategory = "全部";
+    let selectedCategory = "__ALL__";
     let showPasswordValue = {};
     let editingPassword = null;
     let showSidebar = false;
@@ -56,8 +58,7 @@ let confirmNewMasterPassword = "";
         username: "",
         password: "",
         url: "",
-        category: "默认",
-        notes: "",
+        category: getI18n(_)('passwords.categories.default') || 'Default',        notes: "",
     };
 
     let passwordGenOptions = {
@@ -149,18 +150,19 @@ let confirmNewMasterPassword = "";
     }
 
     function setupMasterPassword() {
+        const t = getI18n(_);
         if (masterPassword.length < 8) {
             showAlert({
-                title: "密码太短",
-                message: "主密码至少需要8个字符",
+                title: t('common.warning'),
+                message: t('passwords.master_too_short'),
                 variant: "warning",
             });
             return;
         }
         if (masterPassword !== confirmPassword) {
             showAlert({
-                title: "密码不匹配",
-                message: "两次输入的密码不一致",
+                title: t('common.warning'),
+                message: t('passwords.master_mismatch'),
                 variant: "warning",
             });
             return;
@@ -172,26 +174,27 @@ let confirmNewMasterPassword = "";
     }
 
     function unlockVault() {
+        const t = getI18n(_);
         if (passwordsStore.unlock(unlockPassword)) {
             showUnlockModal = false;
             unlockPassword = "";
             decryptedCache = {};
         } else {
             showAlert({
-                title: "密码错误",
-                message: "主密码不正确",
+                title: t('common.warning'),
+                message: t('passwords.master_wrong'),
                 variant: "danger",
             });
         }
     }
 
     async function handleForgotPassword() {
+        const t = getI18n(_);
         const confirmed = await showConfirm({
-            title: "忘记密码",
-            message:
-                "忘记密码将清除所有密码数据，此操作无法恢复！\n\n确定要清除所有数据吗？",
-            confirmText: "清除数据",
-            cancelText: "返回",
+            title: t('passwords.clear_title'),
+            message: t('passwords.clear_confirm'),
+            confirmText: t('passwords.clear_confirm_btn'),
+            cancelText: t('common.cancel'),
             variant: "danger",
         });
         if (confirmed) {
@@ -199,7 +202,7 @@ let confirmNewMasterPassword = "";
             showUnlockModal = false;
             showSetupModal = true;
             decryptedCache = {};
-            showToast({ message: "所有数据已清空", type: "info" });
+            showToast({ message: t('settings.clear_success'), type: "info" });
         } else {
             showUnlockModal = false;
             currentView.set("dashboard");
@@ -225,24 +228,25 @@ let confirmNewMasterPassword = "";
             username: "",
             password: "",
             url: "",
-            category: "默认",
+            category: getI18n(_)('passwords.categories.default') || 'Default',
             notes: "",
         };
         showAddModal = true;
     }
 
     function addPassword() {
+        const t = getI18n(_);
         if (!newPassword.title || !newPassword.password) {
             showAlert({
-                title: "信息不完整",
-                message: "标题和密码不能为空",
+                title: t('common.warning'),
+                message: t('passwords.title_required'),
                 variant: "warning",
             });
             return;
         }
         passwordsStore.addPassword(newPassword);
         showAddModal = false;
-        showToast({ message: "密码已添加", type: "success" });
+        showToast({ message: t('passwords.password_added'), type: "success" });
     }
 
     function openEditModal(password) {
@@ -254,10 +258,11 @@ let confirmNewMasterPassword = "";
     }
 
     function updatePassword() {
+        const t = getI18n(_);
         if (!editingPassword.title || !editingPassword.password) {
             showAlert({
-                title: "信息不完整",
-                message: "标题和密码不能为空",
+                title: t('common.warning'),
+                message: t('passwords.title_required'),
                 variant: "warning",
             });
             return;
@@ -266,15 +271,16 @@ let confirmNewMasterPassword = "";
         delete decryptedCache[editingPassword.id];
         showEditModal = false;
         editingPassword = null;
-        showToast({ message: "密码已更新", type: "success" });
+        showToast({ message: t('passwords.password_updated'), type: "success" });
     }
 
     async function deletePassword(id) {
+        const t = getI18n(_);
         const confirmed = await showConfirm({
-            title: "删除密码",
-            message: "确定要删除这条密码记录吗？",
-            confirmText: "删除",
-            cancelText: "取消",
+            title: t('passwords.delete_password'),
+            message: t('passwords.delete_confirm'),
+            confirmText: t('common.delete'),
+            cancelText: t('common.cancel'),
             variant: "danger",
         });
         if (confirmed) {
@@ -283,7 +289,7 @@ let confirmNewMasterPassword = "";
             selectedPasswordIds = selectedPasswordIds;
             delete decryptedCache[id];
             delete showPasswordValue[id];
-            showToast({ message: "密码已删除", type: "success" });
+            showToast({ message: t('passwords.password_deleted'), type: "success" });
         }
     }
 
@@ -310,7 +316,7 @@ let confirmNewMasterPassword = "";
     function copyToClipboard(text) {
         if (navigator.clipboard) {
             navigator.clipboard.writeText(text);
-            showToast({ message: "已复制到剪贴板", type: "success" });
+            showToast({ message: getI18n(_)('common.copied'), type: "success" });
         }
     }
 
@@ -350,10 +356,11 @@ let confirmNewMasterPassword = "";
     }
 
     function openExportModal() {
+        const t = getI18n(_);
         if (selectMode && selectedPasswordIds.size === 0) {
             showAlert({
-                title: "未选择密码",
-                message: "请至少选择一条密码记录",
+                title: t('passwords.no_selected'),
+                message: t('passwords.select_first'),
                 variant: "warning",
             });
             return;
@@ -380,10 +387,11 @@ let confirmNewMasterPassword = "";
 }
 
 async function handleChangeMasterPassword() {
+    const t = getI18n(_);
     if (!oldMasterPassword) {
         showAlert({
-            title: "请输入原密码",
-            message: "请输入当前的主密码",
+            title: t('passwords.enter_master_title'),
+            message: t('passwords.enter_master'),
             variant: "warning",
         });
         return;
@@ -391,8 +399,8 @@ async function handleChangeMasterPassword() {
 
     if (newMasterPassword.length < 8) {
         showAlert({
-            title: "密码太短",
-            message: "新密码至少需要8个字符",
+            title: t('passwords.password_too_short_title'),
+            message: t('passwords.master_too_short'),
             variant: "warning",
         });
         return;
@@ -400,15 +408,15 @@ async function handleChangeMasterPassword() {
 
     if (newMasterPassword !== confirmNewMasterPassword) {
         showAlert({
-            title: "密码不匹配",
-            message: "两次输入的新密码不一致",
+            title: t('passwords.password_mismatch_title'),
+            message: t('passwords.master_mismatch'),
             variant: "warning",
         });
         return;
     }
 
-    const result = passwordsStore.changeMasterPassword(oldMasterPassword, newMasterPassword);
-    
+    const result = await passwordsStore.changeMasterPassword(oldMasterPassword, newMasterPassword);
+
     if (result.success) {
         showChangeMasterPasswordModal = false;
         oldMasterPassword = "";
@@ -416,10 +424,10 @@ async function handleChangeMasterPassword() {
         confirmNewMasterPassword = "";
         decryptedCache = {};
         showPasswordValue = {};
-        showToast({ message: "主密码修改成功", type: "success" });
+        showToast({ message: t('passwords.master_changed'), type: "success" });
     } else {
         showAlert({
-            title: "修改失败",
+            title: t('passwords.change_failed'),
             message: result.error,
             variant: "danger",
         });
@@ -432,6 +440,7 @@ async function handleChangeMasterPassword() {
     }
 
     async function handleExport(format, useEncryption = false) {
+        const t = getI18n(_);
         showExportModal = false;
         const idsToExport =
             selectMode && selectedPasswordIds.size > 0
@@ -439,7 +448,7 @@ async function handleChangeMasterPassword() {
                 : null;
         const decrypted = passwordsStore.getDecryptedPasswords(idsToExport);
         if (decrypted.length === 0) {
-            showToast({ message: "没有可导出的数据", type: "warning" });
+            showToast({ message: t('passwords.no_export'), type: "warning" });
             return;
         }
         const masterPass = useEncryption
@@ -477,11 +486,12 @@ async function handleChangeMasterPassword() {
                 selectMode = false;
             }
         } catch (e) {
-            showToast({ message: "导出失败: " + e.message, type: "error" });
+            showToast({ message: t('passwords.export_failed', { values: { error: e.message } }), type: "error" });
         }
     }
 
     async function handleImportFile(event) {
+        const t = getI18n(_);
         const file = event.target.files?.[0];
         if (!file) return;
         isImporting = true;
@@ -495,12 +505,12 @@ async function handleChangeMasterPassword() {
                 await importFromJSON(file);
             } else {
                 showToast({
-                    message: "不支持的文件格式，支持 Excel、CSV、JSON",
+                    message: t('passwords.unsupported_format'),
                     type: "error",
                 });
             }
         } catch (e) {
-            showToast({ message: "导入失败: " + e.message, type: "error" });
+            showToast({ message: t('passwords.import_failed', { values: { error: e.message } }), type: "error" });
         } finally {
             isImporting = false;
             if (importFileInput) importFileInput.value = "";
@@ -508,6 +518,7 @@ async function handleChangeMasterPassword() {
     }
 
     async function importFromExcel(file) {
+        const t = getI18n(_);
         const ExcelJS = await import("exceljs");
         const workbook = new ExcelJS.Workbook();
         const buffer = await file.arrayBuffer();
@@ -515,7 +526,7 @@ async function handleChangeMasterPassword() {
 
         const worksheet = workbook.worksheets[0];
         if (!worksheet) {
-            showToast({ message: "Excel 文件为空", type: "error" });
+            showToast({ message: t('passwords.excel_empty'), type: "error" });
             return;
         }
 
@@ -548,10 +559,11 @@ async function handleChangeMasterPassword() {
     }
 
     async function importFromCSV(file) {
+        const t = getI18n(_);
         const text = await file.text();
         const lines = text.split("\n").filter((line) => line.trim());
         if (lines.length < 2) {
-            showToast({ message: "CSV 文件为空", type: "error" });
+            showToast({ message: t('passwords.csv_empty'), type: "error" });
             return;
         }
         const headers = parseCSVLine(lines[0]);
@@ -592,6 +604,7 @@ async function handleChangeMasterPassword() {
     }
 
     async function importFromJSON(file) {
+        const t = getI18n(_);
         const text = await file.text();
         try {
             const json = JSON.parse(text);
@@ -603,17 +616,18 @@ async function handleChangeMasterPassword() {
             } else if (Array.isArray(json)) {
                 await processImportedDataAsync(json);
             } else {
-                showToast({ message: "JSON 格式不正确", type: "error" });
+                showToast({ message: t('passwords.json_invalid'), type: "error" });
             }
         } catch (e) {
             showToast({
-                message: "JSON 解析失败: " + e.message,
+                message: t('passwords.json_parse_failed', { values: { error: e.message } }),
                 type: "error",
             });
         }
     }
 
     function verifyImportPassword() {
+        const t = getI18n(_);
         if (!importPasswordInput || !importData) return;
         try {
             const decrypted = CryptoJS.AES.decrypt(
@@ -621,7 +635,7 @@ async function handleChangeMasterPassword() {
                 importPasswordInput,
             ).toString(CryptoJS.enc.Utf8);
             if (!decrypted) {
-                throw new Error("解密失败");
+                throw new Error(t('passwords.decrypt_failed'));
             }
             const data = JSON.parse(decrypted);
             showImportPasswordModal = false;
@@ -633,7 +647,7 @@ async function handleChangeMasterPassword() {
             importAttempts++;
             if (importAttempts >= 3) {
                 showToast({
-                    message: "密码错误次数过多，请重新选择文件",
+                    message: t('passwords.too_many_attempts'),
                     type: "error",
                 });
                 showImportPasswordModal = false;
@@ -641,7 +655,7 @@ async function handleChangeMasterPassword() {
                 importAttempts = 0;
             } else {
                 showToast({
-                    message: `密码错误，还剩 ${3 - importAttempts} 次机会`,
+                    message: t('passwords.wrong_password', { values: { remaining: 3 - importAttempts } }),
                     type: "error",
                 });
             }
@@ -657,11 +671,13 @@ async function handleChangeMasterPassword() {
     }
 
     async function processImportedDataAsync(data) {
+        const t = getI18n(_);
         if (!Array.isArray(data) || data.length === 0) {
-            showToast({ message: "没有可导入的数据", type: "warning" });
+            showToast({ message: t('passwords.no_import_data'), type: "warning" });
             return;
         }
 
+        const defaultCategory = t('passwords.categories.default') || 'Default';
         const validEntries = data
             .filter((item) => {
                 const title =
@@ -693,7 +709,7 @@ async function handleChangeMasterPassword() {
                 password: item.password || item["密码"] || item.Password || "",
                 url: item.url || item["网址"] || item.URL || item.Url || "",
                 category:
-                    item.category || item["分类"] || item.Category || "默认",
+                    item.category || item["分类"] || item.Category || defaultCategory,
                 notes:
                     item.notes ||
                     item["备注"] ||
@@ -704,7 +720,7 @@ async function handleChangeMasterPassword() {
             }));
 
         if (validEntries.length === 0) {
-            showToast({ message: "没有有效的密码记录可导入", type: "warning" });
+            showToast({ message: t('passwords.import_empty'), type: "warning" });
             return;
         }
 
@@ -731,19 +747,20 @@ async function handleChangeMasterPassword() {
 
         if (imported > 0) {
             showToast({
-                message: `成功导入 ${imported} 条密码记录`,
+                message: t('passwords.import_success', { values: { count: imported } }),
                 type: "success",
             });
         }
     }
 
     async function clearAllPasswords() {
+        const t = getI18n(_);
         closeExportMenu();
         const confirmed = await showConfirm({
-            title: "清空所有密码",
-            message: "警告：此操作将永久删除所有密码记录和主密码，无法恢复！",
-            confirmText: "确认清空",
-            cancelText: "取消",
+            title: t('passwords.clear_title'),
+            message: t('passwords.clear_confirm'),
+            confirmText: t('passwords.clear_confirm_btn'),
+            cancelText: t('common.cancel'),
             variant: "danger",
         });
         if (confirmed) {
@@ -751,7 +768,7 @@ async function handleChangeMasterPassword() {
             showSetupModal = true;
             decryptedCache = {};
             showPasswordValue = {};
-            showToast({ message: "所有数据已清空", type: "info" });
+            showToast({ message: t('passwords.all_cleared'), type: "info" });
         }
     }
 
@@ -764,10 +781,11 @@ async function handleChangeMasterPassword() {
     }
 
     function toggleRememberSession() {
+        const t = getI18n(_);
         closeExportMenu();
         passwordsStore.setRememberSession(!$rememberSession);
         showToast({
-            message: $rememberSession ? "已开启会话记忆" : "已关闭会话记忆",
+            message: $rememberSession ? t('passwords.session_on') : t('passwords.session_off'),
             type: "info",
         });
     }
@@ -778,7 +796,7 @@ async function handleChangeMasterPassword() {
             p.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
             p.url.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesCategory =
-            selectedCategory === "全部" || p.category === selectedCategory;
+            selectedCategory === "__ALL__" || p.category === selectedCategory;
         return matchesSearch && matchesCategory;
     });
 
@@ -833,13 +851,13 @@ async function handleChangeMasterPassword() {
             {/if}
             <div>
                 <h2 class="text-base md:text-lg font-bold text-amber-800">
-                    密码记录本
+                    {$_('passwords.title')}
                 </h2>
                 <div class="text-[10px] md:text-xs text-slate-500">
                     {#if $isPasswordsUnlocked}
-                        共 {filteredPasswords.length} 条
+                        {$_('passwords.count', { values: { count: filteredPasswords.length } })}
                     {:else}
-                        加密存储
+                        {$_('passwords.subtitle')}
                     {/if}
                 </div>
             </div>
@@ -851,16 +869,16 @@ async function handleChangeMasterPassword() {
                         on:click={selectAllPasswords}
                         class="h-9 px-3 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-xs font-bold"
                     >
-                        全选
+                        {$_('common.select_all')}
                     </button>
                     <button
                         on:click={deselectAllPasswords}
                         class="h-9 px-3 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-bold"
                     >
-                        取消
+                        {$_('common.cancel')}
                     </button>
                     <span class="text-xs text-slate-500"
-                        >已选 {selectedPasswordIds.size}</span
+                        >{selectedPasswordIds.size}</span
                     >
                 {:else}
                     <button
@@ -868,7 +886,7 @@ async function handleChangeMasterPassword() {
                         class="h-9 px-3 md:px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow-md flex items-center gap-1 md:gap-2"
                     >
                         <i class="ph-bold ph-plus"></i>
-                        <span class="hidden md:inline">新建</span>
+                        <span class="hidden md:inline">{$_('common.new')}</span>
                     </button>
                 {/if}
                 <div class="relative">
@@ -889,54 +907,46 @@ async function handleChangeMasterPassword() {
                                 <i
                                     class="ph ph-check-square text-lg text-blue-600"
                                 ></i>
-                                {selectMode ? "退出选择" : "选择导出"}
+                                {selectMode ? $_('passwords.exit_select') : $_('passwords.select_export')}
                             </button>
                             <button
                                 on:click={openExportModal}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
                             >
-                                <i class="ph ph-export text-lg text-green-600"
-                                ></i> 导出密码
+                                <i class="ph ph-export text-lg text-green-600"></i> {$_('passwords.export_passwords')}
                             </button>
                             <button
                                 on:click={triggerImport}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
                             >
-                                <i
-                                    class="ph ph-download text-lg text-purple-600"
-                                ></i> 导入密码
+                                <i class="ph ph-download text-lg text-purple-600"></i> {$_('passwords.import_passwords')}
                             </button>
                             <button
-    on:click={openChangeMasterPasswordModal}
-    class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
->
-    <i class="ph ph-password text-lg text-blue-600"></i>
-    修改主密码
-</button>
+                                on:click={openChangeMasterPasswordModal}
+                                class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                            >
+                                <i class="ph ph-password text-lg text-blue-600"></i>
+                                {$_('passwords.change_master')}
+                            </button>
                             <hr class="my-1 border-slate-100" />
                             <button
                                 on:click={toggleRememberSession}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
                             >
-                                <i
-                                    class="ph {$rememberSession
-                                        ? 'ph-check-square'
-                                        : 'ph-square'} text-lg text-indigo-600"
-                                ></i>
-                                记住会话
+                                <i class="ph {$rememberSession ? 'ph-check-square' : 'ph-square'} text-lg text-indigo-600"></i>
+                                {$_('passwords.remember_session')}
                             </button>
                             <button
                                 on:click={lockVault}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
                             >
-                                <i class="ph ph-lock text-lg text-slate-500"
-                                ></i> 锁定
+                                <i class="ph ph-lock text-lg text-slate-500"></i> {$_('passwords.lock')}
                             </button>
                             <button
                                 on:click={clearAllPasswords}
                                 class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
                             >
-                                <i class="ph ph-trash text-lg"></i> 清空所有
+                                <i class="ph ph-trash text-lg"></i> {$_('passwords.clear_all')}
                             </button>
                         </div>
                     {/if}
@@ -949,7 +959,7 @@ async function handleChangeMasterPassword() {
         <div class="bg-purple-50 border-b border-purple-200 px-4 py-3">
             <div class="flex items-center justify-between mb-2">
                 <span class="text-sm text-purple-700 font-bold"
-                    >正在导入密码...</span
+                    >{$_('passwords.importing')}</span
                 >
                 <span class="text-xs text-purple-600"
                     >{importProgress} / {importTotal}</span
@@ -985,21 +995,21 @@ async function handleChangeMasterPassword() {
                     <input
                         type="text"
                         bind:value={searchQuery}
-                        placeholder="搜索..."
+                        placeholder={$_('common.search')}
                         class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-400"
                     />
                 </div>
                 <div class="flex-1 overflow-y-auto py-2">
                     <button
-                        on:click={() => selectCategory("全部")}
+                        on:click={() => selectCategory("__ALL__")}
                         class="w-full text-left px-4 py-2.5 text-sm transition"
-                        class:bg-amber-50={selectedCategory === "全部"}
-                        class:text-amber-700={selectedCategory === "全部"}
-                        class:font-bold={selectedCategory === "全部"}
-                        class:text-slate-600={selectedCategory !== "全部"}
-                        class:hover:bg-slate-50={selectedCategory !== "全部"}
+                        class:bg-amber-50={selectedCategory === "__ALL__"}
+                        class:text-amber-700={selectedCategory === "__ALL__"}
+                        class:font-bold={selectedCategory === "__ALL__"}
+                        class:text-slate-600={selectedCategory !== "__ALL__"}
+                        class:hover:bg-slate-50={selectedCategory !== "__ALL__"}
                     >
-                        <i class="ph ph-folder-open mr-2"></i> 全部
+                        <i class="ph ph-folder-open mr-2"></i> {$_('common.all')}
                     </button>
                     {#each $passwordCategories as category}
                         <button
@@ -1029,13 +1039,13 @@ async function handleChangeMasterPassword() {
                     >
                         <div class="text-center">
                             <i class="ph ph-key text-5xl mb-4"></i>
-                            <p class="text-lg font-bold">暂无密码记录</p>
+                            <p class="text-lg font-bold">{$_('passwords.no_records')}</p>
                             {#if isMobile}
                                 <button
                                     on:click={() => (showSidebar = true)}
                                     class="mt-4 text-amber-600 font-bold text-sm"
                                 >
-                                    <i class="ph ph-funnel"></i> 筛选分类
+                                    <i class="ph ph-funnel"></i> {$_('passwords.filter_category')}
                                 </button>
                             {/if}
                         </div>
@@ -1120,7 +1130,7 @@ async function handleChangeMasterPassword() {
                                                 ? 'text-slate-400 italic'
                                                 : ''}"
                                         >
-                                            {password.username || "未设置"}
+                                            {password.username || $_('passwords.not_set')}
                                         </span>
                                         {#if password.username}
                                             <button
@@ -1226,11 +1236,11 @@ async function handleChangeMasterPassword() {
                                     <i
                                         class="ph ph-spinner animate-spin text-xl"
                                     ></i>
-                                    <span class="text-sm">加载中...</span>
+                                    <span class="text-sm">{$_('common.loading')}</span>
                                 </div>
                             {:else}
                                 <div class="text-sm text-slate-400">
-                                    向下滚动加载更多
+                                    {$_('passwords.scroll_more')}
                                 </div>
                             {/if}
                         </div>
@@ -1251,33 +1261,33 @@ async function handleChangeMasterPassword() {
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
-                <i class="ph-fill ph-lock text-purple-600"></i> 输入导入密码
+                <i class="ph-fill ph-lock text-purple-600"></i> {$_('passwords.import_password_title')}
             </h3>
             <p class="text-sm text-slate-600 mb-4">
-                检测到加密的 JSON 文件，请输入密码解密：
+                {$_('passwords.import_password_desc')}
             </p>
             <input
                 type="password"
                 bind:value={importPasswordInput}
                 on:keydown={(e) => e.key === "Enter" && verifyImportPassword()}
-                placeholder="输入导出时设置的密码"
+                placeholder={$_('passwords.import_password_placeholder')}
                 class="w-full border border-slate-200 rounded-lg px-3 py-2.5 mb-3 focus:outline-none focus:border-purple-400"
             />
             <p class="text-xs text-slate-500 mb-4">
-                剩余尝试次数：{3 - importAttempts}
+                {$_('passwords.remaining_attempts', { values: { remaining: 3 - importAttempts } })}
             </p>
             <div class="flex gap-3">
                 <button
                     on:click={cancelImportPassword}
                     class="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
                 >
-                    取消
+                    {$_('common.cancel')}
                 </button>
                 <button
                     on:click={verifyImportPassword}
                     class="flex-1 py-2.5 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700"
                 >
-                    解密导入
+                    {$_('passwords.decrypt_import')}
                 </button>
             </div>
         </div>
@@ -1292,12 +1302,12 @@ async function handleChangeMasterPassword() {
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
-                <i class="ph-fill ph-export text-amber-600"></i> 导出密码
+                <i class="ph-fill ph-export text-amber-600"></i> {$_('passwords.export_title')}
             </h3>
             <p class="text-sm text-slate-600 mb-4">
                 {selectMode && selectedPasswordIds.size > 0
-                    ? `将导出 ${selectedPasswordIds.size} 条选中的密码记录`
-                    : `将导出全部 ${$passwordsList.length} 条密码记录`}
+                    ? $_('passwords.export_selected_count', { values: { count: selectedPasswordIds.size } })
+                    : $_('passwords.export_all_count', { values: { count: $passwordsList.length } })}
             </p>
             <div class="space-y-3 mb-6">
                 <button
@@ -1306,9 +1316,9 @@ async function handleChangeMasterPassword() {
                 >
                     <i class="ph ph-file-csv text-2xl text-green-600"></i>
                     <div class="flex-1 text-left">
-                        <div class="font-bold text-slate-700">CSV 格式</div>
+                        <div class="font-bold text-slate-700">{$_('passwords.csv_format')}</div>
                         <div class="text-xs text-slate-500">
-                            Excel兼容，明文存储
+                            {$_('passwords.csv_desc')}
                         </div>
                     </div>
                 </button>
@@ -1318,8 +1328,8 @@ async function handleChangeMasterPassword() {
                 >
                     <i class="ph ph-lock text-2xl text-amber-600"></i>
                     <div class="flex-1 text-left">
-                        <div class="font-bold text-slate-700">加密JSON</div>
-                        <div class="text-xs text-slate-500">使用主密码加密</div>
+                        <div class="font-bold text-slate-700">{$_('passwords.encrypted_json')}</div>
+                        <div class="text-xs text-slate-500">{$_('passwords.encrypted_json_desc')}</div>
                     </div>
                 </button>
             </div>
@@ -1327,7 +1337,7 @@ async function handleChangeMasterPassword() {
                 on:click={() => (showExportModal = false)}
                 class="w-full py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
             >
-                取消
+                {$_('common.cancel')}
             </button>
         </div>
     </div>
@@ -1341,33 +1351,33 @@ async function handleChangeMasterPassword() {
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
-                <i class="ph-fill ph-lock-key text-amber-600"></i> 设置主密码
+                <i class="ph-fill ph-lock-key text-amber-600"></i> {$_('passwords.setup_title')}
             </h3>
             <p class="text-sm text-slate-600 mb-4">
-                主密码用于加密所有密码记录，请妥善保管，丢失后无法恢复！
+                {$_('passwords.setup_desc')}
             </p>
             <div class="space-y-3">
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >主密码（至少8位）</label
+                        >{$_('passwords.master_label')}</label
                     >
                     <input
                         type="password"
                         bind:value={masterPassword}
-                        placeholder="输入主密码"
+                        placeholder={$_('passwords.master_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-amber-400"
                     />
                 </div>
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >确认密码</label
+                        >{$_('passwords.confirm_label')}</label
                     >
                     <input
                         type="password"
                         bind:value={confirmPassword}
-                        placeholder="再次输入主密码"
+                        placeholder={$_('passwords.confirm_placeholder')}
                         on:keydown={(e) =>
                             e.key === "Enter" && setupMasterPassword()}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-amber-400"
@@ -1378,7 +1388,7 @@ async function handleChangeMasterPassword() {
                 on:click={setupMasterPassword}
                 class="w-full mt-4 py-3 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
             >
-                创建主密码
+                {$_('passwords.create_master')}
             </button>
         </div>
     </div>
@@ -1392,19 +1402,19 @@ async function handleChangeMasterPassword() {
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
-                <i class="ph-fill ph-lock text-amber-600"></i> 解锁密码库
+                <i class="ph-fill ph-lock text-amber-600"></i> {$_('passwords.unlock_title')}
             </h3>
             <div class="space-y-3">
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >主密码</label
+                        >{$_('passwords.label_password')}</label
                     >
                     <input
                         type="password"
                         bind:value={unlockPassword}
                         on:keydown={(e) => e.key === "Enter" && unlockVault()}
-                        placeholder="输入主密码"
+                        placeholder={$_('passwords.master_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-amber-400"
                     />
                 </div>
@@ -1413,13 +1423,13 @@ async function handleChangeMasterPassword() {
                 on:click={unlockVault}
                 class="w-full mt-4 py-3 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
             >
-                解锁
+                {$_('passwords.unlock')}
             </button>
             <button
                 on:click={handleForgotPassword}
                 class="w-full mt-3 py-2 text-slate-500 hover:text-red-600 text-sm font-bold"
             >
-                忘记密码？
+                {$_('passwords.forgot_password')}
             </button>
         </div>
     </div>
@@ -1432,24 +1442,24 @@ async function handleChangeMasterPassword() {
         <div
             class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
         >
-            <h3 class="text-xl font-bold text-slate-800 mb-4">新建密码</h3>
+            <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.new_title')}</h3>
             <div class="space-y-3">
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >标题 *</label
+                        >{$_('passwords.label_title')} {$_('passwords.required_mark')}</label
                     >
                     <input
                         type="text"
                         bind:value={newPassword.title}
-                        placeholder="例如：Google 账号"
+                        placeholder={$_('passwords.title_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
                     />
                 </div>
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >用户名/邮箱</label
+                        >{$_('passwords.label_username')}</label
                     >
                     <input
                         type="text"
@@ -1462,25 +1472,25 @@ async function handleChangeMasterPassword() {
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block flex justify-between items-center"
                     >
-                        <span>密码 *</span>
+                        <span>{$_('passwords.label_password')} {$_('passwords.required_mark')}</span>
                         <button
                             on:click={() => generateNewPassword("new")}
                             class="text-blue-600 text-xs font-bold"
                         >
-                            <i class="ph ph-magic-wand"></i> 生成
+                            <i class="ph ph-magic-wand"></i> {$_('common.generate')}
                         </button>
                     </label>
                     <input
                         type="text"
                         bind:value={newPassword.password}
-                        placeholder="密码"
+                        placeholder={$_('passwords.password_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400 font-mono"
                     />
                 </div>
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >网址</label
+                        >{$_('passwords.label_url')}</label
                     >
                     <input
                         type="url"
@@ -1492,7 +1502,7 @@ async function handleChangeMasterPassword() {
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >分类</label
+                        >{$_('passwords.label_category')}</label
                     >
                     <select
                         bind:value={newPassword.category}
@@ -1506,12 +1516,12 @@ async function handleChangeMasterPassword() {
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >备注</label
+                        >{$_('passwords.label_notes')}</label
                     >
                     <textarea
                         bind:value={newPassword.notes}
                         rows="3"
-                        placeholder="其他信息..."
+                        placeholder={$_('passwords.notes_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400 resize-none"
                     ></textarea>
                 </div>
@@ -1521,13 +1531,13 @@ async function handleChangeMasterPassword() {
                     on:click={() => (showAddModal = false)}
                     class="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
                 >
-                    取消
+                    {$_('common.cancel')}
                 </button>
                 <button
                     on:click={addPassword}
                     class="flex-1 py-2.5 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
                 >
-                    保存
+                    {$_('common.save')}
                 </button>
             </div>
         </div>
@@ -1541,12 +1551,12 @@ async function handleChangeMasterPassword() {
         <div
             class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
         >
-            <h3 class="text-xl font-bold text-slate-800 mb-4">编辑密码</h3>
+            <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.edit_title')}</h3>
             <div class="space-y-3">
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >标题 *</label
+                        >{$_('passwords.label_title')} {$_('passwords.required_mark')}</label
                     >
                     <input
                         type="text"
@@ -1557,7 +1567,7 @@ async function handleChangeMasterPassword() {
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >用户名/邮箱</label
+                        >{$_('passwords.label_username')}</label
                     >
                     <input
                         type="text"
@@ -1569,12 +1579,12 @@ async function handleChangeMasterPassword() {
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block flex justify-between items-center"
                     >
-                        <span>密码 *</span>
+                        <span>{$_('passwords.label_password')} {$_('passwords.required_mark')}</span>
                         <button
                             on:click={() => generateNewPassword("edit")}
                             class="text-blue-600 text-xs font-bold"
                         >
-                            <i class="ph ph-magic-wand"></i> 生成
+                            <i class="ph ph-magic-wand"></i> {$_('common.generate')}
                         </button>
                     </label>
                     <input
@@ -1586,7 +1596,7 @@ async function handleChangeMasterPassword() {
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >网址</label
+                        >{$_('passwords.label_url')}</label
                     >
                     <input
                         type="url"
@@ -1597,7 +1607,7 @@ async function handleChangeMasterPassword() {
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >分类</label
+                        >{$_('passwords.label_category')}</label
                     >
                     <select
                         bind:value={editingPassword.category}
@@ -1611,7 +1621,7 @@ async function handleChangeMasterPassword() {
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >备注</label
+                        >{$_('passwords.label_notes')}</label
                     >
                     <textarea
                         bind:value={editingPassword.notes}
@@ -1628,13 +1638,13 @@ async function handleChangeMasterPassword() {
                     }}
                     class="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
                 >
-                    取消
+                    {$_('common.cancel')}
                 </button>
                 <button
                     on:click={updatePassword}
                     class="flex-1 py-2.5 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
                 >
-                    保存
+                    {$_('common.save')}
                 </button>
             </div>
         </div>
@@ -1649,44 +1659,44 @@ async function handleChangeMasterPassword() {
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
-                <i class="ph-fill ph-password text-blue-600"></i> 修改主密码
+                <i class="ph-fill ph-password text-blue-600"></i> {$_('passwords.change_master_title')}
             </h3>
             <div class="space-y-3">
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >原密码</label
+                        >{$_('passwords.old_password_label')}</label
                     >
                     <input
                         type="password"
                         bind:value={oldMasterPassword}
-                        placeholder="输入当前主密码"
+                        placeholder={$_('passwords.old_password_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-400"
                     />
                 </div>
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >新密码（至少8位）</label
+                        >{$_('passwords.new_password_label')}</label
                     >
                     <input
                         type="password"
                         bind:value={newMasterPassword}
-                        placeholder="输入新密码"
+                        placeholder={$_('passwords.new_password_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-400"
                     />
                 </div>
                 <div>
                     <label
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >确认新密码</label
+                        >{$_('passwords.confirm_new_label')}</label
                     >
                     <input
                         type="password"
                         bind:value={confirmNewMasterPassword}
                         on:keydown={(e) =>
                             e.key === "Enter" && handleChangeMasterPassword()}
-                        placeholder="再次输入新密码"
+                        placeholder={$_('passwords.confirm_new_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-400"
                     />
                 </div>
@@ -1696,13 +1706,13 @@ async function handleChangeMasterPassword() {
                     on:click={() => (showChangeMasterPasswordModal = false)}
                     class="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
                 >
-                    取消
+                    {$_('common.cancel')}
                 </button>
                 <button
                     on:click={handleChangeMasterPassword}
                     class="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700"
                 >
-                    确认修改
+                    {$_('passwords.confirm_change')}
                 </button>
             </div>
         </div>

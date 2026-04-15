@@ -91,14 +91,20 @@ fn get_app_version() -> String {
 #[tauri::command]
 async fn open_github(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
-        .open_url("https://github.com/MakotoArai-CN/WorkPlan-with-AI", None::<&str>)
+        .open_url(
+            "https://github.com/MakotoArai-CN/WorkPlan-with-AI",
+            None::<&str>,
+        )
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn open_releases(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
-        .open_url("https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases", None::<&str>)
+        .open_url(
+            "https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases",
+            None::<&str>,
+        )
         .map_err(|e| e.to_string())
 }
 
@@ -115,20 +121,6 @@ fn get_close_to_quit() -> bool {
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
-}
-
-#[tauri::command]
-async fn close_splashscreen(app: tauri::AppHandle) {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        if let Some(splashscreen) = app.get_webview_window("splashscreen") {
-            let _ = splashscreen.close();
-        }
-        if let Some(main_window) = app.get_webview_window("main") {
-            let _ = main_window.show();
-            let _ = main_window.set_focus();
-        }
-    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -148,8 +140,7 @@ pub fn run() {
             open_releases,
             set_close_to_quit,
             get_close_to_quit,
-            exit_app,
-            close_splashscreen
+            exit_app
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

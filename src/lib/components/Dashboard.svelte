@@ -2,6 +2,7 @@
     import { taskStore, viewDate, today, activeTasks, completedTasks, futurePreviews, activeTask } from '../stores/tasks.js';
     import { showAiPanel } from '../stores/ai.js';
     import TaskCard from './TaskCard.svelte';
+    import { _, locale } from 'svelte-i18n';
 
     export let openModal;
 
@@ -9,9 +10,11 @@
 
     $: dateInfo = (() => {
         const date = new Date($viewDate);
+        const lang = $locale || 'zh';
+        const localeCode = lang === 'zh' ? 'zh-CN' : lang === 'ja' ? 'ja-JP' : 'en-US';
         return {
-            date: date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }),
-            week: date.toLocaleDateString('zh-CN', { weekday: 'long' })
+            date: date.toLocaleDateString(localeCode, { month: 'long', day: 'numeric' }),
+            week: date.toLocaleDateString(localeCode, { weekday: 'long' })
         };
     })();
 
@@ -54,8 +57,8 @@
 
 <header class="h-16 bg-white/90 backdrop-blur px-2 md:px-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0 gap-2">
     <div class="shrink-0">
-        <h2 class="text-lg font-bold text-blue-800">今日看板</h2>
-        <div class="text-[10px] text-slate-400 hidden md:block">管理您的每日待办</div>
+        <h2 class="text-lg font-bold text-blue-800">{$_('dashboard.title')}</h2>
+        <div class="text-[10px] text-slate-400 hidden md:block">{$_('dashboard.subtitle')}</div>
     </div>
 
     <div class="flex items-center justify-center gap-1 md:gap-3 flex-1 min-w-0 overflow-hidden">
@@ -80,7 +83,7 @@
         {#if $viewDate !== $today}
             <button on:click={resetToToday}
                 class="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-md font-bold whitespace-nowrap shrink-0">
-                今
+                {$_('dashboard.today_btn')}
             </button>
         {/if}
     </div>
@@ -89,7 +92,7 @@
         <button on:click={toggleAll}
             class="h-8 w-8 md:h-9 md:w-auto md:px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-sm font-medium flex items-center justify-center gap-2 shrink-0">
             <i class={isAllExpanded ? 'ph ph-arrows-in-line-vertical' : 'ph ph-arrows-out-line-vertical'}></i>
-            <span class="hidden md:inline">{isAllExpanded ? '收起' : '展开'}</span>
+            <span class="hidden md:inline">{isAllExpanded ? $_('dashboard.collapse') : $_('dashboard.expand')}</span>
         </button>
         <button on:click={toggleAiPanel}
             class="h-9 px-3 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-sm font-bold flex items-center gap-1 border border-rose-100 transition-colors">
@@ -97,7 +100,7 @@
         </button>
         <button on:click={() => openModal()}
             class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md shadow-blue-200 flex items-center gap-2">
-            <i class="ph-bold ph-plus"></i>新建
+            <i class="ph-bold ph-plus"></i>{$_('dashboard.new_task')}
         </button>
     </div>
 </header>
@@ -106,7 +109,7 @@
     {#if $futurePreviews.length > 0}
         <div class="mb-6">
             <h3 class="text-xs font-bold text-teal-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <i class="ph-fill ph-calendar-plus"></i> 待自动生成
+                <i class="ph-fill ph-calendar-plus"></i> {$_('dashboard.auto_generate')}
                 <div class="h-px bg-teal-100 flex-1"></div>
             </h3>
             {#each $futurePreviews as task (task.id)}
@@ -124,7 +127,7 @@
     {#if $activeTasks.length === 0 && $completedTasks.length === 0 && $futurePreviews.length === 0}
         <div class="flex flex-col items-center justify-center h-64 text-slate-400">
             <i class="ph ph-coffee text-4xl mb-2"></i>
-            <p class="text-sm">今日无任务</p>
+            <p class="text-sm">{$_('dashboard.no_tasks')}</p>
         </div>
     {/if}
 
@@ -135,7 +138,7 @@
     {#if $completedTasks.length > 0}
         <div class="pt-8 pb-4">
             <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                <i class="ph-bold ph-archive"></i> 已完成
+                <i class="ph-bold ph-archive"></i> {$_('dashboard.completed')}
                 <div class="h-px bg-slate-200 flex-1"></div>
             </h3>
             <div class="space-y-2">

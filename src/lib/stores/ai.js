@@ -1,11 +1,10 @@
 import { writable, get } from 'svelte/store';
-import { isG4FProvider } from '../utils/g4f-client.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
 const PROVIDER_CONFIG_FIELDS = ['apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
 
 export const aiConfig = writable({
-    provider: 'g4f-default',
+    provider: '',
     apiKey: '',
     secretKey: '',
     model: 'auto',
@@ -76,7 +75,7 @@ async function normalizeProviderModel(providerId, providerInfo, providerConfig) 
 
 export function hydrateCurrentProviderConfig() {
     const current = get(aiConfig);
-    const providerId = current.provider || 'g4f-default';
+    const providerId = current.provider || '';
     const providerConfigs = current.providerConfigs || {};
     const cached = providerConfigs[providerId] || null;
     const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
@@ -94,7 +93,7 @@ export function hydrateCurrentProviderConfig() {
 
 export async function hydrateCurrentProviderConfigWithDefaults() {
     const current = get(aiConfig);
-    const providerId = current.provider || 'g4f-default';
+    const providerId = current.provider || '';
     const providerInfo = await getProviderInfoCached(providerId);
 
     const providerConfigs = current.providerConfigs || {};
@@ -116,7 +115,7 @@ export async function hydrateCurrentProviderConfigWithDefaults() {
 
 export async function switchProvider(newProviderId) {
     const current = get(aiConfig);
-    const prevProviderId = current.provider || 'g4f-default';
+    const prevProviderId = current.provider || '';
 
     const providerConfigsUpdated = mergeProviderConfigs(current.providerConfigs, prevProviderId, current);
 
@@ -147,7 +146,7 @@ export function loadAiConfig() {
         try {
             const parsed = JSON.parse(saved);
             const providerConfigs = parsed.providerConfigs || {};
-            const providerId = parsed.provider || 'g4f-default';
+            const providerId = parsed.provider || '';
 
             const cached = providerConfigs[providerId] || null;
             const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
@@ -185,7 +184,7 @@ export function loadAiConfig() {
 export function saveAiConfig() {
     if (typeof window === 'undefined') return;
     const current = get(aiConfig);
-    const providerId = current.provider || 'g4f-default';
+    const providerId = current.provider || '';
     const providerConfigsUpdated = mergeProviderConfigs(current.providerConfigs, providerId, current);
 
     const toSave = {
@@ -590,29 +589,16 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     const currentConfig = getEffectiveConfig();
     const subtaskOperation = detectSubtaskOperation(text);
     const lowerText = text.toLowerCase();
+    
     const createKeywords = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
     const isExplicitCreate = createKeywords.some(kw => lowerText.includes(kw));
-    const needsApiKey = !isG4FProvider(currentConfig.provider) &&
-        currentConfig.provider !== 'ollama' &&
-        currentConfig.provider !== 'lmstudio';
+    
+    const hasNoActionKeyword = !DELETE_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase())) &&
+                               !UPDATE_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase())) &&
+                               !QUERY_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase()));
 
-    const checkDuplicateWithTime = (taskTitle, existingTasks, dateInfo) => {
-        const lowerTitle = taskTitle.toLowerCase();
-        const matchingTasks = existingTasks.filter(t => 
-            t.title.toLowerCase().includes(lowerTitle) || 
-            lowerTitle.includes(t.title.toLowerCase())
-        );
-        
-        if (matchingTasks.length === 0) return { hasDuplicate: false };
-        
-        const incompleteDuplicates = matchingTasks.filter(t => t.status !== 'done');
-        if (incompleteDuplicates.length === 0) return { hasDuplicate: false };
-        
-        return {
-            hasDuplicate: true,
-            duplicateTasks: incompleteDuplicates
-        };
-    };
+    const needsApiKey = currentConfig.provider !== 'ollama' &&
+        currentConfig.provider !== 'lmstudio';
 
     if (needsApiKey && !currentConfig.apiKey) {
         showAiSettings.set(true);
@@ -647,7 +633,7 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
 
         if (subtaskOperation) {
             result = await analyzeSubtaskIntent(text, existingTasks, dateInfo, currentConfig, callAI);
-        } else if (isExplicitCreate) {
+        } else if (isExplicitCreate || hasNoActionKeyword) {
             result = await analyzeCreateIntent(text, existingTasks, dateInfo, currentConfig, callAI);
         } else if (operationType === 'mixed') {
             result = await analyzeMixedIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
@@ -728,10 +714,6 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
     const tomorrowStr = formatDateForAI(dateInfo.tomorrow);
     const dayAfterTomorrowStr = formatDateForAI(dateInfo.dayAfterTomorrow);
 
-    const existingTasksStr = existingTasks.length > 0
-        ? `\n\n【现有任务列表（仅供参考，不影响新增）】\n${existingTasks.map(t => formatFullTaskForAI(t)).join('\n')}`
-        : '';
-
     const systemPrompt = `你是一个智能任务管理助手。请根据用户的自然语言描述创建任务。
 
 【当前时间信息】
@@ -740,32 +722,28 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
 - 明天: ${tomorrowStr}
 - 后天: ${dayAfterTomorrowStr}
 - 本周: ${formatDateForAI(dateInfo.thisWeek.start)} 至 ${formatDateForAI(dateInfo.thisWeek.end)}
-${existingTasksStr}
 
-【核心规则 - 必须遵守】
-1. 这是一个新增任务的请求，必须创建新任务，绝对不能修改现有任务
-2. 即使现有任务中存在同名或相似的任务，也必须创建新任务
-3. 用户说"新增"、"添加"、"创建"时，一定是新建任务，不是修改
-4. 不要尝试去匹配或修改任何现有任务
+【核心规则 - 必须严格遵守】
+1. 这是一个【新增任务】的请求，必须创建新任务
+2. 绝对不能修改、更新、删除任何现有任务
+3. 不要检查是否存在同名任务，直接创建新任务
+4. 即使用户描述的任务与现有任务完全相同，也必须创建新任务
+5. 输出格式必须是创建任务的JSON格式
 
 【任务拆分规则】
 1. 如果用户描述包含多个不同的任务（不同时间或不同事项），必须拆分成多个独立任务对象
 2. 如果单个任务较复杂（包含多个步骤），需要创建子任务（subtasks）
+3. "下周一到下周五" 表示需要创建5个任务，每天一个
 
 【时间解析规则】
 - "上午" = 09:00, "中午" = 12:00, "下午" = 14:00, "傍晚" = 17:00, "晚上" = 19:00
 - 如果用户说"8点到10点"，date设为开始时间，deadline设为结束时间
 - 默认创建的是当前时间往后的任务，除非用户明确提到过去的时间
-- "下周一到下周五" 表示需要创建多个任务，每天一个
 
 【输出格式】
 严格只返回纯 JSON 格式，不要包含任何 markdown 标记或解释文字
-
-单任务:
-{"title":"任务标题","date":"YYYY-MM-DDTHH:mm","deadline":"YYYY-MM-DDTHH:mm或空字符串","priority":"normal|urgent|critical","note":"备注","subtasks":[{"title":"子任务名","status":"todo"}]}
-
-多任务:
-{"tasks":[{...},{...}]}
+单任务: {"title":"任务标题","date":"YYYY-MM-DDTHH:mm","deadline":"YYYY-MM-DDTHH:mm或空字符串","priority":"normal|urgent|critical","note":"备注","subtasks":[{"title":"子任务名","status":"todo"}]}
+多任务: {"tasks":[{...},{...}]}
 
 【priority说明】
 - normal: 普通任务
@@ -780,11 +758,12 @@ ${existingTasksStr}
         const jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
         const jsonStr = jsonMatch ? jsonMatch[0] : cleanJsonStr;
         const parsed = JSON.parse(jsonStr);
+
         const today = formatDateForAI(dateInfo.today);
 
         if (parsed.tasks && Array.isArray(parsed.tasks)) {
             const tasks = parsed.tasks.map((t, idx) => ({
-                id: (Date.now() + idx).toString(),
+                id: (Date.now() + idx).toString() + Math.random().toString(36).substr(2, 5),
                 title: t.title || '未命名任务',
                 date: t.date || today + 'T09:00',
                 deadline: t.deadline || '',
@@ -800,7 +779,7 @@ ${existingTasksStr}
         }
 
         return {
-            id: Date.now().toString(),
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
             title: parsed.title || '未命名任务',
             date: parsed.date || today + 'T09:00',
             deadline: parsed.deadline || '',
@@ -1375,8 +1354,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     if (!text.trim()) return;
 
     const currentConfig = getEffectiveConfig();
-    const needsApiKey = !isG4FProvider(currentConfig.provider) &&
-        currentConfig.provider !== 'ollama' &&
+    const needsApiKey = currentConfig.provider !== 'ollama' &&
         currentConfig.provider !== 'lmstudio';
 
     if (needsApiKey && !currentConfig.apiKey) {

@@ -13,10 +13,20 @@
     import { setupAndroidBackHandler, handleBackPress, showExitToast, popNavigation, getNavigationDepth, canGoBack } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
     import { get } from 'svelte/store';
+    import { setupI18n } from '$lib/i18n/index.js';
+    import { _, isLoading } from 'svelte-i18n';
 
     let unlistenBack = () => {};
+    let i18nReady = false;
 
     onMount(async () => {
+        setupI18n();
+        await new Promise(resolve => {
+            const unsub = isLoading.subscribe(loading => {
+                if (!loading) { unsub(); resolve(); }
+            });
+        });
+        i18nReady = true;
         taskStore.loadFromLocal();
         await settingsStore.init();
         loadAiConfig();
@@ -54,17 +64,17 @@
                     const data = await invoke('check_update');
                     if (data && data.has_update) {
                         const confirmed = await showConfirm({
-                            title: '发现新版本',
-                            message: `发现新版本 v${data.latest_version}，是否前往下载？`,
-                            confirmText: '前往下载',
-                            cancelText: '稍后',
+                            title: get(_)('settings.update_available'),
+                            message: get(_)('settings.update_desc', { values: { version: data.latest_version } }),
+                            confirmText: get(_)('settings.download'),
+                            cancelText: get(_)('settings.later'),
                             variant: 'success'
                         });
                         if (confirmed) {
                             await invoke('open_releases');
                         }
                     } else {
-                        await showAlert({ title: '检查更新', message: '当前已是最新版本！', variant: 'success' });
+                        await showAlert({ title: get(_)('settings.check_update'), message: get(_)('settings.up_to_date'), variant: 'success' });
                     }
                 } catch (e) {
                     console.error(e);
@@ -131,14 +141,6 @@
             taskStore.checkScheduled();
         }, 60000);
 
-        // 关闭启动屏幕，显示主窗口
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('close_splashscreen');
-        } catch (e) {
-            console.log('Splashscreen close not available:', e);
-        }
-
         return () => {
             unlistenNotification();
             unlistenAutostart();
@@ -152,15 +154,16 @@
 
 <GlobalModal />
 
-{#if $showExitToast}
-    <div class="fixed bottom-20 left-0 right-0 z-[102] flex justify-center pointer-events-none">
-        <div class="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in">
-            再按一次退出应用
+{#if i18nReady}
+    {#if $showExitToast}
+        <div class="fixed bottom-20 left-0 right-0 z-[102] flex justify-center pointer-events-none">
+            <div class="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in">
+                {$_('exit.press_again')}
+            </div>
         </div>
-    </div>
+    {/if}
+    <slot />
 {/if}
-
-<slot />
 
 <style>
     @keyframes fade-in {

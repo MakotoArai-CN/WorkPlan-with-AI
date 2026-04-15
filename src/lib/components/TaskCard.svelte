@@ -1,6 +1,8 @@
 <script>
     import { taskStore, activeTask } from '../stores/tasks.js';
     import { showConfirm } from '../stores/modal.js';
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
 
     export let task;
     export let openModal;
@@ -79,11 +81,12 @@
     }
 
     async function deleteTask() {
+        const t = get(_);
         const confirmed = await showConfirm({
-            title: '删除任务',
-            message: `确定要删除任务 "${task.title}" 吗？`,
-            confirmText: '删除',
-            cancelText: '取消',
+            title: t('task_detail.delete_title'),
+            message: t('task.delete_confirm', { values: { title: task.title } }),
+            confirmText: t('common.delete'),
+            cancelText: t('common.cancel'),
             variant: 'danger'
         });
         if (confirmed) {
@@ -120,9 +123,9 @@
         <div class="relative w-14 md:w-24 shrink-0" on:click|stopPropagation>
             <select value={task.priority} on:change={updatePriority}
                 class="w-full appearance-none px-1 md:pl-7 md:pr-2 py-1.5 rounded-lg text-xs font-bold border bg-white focus:outline-none text-center md:text-left {getPriorityStyle(task.priority)}">
-                <option value="normal">普通</option>
-                <option value="urgent">紧急</option>
-                <option value="critical">特急</option>
+                <option value="normal">{$_('task_priority.normal')}</option>
+                <option value="urgent">{$_('task_priority.urgent')}</option>
+                <option value="critical">{$_('task_priority.critical')}</option>
             </select>
             <div class="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none hidden md:block">
                 <i class="ph-fill ph-flag {getPriorityStyle(task.priority)}"></i>
@@ -132,9 +135,9 @@
         <div class="relative w-16 md:w-28 shrink-0" on:click|stopPropagation>
             <select value={task.status} on:change={updateStatus}
                 class="w-full appearance-none px-1 md:pl-7 md:pr-2 py-1.5 rounded-lg text-xs font-bold border bg-white focus:outline-none text-center md:text-left {getStatusStyle(task.status)}">
-                <option value="todo">未开始</option>
-                <option value="doing">进行中</option>
-                <option value="done">已完成</option>
+                <option value="todo">{$_('task_status.todo')}</option>
+                <option value="doing">{$_('task_status.doing')}</option>
+                <option value="done">{$_('task_status.done')}</option>
             </select>
             <div class="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none hidden md:block">
                 {#if task.status === 'todo'}
@@ -193,7 +196,7 @@
                 {/each}
                 <div class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-200 border-dashed">
                     <i class="ph ph-plus text-slate-400 text-xs"></i>
-                    <input type="text" placeholder="添加子步骤..." on:keydown={addInlineSubtask}
+                    <input type="text" placeholder={$_('task_modal.subtask_ph')} on:keydown={addInlineSubtask}
                         class="bg-transparent text-xs w-full focus:outline-none text-slate-600 placeholder-slate-400">
                 </div>
             </div>

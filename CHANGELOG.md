@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7] -2026-04-16
+
+- 去除G4F接口
+- 新增i18n支持
+- 优化加密算法
+- 新增主题切换支持
+
 ## [0.2.6] -2025-12-27
 
 - 引入`@kingsword/tauri-plugin-mobile-onbackpressed-listener`修复移动端返回事件

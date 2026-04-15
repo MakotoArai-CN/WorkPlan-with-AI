@@ -1,5 +1,6 @@
 <script>
     import { taskStore, currentView, viewDate, today } from '../stores/tasks.js';
+    import { _ } from 'svelte-i18n';
 
     export let show = false;
     export let editTask = null;
@@ -113,7 +114,10 @@
         }
     }
 
-    const dayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+    $: dayLabels = [
+        $_('weekdays.mon'), $_('weekdays.tue'), $_('weekdays.wed'),
+        $_('weekdays.thu'), $_('weekdays.fri'), $_('weekdays.sat'), $_('weekdays.sun')
+    ];
 </script>
 
 {#if show}
@@ -121,7 +125,7 @@
         <div on:click={close} class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"></div>
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] overflow-hidden transform transition-all">
             <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <h3 class="font-bold text-lg text-slate-800">{editTask ? '编辑' : '新建'}</h3>
+                <h3 class="font-bold text-lg text-slate-800">{editTask ? $_('task_modal.edit') : $_('task_modal.new')}</h3>
                 <button on:click={close}><i class="ph ph-x text-xl"></i></button>
             </div>
 
@@ -130,7 +134,7 @@
                     <div class="bg-purple-50 border border-purple-100 rounded-lg p-3">
                         <select on:change={loadTemplate}
                             class="w-full bg-white border border-purple-200 rounded px-2 py-1.5 text-sm text-slate-700">
-                            <option value="">-- 快速加载模板 --</option>
+                            <option value="">{$_('task_modal.load_template')}</option>
                             {#each $taskStore.templates as t}
                                 <option value={t.id}>{t.title}</option>
                             {/each}
@@ -139,15 +143,15 @@
                 {/if}
 
                 <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase">名称</label>
+                    <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.name')}</label>
                     <input bind:value={data.title} type="text"
                         class="w-full text-lg font-bold border-b-2 border-slate-200 py-1 focus:border-blue-500 outline-none"
-                        placeholder="输入名称">
+                        placeholder={$_('task_modal.name_ph')}>
                 </div>
 
                 {#if $currentView === 'scheduled'}
                     <div class="bg-teal-50 p-4 rounded-xl">
-                        <label class="text-xs font-bold text-teal-700 uppercase mb-2 block">重复周期</label>
+                        <label class="text-xs font-bold text-teal-700 uppercase mb-2 block">{$_('task_modal.repeat')}</label>
                         <div class="flex justify-between gap-1">
                             {#each dayLabels as dayStr, idx}
                                 {@const dayValue = idx === 6 ? 0 : idx + 1}
@@ -164,7 +168,7 @@
                 {/if}
 
                 <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase">备注</label>
+                    <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.notes')}</label>
                     <textarea bind:value={data.note} rows="3"
                         class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm resize-none"></textarea>
                 </div>
@@ -185,10 +189,10 @@
                             </div>
                         {/each}
                         <div class="flex gap-2">
-                            <input type="text" bind:this={newSubtaskInput} placeholder="新子任务..."
+                            <input type="text" bind:this={newSubtaskInput} placeholder={$_('task_modal.subtask_ph')}
                                 on:keydown={(e) => e.key === 'Enter' && addSubtask()}
                                 class="flex-1 bg-transparent border-b border-slate-300 px-2 py-1 text-sm outline-none">
-                            <button on:click={addSubtask} class="text-blue-600 text-sm font-bold">添加</button>
+                            <button on:click={addSubtask} class="text-blue-600 text-sm font-bold">{$_('task_modal.add')}</button>
                         </div>
                     </div>
                 </div>
@@ -196,12 +200,12 @@
                 {#if $currentView === 'dashboard'}
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="text-xs font-bold text-slate-500 uppercase">计划</label>
+                            <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.plan')}</label>
                             <input type="datetime-local" bind:value={data.date}
                                 class="w-full border border-slate-200 rounded px-2 py-2 text-sm">
                         </div>
                         <div>
-                            <label class="text-xs font-bold text-slate-500 uppercase">截止</label>
+                            <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.due')}</label>
                             <input type="datetime-local" bind:value={data.deadline}
                                 class="w-full border border-slate-200 rounded px-2 py-2 text-sm">
                         </div>
@@ -211,9 +215,9 @@
 
             <div class="p-4 border-t border-slate-100 flex justify-end gap-3 bg-white">
                 <button on:click={close}
-                    class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">取消</button>
+                    class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">{$_('task_modal.cancel')}</button>
                 <button on:click={save}
-                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-bold shadow">确认</button>
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-bold shadow">{$_('task_modal.confirm')}</button>
             </div>
         </div>
     </div>

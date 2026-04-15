@@ -3,7 +3,8 @@ import CryptoJS from 'crypto-js';
 const SALT_LENGTH = 16;
 const IV_LENGTH = 16;
 const KEY_SIZE = 256;
-const ITERATIONS = 310000;
+const ITERATIONS_NEW = 10000;
+const ITERATIONS_OLD = 10000;
 
 function generateSalt() {
     return CryptoJS.lib.WordArray.random(SALT_LENGTH).toString();
@@ -13,10 +14,10 @@ function generateIV() {
     return CryptoJS.lib.WordArray.random(IV_LENGTH);
 }
 
-function deriveKey(password, salt) {
+function deriveKey(password, salt, iterations = ITERATIONS_NEW) {
     return CryptoJS.PBKDF2(password, salt, {
         keySize: KEY_SIZE / 32,
-        iterations: ITERATIONS,
+        iterations: iterations,
         hasher: CryptoJS.algo.SHA256
     });
 }
@@ -26,28 +27,38 @@ export function encrypt(plaintext, password) {
     try {
         const salt = generateSalt();
         const iv = generateIV();
-        const key = deriveKey(password, salt);
+        const key = deriveKey(password, salt, ITERATIONS_NEW);
         const encrypted = CryptoJS.AES.encrypt(plaintext, key, {
             iv: iv,
             mode: CryptoJS.mode.CBC,
             padding: CryptoJS.pad.Pkcs7
         });
-        return salt + ':' + iv.toString() + ':' + encrypted.ciphertext.toString();
+        return 'v2:' + salt + ':' + iv.toString() + ':' + encrypted.ciphertext.toString();
     } catch (e) {
         console.error('Encryption failed:', e);
         return null;
     }
 }
 
-export function decrypt(ciphertext, password) {
-    if (!ciphertext || !password) return null;
+function decryptWithIterations(ciphertext, password, iterations) {
     try {
         const parts = ciphertext.split(':');
-        if (parts.length !== 3) return null;
-        const salt = parts[0];
-        const iv = CryptoJS.enc.Hex.parse(parts[1]);
-        const encrypted = parts[2];
-        const key = deriveKey(password, salt);
+        let salt, ivHex, encrypted;
+        
+        if (parts.length === 4 && parts[0] === 'v2') {
+            salt = parts[1];
+            ivHex = parts[2];
+            encrypted = parts[3];
+        } else if (parts.length === 3) {
+            salt = parts[0];
+            ivHex = parts[1];
+            encrypted = parts[2];
+        } else {
+            return null;
+        }
+        
+        const iv = CryptoJS.enc.Hex.parse(ivHex);
+        const key = deriveKey(password, salt, iterations);
         const decrypted = CryptoJS.AES.decrypt(
             { ciphertext: CryptoJS.enc.Hex.parse(encrypted) },
             key,
@@ -57,39 +68,62 @@ export function decrypt(ciphertext, password) {
                 padding: CryptoJS.pad.Pkcs7
             }
         );
-        return decrypted.toString(CryptoJS.enc.Utf8);
+        const result = decrypted.toString(CryptoJS.enc.Utf8);
+        if (result && result.length > 0) {
+            return result;
+        }
+        return null;
     } catch (e) {
-        console.error('Decryption failed:', e);
         return null;
     }
 }
 
+export function decrypt(ciphertext, password) {
+    if (!ciphertext || !password) return null;
+    
+    if (ciphertext.startsWith('v2:')) {
+        return decryptWithIterations(ciphertext, password, ITERATIONS_NEW);
+    }
+    
+    let result = decryptWithIterations(ciphertext, password, ITERATIONS_NEW);
+    if (result) return result;
+    
+    result = decryptWithIterations(ciphertext, password, ITERATIONS_OLD);
+    return result;
+}
+
+export function needsMigration(ciphertext) {
+    if (!ciphertext) return false;
+    return !ciphertext.startsWith('v2:');
+}
+
+export function migrateEncryption(ciphertext, password) {
+    if (!ciphertext || !password) return null;
+    if (ciphertext.startsWith('v2:')) return ciphertext;
+    
+    const decrypted = decrypt(ciphertext, password);
+    if (!decrypted) return null;
+    
+    return encrypt(decrypted, password);
+}
+
 export function hashPassword(password) {
-    const salt = CryptoJS.lib.WordArray.random(16).toString();
-    const hash = CryptoJS.PBKDF2(password, salt, {
-        keySize: 256 / 32,
-        iterations: ITERATIONS,
-        hasher: CryptoJS.algo.SHA256
-    }).toString();
-    return salt + ':' + hash;
+    return CryptoJS.SHA256(password).toString();
 }
 
 export function verifyPassword(password, storedHash) {
     if (!storedHash || !password) return false;
     const parts = storedHash.split(':');
-    if (parts.length === 1) {
-        return CryptoJS.SHA256(password).toString() === storedHash;
-    }
     if (parts.length === 2) {
         const [salt, hash] = parts;
-        const computedHash = CryptoJS.PBKDF2(password, salt, {
+        const computed = CryptoJS.PBKDF2(password, salt, {
             keySize: 256 / 32,
-            iterations: ITERATIONS,
+            iterations: ITERATIONS_OLD,
             hasher: CryptoJS.algo.SHA256
         }).toString();
-        return computedHash === hash;
+        if (computed === hash) return true;
     }
-    return false;
+    return CryptoJS.SHA256(password).toString() === storedHash;
 }
 
 export function generatePassword(length = 16, options = {}) {

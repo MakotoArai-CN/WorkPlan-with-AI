@@ -6,7 +6,7 @@
     import ContextMenu from '$lib/components/ContextMenu.svelte';
     import { settingsStore } from '$lib/stores/settings.js';
     import { pushNavigation, popNavigation, getNavigationDepth, handleBackPress, showExitToast, initializeNavigation } from '$lib/stores/navigation.js';
-    // 移除 SplashScreen 导入
+    import { _ } from 'svelte-i18n';
     import LoginModal from '$lib/components/LoginModal.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
     import MobileNav from '$lib/components/MobileNav.svelte';
@@ -29,7 +29,6 @@
     let showModal = false;
     let editTask = null;
     let isMobile = false;
-    // 移除 appReady 和 showSplash 状态
 
     $: needsAgreement = !$settingsStore.agreementAccepted;
 
@@ -37,10 +36,7 @@
         isMobile = window.innerWidth < 768 || 
             /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
         initializeNavigation('dashboard');
-        // 移除开屏动画相关逻辑
     });
-
-    // 移除 handleSplashComplete 函数
 
     function openModal(task = null) {
         editTask = task;
@@ -93,7 +89,6 @@
     }
 </script>
 
-<!-- 移除 showSplash 和 appReady 条件判断 -->
 <div class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800 safe-area-container">
     {#if needsAgreement}
         <AgreementModal isFirstTime={true} />
@@ -110,7 +105,7 @@
 
         <Sidebar />
 
-        <main class="flex-1 flex flex-col relative bg-[#f1f5f9] min-w-0 border-r border-slate-200 pb-14 md:pb-0">
+        <main class="flex-1 flex flex-col relative bg-slate-100 min-w-0 border-r border-slate-200 pb-14 md:pb-0">
             {#if $currentView === 'dashboard'}
                 <Dashboard {openModal} />
             {:else if $currentView === 'aichat'}
@@ -145,14 +140,14 @@
         {#if $showAiPanel && $currentView !== 'aichat' && $currentView !== 'notes'}
             <div class="md:hidden fixed inset-0 z-50 bg-white flex flex-col safe-area-container">
                 <div class="h-14 border-b border-rose-100 flex items-center justify-between px-4 bg-white shrink-0 mobile-header">
-                    <button on:click={handleAiPanelBack} 
+                    <button on:click={handleAiPanelBack}
                         class="text-slate-500 flex items-center gap-1 font-bold">
-                        <i class="ph-bold ph-caret-left text-lg"></i> 返回
+                        <i class="ph-bold ph-caret-left text-lg"></i> {$_('common.back')}
                     </button>
                     <div class="font-bold text-rose-600 flex items-center gap-1">
-                        <i class="ph-fill ph-sparkle"></i> AI 助手
+                        <i class="ph-fill ph-sparkle"></i> {$_('ai.assistant')}
                     </div>
-                    <button on:click={() => clearChatHistory()} class="text-slate-400" aria-label="清空聊天">
+                    <button on:click={() => clearChatHistory()} class="text-slate-400" aria-label={$_('ai.clear')}>
                         <i class="ph ph-trash text-xl"></i>
                     </button>
                 </div>
@@ -170,7 +165,7 @@
 {#if $showExitToast}
     <div class="fixed bottom-20 left-0 right-0 z-[102] flex justify-center pointer-events-none">
         <div class="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium">
-            再按一次退出应用
+            {$_('exit.press_again')}
         </div>
     </div>
 {/if}

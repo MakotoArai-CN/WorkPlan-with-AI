@@ -1,5 +1,5 @@
 <script>
-    import { notesStore, activeNote, notesList } from "../stores/notes.js";
+    import { notesStore, activeNote, notesList, noteCategories, noteAiPrompts } from "../stores/notes.js";
     import { showConfirm, showToast } from "../stores/modal.js";
     import { renderMarkdown } from "../utils/markdown.js";
     import {
@@ -12,7 +12,12 @@
         getEffectiveConfig,
         streamingContent,
     } from "../stores/ai.js";
-    import { isG4FProvider } from "../utils/g4f-client.js";
+    import { settingsStore } from "../stores/settings.js";
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
+
+    function t(key, opts) { return get(_)(key, opts); }
+
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
     import { onMount, onDestroy, tick } from "svelte";
     import "vditor/dist/index.css";
@@ -28,7 +33,19 @@
     let isMobile = false;
     let vditorInstance = null;
     let vditorContainer;
+    let milkdownEditor = null;
+    let milkdownContainer;
     let autoSaveTimer = null;
+    let selectedCategory = null;
+    $: if (selectedCategory === null) selectedCategory = $_('notes.category_all');
+    let showCategoryPanel = false;
+    let newCategoryName = '';
+    let showAiPromptPanel = false;
+    let editingPromptId = null;
+    let editingPromptText = '';
+    let aiSuggestion = '';
+    let aiSuggestionLoading = false;
+    let aiSuggestionTimer = null;
     let summarizing = false;
     let autoSaveEnabled = true;
     let showAiPanel = false;
@@ -52,6 +69,9 @@
         if (vditorInstance) {
             vditorInstance.destroy();
         }
+        if (milkdownEditor) {
+            milkdownEditor = null;
+        }
         if (autoSaveTimer) {
             clearTimeout(autoSaveTimer);
         }
@@ -67,7 +87,7 @@
             if (editMode && $activeNote) {
                 saveNote();
                 showToast({
-                    message: "已保存",
+                    message: $_('notes.saved'),
                     type: "success",
                     duration: 1500,
                 });
@@ -78,8 +98,9 @@
     function toggleAutoSave() {
         autoSaveEnabled = !autoSaveEnabled;
         localStorage.setItem("planpro_notes_autosave", String(autoSaveEnabled));
+        const t = get(_);
         showToast({
-            message: autoSaveEnabled ? "自动保存已开启" : "自动保存已关闭",
+            message: autoSaveEnabled ? t('notes.auto_save_on') : t('notes.auto_save_off'),
             type: "info",
             duration: 1500,
         });
@@ -96,10 +117,10 @@
             mode: "ir",
             theme: "classic",
             icon: "material",
-            placeholder: "开始输入内容...支持 Markdown 格式",
+            placeholder: get(_)('notes.start_typing'),
             cache: { enable: false },
             value: editContent,
-            tab: "\t", // 添加此行：按 Tab 插入制表符
+            tab: "\t", // Insert tab character on Tab key
             toolbarConfig: {
                 pin: true,
                 hide: false,
@@ -149,7 +170,7 @@
                         });
                     } else {
                         showToast({
-                            message: "仅支持图片上传",
+                            message: get(_)('notes.only_image'),
                             type: "warning",
                         });
                         return null;
@@ -166,6 +187,20 @@
                 if (autoSaveEnabled) {
                     scheduleAutoSave();
                 }
+                if (aiSuggestionTimer) clearTimeout(aiSuggestionTimer);
+                aiSuggestion = '';
+                aiSuggestionTimer = setTimeout(() => requestAiSuggestion(value), 1500);
+            },
+            keydown: (e) => {
+                if (e.key === 'Tab' && aiSuggestion && !e.shiftKey) {
+                    e.preventDefault();
+                    if (vditorInstance) {
+                        const cur = vditorInstance.getValue();
+                        vditorInstance.insertValue(aiSuggestion);
+                        aiSuggestion = '';
+                    }
+                    return true;
+                }
             },
             after: () => {
                 if (editContent) {
@@ -173,6 +208,33 @@
                 }
             },
         });
+    }
+
+    async function initMilkdown() {
+        if (!milkdownContainer) return;
+        if (milkdownEditor) {
+            milkdownEditor = null;
+            milkdownContainer.innerHTML = '';
+        }
+        const { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } = await import('@milkdown/core');
+        const { commonmark } = await import('@milkdown/preset-commonmark');
+        const { nord } = await import('@milkdown/theme-nord');
+        const { listener, listenerCtx } = await import('@milkdown/plugin-listener');
+        milkdownEditor = await Editor.make()
+            .config(nord)
+            .config((ctx) => {
+                ctx.set(rootCtx, milkdownContainer);
+                ctx.set(defaultValueCtx, editContent || '');
+                ctx.get(listenerCtx).markdownUpdated((ctx, markdown) => {
+                    editContent = markdown;
+                    if (autoSaveEnabled) {
+                        scheduleAutoSave();
+                    }
+                });
+            })
+            .use(commonmark)
+            .use(listener)
+            .create();
     }
 
     function scheduleAutoSave() {
@@ -187,7 +249,7 @@
                     content: editContent,
                 });
                 showToast({
-                    message: "已自动保存",
+                    message: get(_)('notes.auto_saved'),
                     type: "success",
                     duration: 1000,
                 });
@@ -195,20 +257,36 @@
         }, 2000);
     }
 
-    $: filteredNotes = $notesList.filter(
-        (note) =>
+    $: filteredNotes = $notesList.filter((note) => {
+        const matchesSearch =
             note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            note.content.toLowerCase().includes(searchQuery.toLowerCase()),
-    );
+            note.content.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesCategory =
+            selectedCategory === $_('notes.category_all') || note.category === selectedCategory;
+        return matchesSearch && matchesCategory;
+    });
+
+    function getEditor() {
+        return $settingsStore.markdownEditor || 'vditor';
+    }
+
+    async function initEditor() {
+        if (getEditor() === 'milkdown') {
+            await initMilkdown();
+        } else {
+            await initVditor();
+        }
+    }
 
     function createNote() {
-        notesStore.addNote({ title: "新笔记", content: "" });
+        const defaultTitle = $_('notes.new_note_title');
+        notesStore.addNote({ title: defaultTitle, content: "" });
         editMode = true;
-        editTitle = "新笔记";
+        editTitle = defaultTitle;
         editContent = "";
         editingTitle = true;
         if (isMobile) showSidebar = false;
-        tick().then(initVditor);
+        tick().then(initEditor);
     }
 
     function selectNote(note) {
@@ -224,7 +302,7 @@
             editContent = $activeNote.content;
             editMode = true;
             await tick();
-            await initVditor();
+            await initEditor();
         }
     }
 
@@ -242,6 +320,17 @@
         editingTitle = false;
     }
 
+    function destroyEditor() {
+        if (vditorInstance) {
+            vditorInstance.destroy();
+            vditorInstance = null;
+        }
+        if (milkdownEditor) {
+            milkdownEditor = null;
+            if (milkdownContainer) milkdownContainer.innerHTML = '';
+        }
+    }
+
     function saveNote() {
         if ($activeNote) {
             if (vditorInstance) {
@@ -253,10 +342,7 @@
             });
             editMode = false;
             editingTitle = false;
-            if (vditorInstance) {
-                vditorInstance.destroy();
-                vditorInstance = null;
-            }
+            destroyEditor();
         }
     }
 
@@ -265,19 +351,16 @@
         editTitle = "";
         editContent = "";
         editingTitle = false;
-        if (vditorInstance) {
-            vditorInstance.destroy();
-            vditorInstance = null;
-        }
+        destroyEditor();
     }
 
     async function deleteNote() {
         if (!$activeNote) return;
         const confirmed = await showConfirm({
-            title: "删除笔记",
-            message: `确定要删除"${$activeNote.title}"吗？`,
-            confirmText: "删除",
-            cancelText: "取消",
+            title: $_('notes.delete_note'),
+            message: $_('notes.delete_confirm', { values: { title: $activeNote.title } }),
+            confirmText: $_('common.delete'),
+            cancelText: $_('common.cancel'),
             variant: "danger",
         });
         if (confirmed) {
@@ -290,11 +373,12 @@
     function toggleAiPanel() {
         showAiPanel = !showAiPanel;
         if (showAiPanel && aiMessages.length === 0 && $activeNote) {
+            const t = get(_);
             aiMessages = [
                 {
                     role: "assistant",
                     type: "text",
-                    content: `我是您的笔记助手，可以帮您总结笔记 "${$activeNote.title}" 的内容。\n\n点击下方按钮开始总结，或输入其他问题。`,
+                    content: t('notes.ai_greeting', { values: { title: $activeNote.title } }),
                 },
             ];
         }
@@ -302,22 +386,21 @@
 
     async function summarizeNote() {
         if (!$activeNote || !$activeNote.content) {
-            showToast({ message: "笔记内容为空", type: "warning" });
+            showToast({ message: get(_)('notes.ai_empty'), type: "warning" });
             return;
         }
         const config = getEffectiveConfig();
         const needsApiKey =
-            !isG4FProvider(config.provider) &&
             config.provider !== "ollama" &&
             config.provider !== "lmstudio";
         if (needsApiKey && !config.apiKey) {
-            showToast({ message: "请先配置 AI API Key", type: "warning" });
+            showToast({ message: get(_)('notes.ai_no_key'), type: "warning" });
             return;
         }
         aiLoading = true;
         aiMessages = [
             ...aiMessages,
-            { role: "user", type: "text", content: "请总结这篇笔记" },
+            { role: "user", type: "text", content: get(_)('notes.ai_summarize_request') },
         ];
         aiMessages = [
             ...aiMessages,
@@ -333,18 +416,10 @@
             const { callAIWithMessagesStream } = await import(
                 "../utils/ai-providers.js"
             );
-            const systemPrompt = `你是一个专业的文档总结助手。请对以下笔记内容进行总结，提取关键信息和要点。
-笔记标题：${$activeNote.title}
-笔记内容：
-${$activeNote.content}
-要求：
-1. 保持简洁，突出重点
-2. 使用 Markdown 格式
-3. 包含：主要内容概述、关键要点（用列表）、如有待办事项请标注
-4. 总结字数控制在原文的 1/3 以内`;
+            const systemPrompt = t('notes.ai_summary_system_prompt', { values: { title: $activeNote.title, content: $activeNote.content } });
             const messages = [
                 { role: "system", content: systemPrompt },
-                { role: "user", content: "请总结这篇笔记" },
+                { role: "user", content: t('notes.ai_summarize_request') },
             ];
             const onChunk = (delta, fullContent) => {
                 aiMessages = aiMessages.map((msg, idx) =>
@@ -363,7 +438,7 @@ ${$activeNote.content}
                     ? {
                           role: "assistant",
                           type: "text",
-                          content: result || "总结生成失败",
+                          content: result || get(_)('notes.ai_gen_failed'),
                           isStreaming: false,
                       }
                     : msg,
@@ -379,7 +454,7 @@ ${$activeNote.content}
                     : msg,
             );
             showToast({
-                message: "AI总结失败: " + error.message,
+                message: get(_)('notes.ai_failed') + ": " + error.message,
                 type: "error",
             });
         } finally {
@@ -413,18 +488,110 @@ ${$activeNote.content}
                 }
             }
         } catch (e) {
-            showToast({ message: "导出失败: " + e.message, type: "error" });
+            showToast({ message: get(_)('notes.export_failed_short') + ": " + e.message, type: "error" });
         }
     }
 
     function formatDate(dateStr) {
         const date = new Date(dateStr);
-        return date.toLocaleDateString("zh-CN", {
+        const lang = $settingsStore?.locale || 'zh-CN';
+        const localeCode = lang === 'zh' ? 'zh-CN' : lang === 'ja' ? 'ja-JP' : 'en-US';
+        return date.toLocaleDateString(localeCode, {
             month: "short",
             day: "numeric",
             hour: "2-digit",
             minute: "2-digit",
         });
+    }
+
+    function addCategory() {
+        const name = newCategoryName.trim();
+        if (!name) return;
+        notesStore.addCategory(name);
+        newCategoryName = '';
+    }
+
+    function selectCategory(cat) {
+        selectedCategory = cat;
+        if (isMobile) showSidebar = false;
+    }
+
+    function sendAiPrompt(prompt) {
+        if (!$activeNote) return;
+        const fullPrompt = prompt + '\n\n' + get(_)('notes.note_content_label') + ':\n' + ($activeNote.content || '');
+        aiMessages = [
+            ...aiMessages,
+            { role: 'user', type: 'text', content: prompt },
+            { role: 'assistant', type: 'streaming', content: '', isStreaming: true }
+        ];
+        const streamingIndex = aiMessages.length - 1;
+        aiLoading = true;
+        showAiPanel = true;
+        import('../utils/ai-providers.js').then(async ({ callAIWithMessagesStream }) => {
+            try {
+                const config = getEffectiveConfig();
+                const systemPrompt = t('notes.ai_writing_system_prompt', { values: { title: $activeNote.title } });
+                let result = '';
+                await callAIWithMessagesStream(
+                    [{ role: 'system', content: systemPrompt }, { role: 'user', content: fullPrompt }],
+                    config,
+                    (chunk) => {
+                        result += chunk;
+                        aiMessages = aiMessages.map((m, i) =>
+                            i === streamingIndex ? { ...m, content: result } : m
+                        );
+                    }
+                );
+                aiMessages = aiMessages.map((m, i) =>
+                    i === streamingIndex ? { ...m, type: 'text', isStreaming: false } : m
+                );
+            } catch (e) {
+                aiMessages = aiMessages.map((m, i) =>
+                    i === streamingIndex ? { ...m, type: 'error', content: e.message, isStreaming: false } : m
+                );
+            } finally {
+                aiLoading = false;
+            }
+        });
+    }
+
+    async function requestAiSuggestion(currentText) {
+        if (!currentText || currentText.length < 20) return;
+        const config = getEffectiveConfig();
+        if (!config.apiKey && config.provider !== 'ollama') return;
+        const lastLines = currentText.split('\n').slice(-3).join('\n');
+        if (lastLines.trim().length < 10) return;
+        aiSuggestionLoading = true;
+        try {
+            const { callAIWithMessages } = await import('../utils/ai-providers.js');
+            const result = await callAIWithMessages(
+                [
+                    { role: 'system', content: t('notes.ai_autocomplete_system_prompt') },
+                    { role: 'user', content: lastLines }
+                ],
+                config
+            );
+            if (result && result.trim()) {
+                aiSuggestion = result.trim().split('\n')[0].slice(0, 100);
+            }
+        } catch (e) {
+            aiSuggestion = '';
+        } finally {
+            aiSuggestionLoading = false;
+        }
+    }
+
+    function startEditPrompt(prompt) {
+        editingPromptId = prompt.id;
+        editingPromptText = prompt.prompt;
+    }
+
+    function saveEditPrompt() {
+        if (editingPromptId) {
+            notesStore.updateAiPrompt(editingPromptId, { prompt: editingPromptText });
+            editingPromptId = null;
+            editingPromptText = '';
+        }
     }
 
     function toggleSidebar() {
@@ -434,7 +601,7 @@ ${$activeNote.content}
     function copyAiMessage(content) {
         if (navigator.clipboard && content) {
             navigator.clipboard.writeText(content);
-            showToast({ message: "已复制", type: "success", duration: 1500 });
+            showToast({ message: get(_)('common.copied'), type: "success", duration: 1500 });
         }
     }
 
@@ -443,12 +610,13 @@ ${$activeNote.content}
             .filter((m) => m.role === "assistant" && m.type === "text")
             .pop();
         if (lastAssistantMsg && lastAssistantMsg.content) {
+            const t = get(_);
             const summaryNote = {
-                title: `[总结] ${$activeNote.title}`,
-                content: `# ${$activeNote.title} - AI总结\n\n${lastAssistantMsg.content}\n\n---\n*由 AI 自动生成于 ${new Date().toLocaleString()}*`,
+                title: `[${t('notes.summary_prefix')}] ${$activeNote.title}`,
+                content: `# ${$activeNote.title} - ${t('notes.ai_summarize')}\n\n${lastAssistantMsg.content}\n\n---\n*${t('notes.ai_generated_at')} ${new Date().toLocaleString()}*`,
             };
             notesStore.addNote(summaryNote);
-            showToast({ message: "AI总结已保存为新笔记", type: "success" });
+            showToast({ message: t('notes.ai_summary_saved'), type: "success" });
         }
     }
 </script>
@@ -468,10 +636,10 @@ ${$activeNote.content}
             {/if}
             <div>
                 <h2 class="text-base md:text-lg font-bold text-emerald-800">
-                    工作笔记
+                    {$_('notes.title')}
                 </h2>
                 <div class="text-[10px] md:text-xs text-slate-500">
-                    支持 Markdown
+                    {$_('notes.subtitle')}
                 </div>
             </div>
         </div>
@@ -483,7 +651,7 @@ ${$activeNote.content}
                 class:text-emerald-700={autoSaveEnabled}
                 class:bg-slate-100={!autoSaveEnabled}
                 class:text-slate-500={!autoSaveEnabled}
-                title={autoSaveEnabled ? "自动保存已开启" : "自动保存已关闭"}
+                title={autoSaveEnabled ? $_('notes.auto_save_on') : $_('notes.auto_save_off')}
             >
                 <i
                     class="ph {autoSaveEnabled
@@ -491,7 +659,7 @@ ${$activeNote.content}
                         : 'ph-floppy-disk-back'}"
                 ></i>
                 <span class="hidden md:inline text-xs"
-                    >{autoSaveEnabled ? "自动" : "手动"}</span
+                    >{autoSaveEnabled ? $_('notes.auto_save') : $_('notes.manual_save')}</span
                 >
             </button>
             <button
@@ -499,7 +667,7 @@ ${$activeNote.content}
                 class="h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow-md shadow-emerald-200 flex items-center gap-2"
             >
                 <i class="ph-bold ph-plus"></i>
-                <span class="hidden md:inline">新建</span>
+                <span class="hidden md:inline">{$_('common.new')}</span>
             </button>
         </div>
     </header>
@@ -518,24 +686,53 @@ ${$activeNote.content}
             class:translate-x-0={!isMobile || showSidebar}
             class:-translate-x-full={isMobile && !showSidebar}
         >
-            <div class="p-3 border-b border-slate-100">
+            <div class="p-3 border-b border-slate-100 space-y-2">
                 <div class="relative">
                     <input
                         type="text"
                         bind:value={searchQuery}
-                        placeholder="搜索笔记..."
+                        placeholder={$_('notes.search')}
                         class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 pl-9 text-sm focus:outline-none focus:border-emerald-400"
                     />
-                    <i
-                        class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                    ></i>
+                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
                 </div>
+                <div class="flex gap-1 overflow-x-auto pb-1">
+                    {#each $noteCategories as cat}
+                        <button
+                            on:click={() => selectCategory(cat)}
+                            class="shrink-0 px-2.5 py-1 rounded-full text-xs font-bold transition"
+                            class:bg-emerald-600={selectedCategory === cat}
+                            class:text-white={selectedCategory === cat}
+                            class:bg-slate-100={selectedCategory !== cat}
+                            class:text-slate-600={selectedCategory !== cat}
+                        >{cat}</button>
+                    {/each}
+                    <button
+                        on:click={() => showCategoryPanel = !showCategoryPanel}
+                        class="shrink-0 px-2 py-1 rounded-full text-xs text-slate-400 hover:text-emerald-600"
+                        title={$_('notes.manage_category')}
+                    ><i class="ph ph-plus"></i></button>
+                </div>
+                {#if showCategoryPanel}
+                    <div class="flex gap-1">
+                        <input
+                            type="text"
+                            bind:value={newCategoryName}
+                            placeholder={$_('notes.new_category_ph')}
+                            on:keydown={(e) => e.key === 'Enter' && addCategory()}
+                            class="flex-1 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-emerald-400"
+                        />
+                        <button on:click={addCategory} class="px-2 py-1 bg-emerald-600 text-white rounded text-xs">
+                            <i class="ph ph-check"></i>
+                        </button>
+                    </div>
+                {/if}
             </div>
             <div class="flex-1 overflow-y-auto">
                 {#if filteredNotes.length === 0}
                     <div class="text-center py-8 text-slate-400 text-sm">
                         <i class="ph ph-note-blank text-3xl mb-2"></i>
-                        <p>暂无笔记</p>
+                        <p>{$_('notes.empty')}</p>
                     </div>
                 {:else}
                     {#each filteredNotes as note (note.id)}
@@ -544,20 +741,16 @@ ${$activeNote.content}
                             class="w-full text-left p-3 border-b border-slate-100 hover:bg-slate-50 transition"
                             class:bg-emerald-50={$activeNote?.id === note.id}
                             class:border-l-4={$activeNote?.id === note.id}
-                            class:border-l-emerald-500={$activeNote?.id ===
-                                note.id}
+                            class:border-l-emerald-500={$activeNote?.id === note.id}
                         >
-                            <div
-                                class="font-bold text-slate-700 text-sm truncate"
-                            >
-                                {note.title}
+                            <div class="flex items-center gap-1 mb-0.5">
+                                {#if note.category && note.category !== $_('notes.category_all')}
+                                    <span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded font-bold">{note.category}</span>
+                                {/if}
                             </div>
-                            <div class="text-xs text-slate-400 mt-1 truncate">
-                                {note.content.slice(0, 50) || "空白笔记"}
-                            </div>
-                            <div class="text-[10px] text-slate-300 mt-1">
-                                {formatDate(note.updatedAt)}
-                            </div>
+                            <div class="font-bold text-slate-700 text-sm truncate">{note.title}</div>
+                            <div class="text-xs text-slate-400 mt-1 truncate">{note.content.slice(0, 50) || $_('notes.blank_note')}</div>
+                            <div class="text-[10px] text-slate-300 mt-1">{formatDate(note.updatedAt)}</div>
                         </button>
                     {/each}
                 {/if}
@@ -593,13 +786,13 @@ ${$activeNote.content}
                                 on:click={saveNote}
                                 class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700"
                             >
-                                <i class="ph ph-check"></i> 保存
+                                <i class="ph ph-check"></i> {$_('common.save')}
                             </button>
                             <button
                                 on:click={cancelEdit}
                                 class="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-200"
                             >
-                                取消
+                                {$_('common.cancel')}
                             </button>
                         {:else}
                             <button
@@ -616,9 +809,20 @@ ${$activeNote.content}
                                 class:text-slate-400={!showAiPanel}
                                 class:hover:text-indigo-600={!showAiPanel}
                                 class:hover:bg-indigo-50={!showAiPanel}
-                                title="AI 助手"
+                                title={$_('notes.ai_assistant')}
                             >
                                 <i class="ph ph-sparkle text-lg"></i>
+                            </button>
+                            <button
+                                on:click={() => showAiPromptPanel = !showAiPromptPanel}
+                                class="p-2 rounded-lg transition"
+                                class:text-purple-600={showAiPromptPanel}
+                                class:bg-purple-50={showAiPromptPanel}
+                                class:text-slate-400={!showAiPromptPanel}
+                                class:hover:text-purple-600={!showAiPromptPanel}
+                                title={$_('notes.ai_preset_prompts')}
+                            >
+                                <i class="ph ph-magic-wand text-lg"></i>
                             </button>
                             <div class="relative">
                                 <button
@@ -670,9 +874,60 @@ ${$activeNote.content}
                         {/if}
                     </div>
                 </div>
-                <div class="flex-1 overflow-hidden flex flex-col">
+                {#if showAiPromptPanel}
+                    <div class="bg-purple-50 border-b border-purple-100 px-4 py-2">
+                        <div class="text-xs font-bold text-purple-700 mb-2 flex items-center justify-between">
+                            <span>{$_('notes.ai_preset_prompts')}</span>
+                            <button on:click={() => showAiPromptPanel = false} class="text-purple-400 hover:text-purple-700"><i class="ph ph-x"></i></button>
+                        </div>
+                        <div class="flex flex-wrap gap-1.5">
+                            {#each $noteAiPrompts as prompt}
+                                {#if editingPromptId === prompt.id}
+                                    <div class="flex gap-1 w-full">
+                                        <input bind:value={editingPromptText} class="flex-1 text-xs border border-purple-300 rounded px-2 py-1 bg-white focus:outline-none" />
+                                        <button on:click={saveEditPrompt} class="px-2 py-1 bg-purple-600 text-white rounded text-xs"><i class="ph ph-check"></i></button>
+                                        <button on:click={() => editingPromptId = null} class="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs"><i class="ph ph-x"></i></button>
+                                    </div>
+                                {:else}
+                                    <div class="flex items-center gap-1 bg-white border border-purple-200 rounded-full px-2 py-0.5">
+                                        <button on:click={() => sendAiPrompt(prompt.prompt)} class="text-xs text-purple-700 font-bold hover:text-purple-900">{prompt.label}</button>
+                                        <button on:click={() => startEditPrompt(prompt)} class="text-purple-300 hover:text-purple-600 text-[10px]"><i class="ph ph-pencil"></i></button>
+                                    </div>
+                                {/if}
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
+                {#if $activeNote}
+                    <div class="px-4 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                        <span class="text-[10px] text-slate-400 font-bold">{$_('notes.category')}：</span>
+                        <select
+                            value={$activeNote.category || $_('notes.category_all')}
+                            on:change={(e) => notesStore.updateNote($activeNote.id, { category: e.target.value })}
+                            class="text-xs border border-slate-200 rounded px-2 py-0.5 bg-white text-slate-600 focus:outline-none focus:border-emerald-400"
+                        >
+                            {#each $noteCategories as cat}
+                                <option value={cat}>{cat}</option>
+                            {/each}
+                        </select>
+                    </div>
+                {/if}
+                <div class="flex-1 overflow-hidden flex flex-col relative">
                     {#if editMode}
-                        <div bind:this={vditorContainer} class="h-full"></div>
+                        {#if aiSuggestion}
+                            <div class="absolute bottom-4 left-4 right-4 z-10 pointer-events-none">
+                                <div class="bg-slate-800/90 text-slate-300 text-xs px-3 py-2 rounded-lg backdrop-blur flex items-center gap-2">
+                                    <i class="ph ph-sparkle text-purple-400"></i>
+                                    <span class="flex-1 truncate italic">{aiSuggestion}</span>
+                                    <span class="text-slate-500 shrink-0">{$_('notes.tab_accept')}</span>
+                                </div>
+                            </div>
+                        {/if}
+                        {#if $settingsStore.markdownEditor === 'milkdown'}
+                            <div bind:this={milkdownContainer} class="h-full overflow-y-auto milkdown-container"></div>
+                        {:else}
+                            <div bind:this={vditorContainer} class="h-full"></div>
+                        {/if}
                     {:else}
                         <div
                             class="h-full overflow-y-auto p-4 md:p-6 overscroll-contain"
@@ -695,13 +950,13 @@ ${$activeNote.content}
                 >
                     <div class="text-center">
                         <i class="ph ph-notebook text-5xl mb-4"></i>
-                        <p class="text-lg font-bold">选择或创建一个笔记</p>
+                        <p class="text-lg font-bold">{$_('notes.select_or_create')}</p>
                         {#if isMobile}
                             <button
                                 on:click={toggleSidebar}
                                 class="mt-4 text-emerald-600 font-bold text-sm"
                             >
-                                <i class="ph ph-list"></i> 查看笔记列表
+                                <i class="ph ph-list"></i> {$_('notes.view_list')}
                             </button>
                         {/if}
                     </div>
@@ -718,7 +973,7 @@ ${$activeNote.content}
                     <div
                         class="font-bold text-indigo-700 flex items-center gap-2 text-sm"
                     >
-                        <i class="ph-fill ph-sparkle"></i> AI 笔记助手
+                        <i class="ph-fill ph-sparkle"></i> {$_('notes.ai_assistant')}
                     </div>
                     <button
                         on:click={() => (showAiPanel = false)}
@@ -781,7 +1036,7 @@ ${$activeNote.content}
                                             <button
                                                 on:click={saveAsSummaryNote}
                                                 class="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded text-xs"
-                                                title="保存为新笔记"
+                                                title={$_('notes.save_as_note')}
                                             >
                                                 <i class="ph ph-floppy-disk"
                                                 ></i>
@@ -832,9 +1087,9 @@ ${$activeNote.content}
                         class="w-full py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         {#if aiLoading}
-                            <i class="ph ph-spinner animate-spin"></i> 生成中...
+                            <i class="ph ph-spinner animate-spin"></i> {$_('notes.generating')}
                         {:else}
-                            <i class="ph ph-sparkle"></i> AI 总结笔记
+                            <i class="ph ph-sparkle"></i> {$_('notes.ai_summarize_btn')}
                         {/if}
                     </button>
                 </div>
@@ -852,12 +1107,12 @@ ${$activeNote.content}
                 on:click={() => (showAiPanel = false)}
                 class="text-slate-500 flex items-center gap-1 font-bold text-sm"
             >
-                <i class="ph-bold ph-caret-left text-lg"></i> 返回
+                <i class="ph-bold ph-caret-left text-lg"></i> {$_('common.back')}
             </button>
             <div
                 class="font-bold text-indigo-700 flex items-center gap-2 text-sm"
             >
-                <i class="ph-fill ph-sparkle"></i> AI 笔记助手
+                <i class="ph-fill ph-sparkle"></i> {$_('notes.ai_assistant')}
             </div>
             <div class="w-16"></div>
         </div>
@@ -902,13 +1157,13 @@ ${$activeNote.content}
                                             copyAiMessage(msg.content)}
                                         class="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold"
                                     >
-                                        <i class="ph ph-copy"></i> 复制
+                                        <i class="ph ph-copy"></i> {$_('common.copy')}
                                     </button>
                                     <button
                                         on:click={saveAsSummaryNote}
                                         class="px-3 py-1.5 bg-emerald-100 text-emerald-600 rounded-lg text-xs font-bold"
                                     >
-                                        <i class="ph ph-floppy-disk"></i> 保存
+                                        <i class="ph ph-floppy-disk"></i> {$_('common.save')}
                                     </button>
                                 </div>
                             {/if}
@@ -953,9 +1208,9 @@ ${$activeNote.content}
                 class="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
             >
                 {#if aiLoading}
-                    <i class="ph ph-spinner animate-spin"></i> 生成中...
+                    <i class="ph ph-spinner animate-spin"></i> {$_('notes.generating')}
                 {:else}
-                    <i class="ph ph-sparkle"></i> AI 总结笔记
+                    <i class="ph ph-sparkle"></i> {$_('notes.ai_summarize_btn')}
                 {/if}
             </button>
         </div>

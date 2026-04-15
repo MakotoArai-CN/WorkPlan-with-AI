@@ -2,11 +2,17 @@
     import { onMount, onDestroy } from 'svelte';
     import { Chart, registerables } from 'chart.js';
     import { taskStore } from '../stores/tasks.js';
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
 
     Chart.register(...registerables);
 
     let chartCanvas;
     let chartInstance;
+
+    function t(key) {
+        return get(_)(key);
+    }
 
     $: if (chartCanvas && $taskStore.tasks) {
         updateChart();
@@ -29,10 +35,10 @@
         const labels = tasks.map(t => t.title.length > 15 ? t.title.substring(0, 15) + '...' : t.title);
         const startDates = tasks.map(t => new Date(t.date).getTime());
         const minDate = Math.min(...startDates);
-        
-        const data = tasks.map((t, index) => {
-            const start = new Date(t.date);
-            const end = t.deadline ? new Date(t.deadline) : new Date(start.getTime() + 86400000);
+
+        const data = tasks.map((task, index) => {
+            const start = new Date(task.date);
+            const end = task.deadline ? new Date(task.deadline) : new Date(start.getTime() + 86400000);
             const duration = Math.max(1, (end.getTime() - start.getTime()) / 86400000);
             const offset = (start.getTime() - minDate) / 86400000;
 
@@ -45,7 +51,7 @@
             return {
                 x: [offset, offset + duration],
                 y: index,
-                backgroundColor: colors[t.priority] || colors.normal
+                backgroundColor: colors[task.priority] || colors.normal
             };
         });
 
@@ -75,7 +81,7 @@
                     },
                     title: {
                         display: true,
-                        text: '任务甘特图',
+                        text: t('charts.gantt_title'),
                         font: { size: 14, weight: 'bold' }
                     },
                     tooltip: {
@@ -83,7 +89,7 @@
                             label: (context) => {
                                 const task = tasks[context.dataIndex];
                                 const start = task.date.split('T')[0];
-                                const end = task.deadline ? task.deadline.split('T')[0] : '无截止';
+                                const end = task.deadline ? task.deadline.split('T')[0] : t('charts.no_deadline');
                                 return `${start} → ${end}`;
                             }
                         }
@@ -95,7 +101,7 @@
                         position: 'top',
                         title: {
                             display: true,
-                            text: '天数'
+                            text: t('charts.days')
                         },
                         ticks: {
                             stepSize: 1
@@ -129,7 +135,7 @@
             <div class="flex items-center justify-center h-full text-slate-400">
                 <div class="text-center">
                     <i class="ph ph-chart-bar text-4xl mb-2"></i>
-                    <p class="text-sm">暂无进行中的任务</p>
+                    <p class="text-sm">{$_('charts.no_active_tasks')}</p>
                 </div>
             </div>
         {:else}

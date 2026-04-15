@@ -1,6 +1,8 @@
 <script>
     import { activeTask, taskStore, currentView } from '../stores/tasks.js';
     import { showConfirm } from '../stores/modal.js';
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
 
     export let openModal;
 
@@ -31,11 +33,12 @@
 
     async function deleteTask() {
         if (!$activeTask) return;
+        const t = get(_);
         const confirmed = await showConfirm({
-            title: '删除任务',
-            message: `确定要删除 "${$activeTask.title}" 吗？`,
-            confirmText: '删除',
-            cancelText: '取消',
+            title: t('task_detail.delete_title'),
+            message: t('task.delete_confirm', { values: { title: $activeTask.title } }),
+            confirmText: t('common.delete'),
+            cancelText: t('common.cancel'),
             variant: 'danger'
         });
         if (confirmed) {
@@ -54,7 +57,7 @@
     <div class="md:hidden fixed inset-0 z-50 bg-white flex flex-col safe-area-detail" style="animation: slideInRight 0.25s ease-out">
         <div class="h-14 border-b border-slate-100 flex items-center justify-between px-4 bg-white shrink-0 detail-header">
             <button on:click={close} class="text-slate-500 flex items-center gap-1 font-bold">
-                <i class="ph-bold ph-caret-left text-lg"></i> 返回
+                <i class="ph-bold ph-caret-left text-lg"></i> {$_('common.back')}
             </button>
             <div class="text-xs font-mono text-slate-400 bg-slate-100 px-2 py-1 rounded">
                 ID: {$activeTask.id.slice(-4)}
@@ -75,28 +78,28 @@
             <div>
                 <div class="flex items-center gap-2 mb-2">
                     {#if isOverdue($activeTask)}
-                        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-red-100 text-red-600 border border-red-200">已超时</span>
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-red-100 text-red-600 border border-red-200">{$_('task_detail.overdue')}</span>
                     {/if}
                     {#if $activeTask.priority === 'urgent'}
-                        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-100 text-orange-600">紧急</span>
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-100 text-orange-600">{$_('task_priority.urgent')}</span>
                     {/if}
                     {#if $activeTask.priority === 'critical'}
-                        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-red-100 text-red-600">特急</span>
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-red-100 text-red-600">{$_('task_priority.critical')}</span>
                     {/if}
                 </div>
                 <h2 class="text-2xl font-black text-slate-800 leading-snug">{$activeTask.title}</h2>
             </div>
 
             <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                <label class="text-xs font-bold text-slate-400 uppercase mb-2 block">备注 / 笔记</label>
-                <textarea value={$activeTask.note || ''} on:input={updateNote} rows="5" placeholder="点击输入内容..."
+                <label class="text-xs font-bold text-slate-400 uppercase mb-2 block">{$_('task_detail.notes')}</label>
+                <textarea value={$activeTask.note || ''} on:input={updateNote} rows="5" placeholder="..."
                     class="w-full text-sm text-slate-700 leading-relaxed focus:outline-none resize-none font-mono placeholder-slate-300"></textarea>
             </div>
 
             <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <label class="text-xs font-bold text-slate-400 uppercase mb-3 block flex justify-between">
-                    子任务清单
-                    <span class="text-blue-500" on:click={() => openModal($activeTask)}>去编辑</span>
+                    {$_('task_detail.subtasks')}
+                    <span class="text-blue-500" on:click={() => openModal($activeTask)}>{$_('task_detail.edit')}</span>
                 </label>
                 <ul class="space-y-3">
                     {#each $activeTask.subtasks || [] as sub}
@@ -110,28 +113,28 @@
                             </span>
                         </li>
                     {:else}
-                        <li class="text-sm text-slate-400 italic text-center py-2">无子任务</li>
+                        <li class="text-sm text-slate-400 italic text-center py-2">{$_('task_detail.no_subtasks')}</li>
                     {/each}
                 </ul>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
                 <div class="bg-white p-3 rounded-lg border border-slate-100">
-                    <div class="text-xs text-slate-400 mb-1">计划日期</div>
+                    <div class="text-xs text-slate-400 mb-1">{$_('task_detail.plan_date')}</div>
                     <div class="font-bold text-slate-700">{formatDateTime($activeTask.date)}</div>
                 </div>
                 <div class="bg-white p-3 rounded-lg border border-slate-100">
-                    <div class="text-xs text-slate-400 mb-1">截止时间</div>
+                    <div class="text-xs text-slate-400 mb-1">{$_('task_detail.due_time')}</div>
                     <div class="font-bold" class:text-red-500={isOverdue($activeTask)} class:text-slate-700={!isOverdue($activeTask)}>
-                        {formatDateTime($activeTask.deadline) || '无'}
+                        {formatDateTime($activeTask.deadline) || '-'}
                     </div>
                 </div>
                 <div class="bg-white p-3 rounded-lg border border-slate-100">
-                    <div class="text-xs text-slate-400 mb-1">开始时间</div>
+                    <div class="text-xs text-slate-400 mb-1">{$_('task_detail.start_time')}</div>
                     <div class="font-bold text-blue-600">{$activeTask.startTime ? formatDateTime($activeTask.startTime) : '-'}</div>
                 </div>
                 <div class="bg-white p-3 rounded-lg border border-slate-100">
-                    <div class="text-xs text-slate-400 mb-1">完成时间</div>
+                    <div class="text-xs text-slate-400 mb-1">{$_('task_detail.finish_time')}</div>
                     <div class="font-bold text-green-600">{$activeTask.completedDate ? formatDateTime($activeTask.completedDate) : '-'}</div>
                 </div>
             </div>
