@@ -6,8 +6,26 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="theme-color" content="#1e3a8a" />
+    <meta name="color-scheme" content="light dark" />
     <title>WorkPlan with AI</title>
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+    <script>
+        (function() {
+            try {
+                var saved = localStorage.getItem('planpro_system_settings');
+                var mode = 'auto';
+                if (saved) {
+                    try { mode = JSON.parse(saved).theme || 'auto'; } catch (e) {}
+                }
+                var isDark = mode === 'dark' || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                    document.documentElement.style.colorScheme = 'dark';
+                    document.querySelector('meta[name="theme-color"]').setAttribute('content','#0f172a');
+                }
+            } catch (e) {}
+        })();
+    </script>
     %sveltekit.head%
 </head>
 <body data-sveltekit-preload-data="hover">

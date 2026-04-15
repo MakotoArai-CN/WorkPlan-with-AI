@@ -2,6 +2,8 @@
     import { renderMarkdown, isMarkdown } from '../utils/markdown.js';
     import { onMount, afterUpdate } from 'svelte';
     import { showToast } from '../stores/modal.js';
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
     import 'highlight.js/styles/github.css';
     import 'katex/dist/katex.min.css';
 
@@ -31,7 +33,7 @@
             const btn = document.createElement('button');
             btn.className = 'code-copy-btn';
             btn.innerHTML = '<i class="ph ph-copy"></i>';
-            btn.title = '复制代码';
+            btn.title = get(_)('common.copy_code');
             btn.onclick = async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -41,13 +43,13 @@
                     await navigator.clipboard.writeText(text);
                     btn.innerHTML = '<i class="ph ph-check"></i>';
                     btn.classList.add('copied');
-                    showToast({ message: '代码已复制', type: 'success', duration: 1500 });
+                    showToast({ message: get(_)('common.code_copied'), type: 'success', duration: 1500 });
                     setTimeout(() => {
                         btn.innerHTML = '<i class="ph ph-copy"></i>';
                         btn.classList.remove('copied');
                     }, 2000);
                 } catch {
-                    showToast({ message: '复制失败', type: 'error' });
+                    showToast({ message: get(_)('common.copy_failed'), type: 'error' });
                 }
             };
             wrapper.appendChild(btn);

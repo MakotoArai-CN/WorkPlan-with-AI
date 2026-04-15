@@ -15,6 +15,10 @@
     } from "../stores/ai.js";
     import { taskStore } from "../stores/tasks.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
+
+    function t(key, opts) { return get(_)(key, opts); }
 
     let inputText = "";
     let chatContainer;
@@ -41,7 +45,7 @@
             scrollToBottom();
         } catch (error) {
             await showAlert({
-                title: "发送失败",
+                title: t('ai_panel.send_failed'),
                 message: error.message,
                 variant: "danger",
             });
@@ -54,7 +58,7 @@
             scrollToBottom();
         } catch (error) {
             await showAlert({
-                title: "重试失败",
+                title: t('ai_panel.retry_failed'),
                 message: error.message,
                 variant: "danger",
             });
@@ -78,7 +82,7 @@
             {
                 role: "assistant",
                 type: "text",
-                content: `任务 "${data.title}" 已成功添加！`,
+                content: t('ai_panel.task_added_msg', { values: { title: data.title } }),
             },
         ]);
         scrollToBottom();
@@ -121,7 +125,7 @@
             {
                 role: "assistant",
                 type: "text",
-                content: `已添加 ${unconfirmed.length} 个任务！`,
+                content: t('ai_panel.tasks_added_msg', { values: { count: unconfirmed.length } }),
             },
         ]);
         scrollToBottom();
@@ -130,10 +134,10 @@
     async function handleDeleteConfirm(tasks, msgIndex) {
         const taskNames = tasks.map((t) => `• ${t.title}`).join("\n");
         const confirmed = await showConfirm({
-            title: "确认删除",
-            message: `确定要删除以下 ${tasks.length} 个任务吗？\n\n${taskNames}`,
-            confirmText: "删除",
-            cancelText: "取消",
+            title: t('ai_panel.confirm_delete'),
+            message: `${t('ai_panel.delete_tasks_confirm', { values: { count: tasks.length } })}\n\n${taskNames}`,
+            confirmText: t('common.delete'),
+            cancelText: t('common.cancel'),
             variant: "danger",
         });
         if (confirmed) {
@@ -145,7 +149,7 @@
                 newHistory[msgIndex] = {
                     role: "assistant",
                     type: "text",
-                    content: `🗑️ 已删除 ${tasks.length} 个任务：${tasks.map((t) => t.title).join("、")}`,
+                    content: `🗑️ ${t('ai_panel.confirm_delete')}: ${tasks.map((t) => t.title).join(", ")}`,
                 };
                 return newHistory;
             });
@@ -155,26 +159,26 @@
 
     async function handleUpdateConfirm(task, updates, msgIndex) {
         const updateDescriptions = [];
-        if (updates.title) updateDescriptions.push(`标题 → "${updates.title}"`);
+        if (updates.title) updateDescriptions.push(`${t('ai_panel.title_label')} → "${updates.title}"`);
         if (updates.date)
-            updateDescriptions.push(`时间 → ${formatDateTime(updates.date)}`);
+            updateDescriptions.push(`${t('ai_panel.time_label')} → ${formatDateTime(updates.date)}`);
         if (updates.deadline)
             updateDescriptions.push(
-                `截止 → ${formatDateTime(updates.deadline)}`,
+                `${t('ai_panel.deadline')} → ${formatDateTime(updates.deadline)}`,
             );
         if (updates.priority)
             updateDescriptions.push(
-                `优先级 → ${formatPriority(updates.priority)}`,
+                `${t('ai_panel.priority_label')} → ${formatPriority(updates.priority)}`,
             );
         if (updates.note !== undefined)
-            updateDescriptions.push(`备注 → "${updates.note}"`);
-        if (updates.subtasks) updateDescriptions.push(`子任务已更新`);
+            updateDescriptions.push(`${t('ai_panel.note_label')} → "${updates.note}"`);
+        if (updates.subtasks) updateDescriptions.push(`${t('ai_panel.subtasks')} updated`);
 
         const confirmed = await showConfirm({
-            title: "确认修改",
-            message: `确定要修改任务 "${task.title}" 吗？\n\n修改内容：\n${updateDescriptions.join("\n")}`,
-            confirmText: "确认修改",
-            cancelText: "取消",
+            title: t('ai_panel.confirm_modify'),
+            message: `${t('ai_panel.modify_task_confirm', { values: { title: task.title, changes: updateDescriptions.join("\n") } })}`,
+            confirmText: t('ai_panel.confirm_modify'),
+            cancelText: t('common.cancel'),
             variant: "warning",
         });
         if (confirmed) {
@@ -184,7 +188,7 @@
                 newHistory[msgIndex] = {
                     role: "assistant",
                     type: "text",
-                    content: `✏️ 已修改任务 "${task.title}"：${updateDescriptions.join("，")}`,
+                    content: `✏️ ${t('ai_panel.task_modified_msg', { values: { title: task.title, changes: updateDescriptions.join("，") } })}`,
                 };
                 return newHistory;
             });
@@ -197,24 +201,24 @@
             .map((op) => {
                 const updates = [];
                 if (op.updates.title)
-                    updates.push(`标题→"${op.updates.title}"`);
+                    updates.push(`${t('ai_panel.title_label')}→"${op.updates.title}"`);
                 if (op.updates.date)
                     updates.push(
-                        `时间→${formatDateTime(op.updates.date).split(" ")[0]}`,
+                        `${t('ai_panel.time_label')}→${formatDateTime(op.updates.date).split(" ")[0]}`,
                     );
                 if (op.updates.priority)
                     updates.push(
-                        `优先级→${formatPriority(op.updates.priority)}`,
+                        `${t('ai_panel.priority_label')}→${formatPriority(op.updates.priority)}`,
                     );
-                return `• ${op.task.title}: ${updates.join(", ") || "更新内容"}`;
+                return `• ${op.task.title}: ${updates.join(", ")}`;
             })
             .join("\n");
 
         const confirmed = await showConfirm({
-            title: "确认批量修改",
-            message: `确定要修改以下 ${operations.length} 个任务吗？\n\n${summaryLines}`,
-            confirmText: "确认修改",
-            cancelText: "取消",
+            title: t('ai_panel.confirm_all_modify'),
+            message: `${t('ai_panel.modify_tasks_confirm', { values: { count: operations.length } })}\n\n${summaryLines}`,
+            confirmText: t('ai_panel.confirm_modify'),
+            cancelText: t('common.cancel'),
             variant: "warning",
         });
         if (confirmed) {
@@ -226,7 +230,7 @@
                 newHistory[msgIndex] = {
                     role: "assistant",
                     type: "text",
-                    content: `已修改 ${operations.length} 个任务`,
+                    content: t('ai_panel.tasks_modified_msg', { values: { count: operations.length } }),
                 };
                 return newHistory;
             });
@@ -240,10 +244,10 @@
             .join("\n");
 
         const confirmed = await showConfirm({
-            title: "批量标记完成",
-            message: `确定要将以下 ${operations.length} 个任务标记为完成吗？\n\n${taskNames}`,
-            confirmText: "标记完成",
-            cancelText: "取消",
+            title: t('ai_panel.mark_complete'),
+            message: `${t('ai_panel.batch_complete_confirm', { values: { count: operations.length } })}\n\n${taskNames}`,
+            confirmText: t('ai_panel.mark_complete'),
+            cancelText: t('common.cancel'),
             variant: "success",
         });
 
@@ -256,7 +260,7 @@
                 newHistory[msgIndex] = {
                     role: "assistant",
                     type: "text",
-                    content: `已将 ${operations.length} 个任务标记为完成！`,
+                    content: t('ai_panel.tasks_completed_msg', { values: { count: operations.length } }),
                 };
                 return newHistory;
             });
@@ -268,15 +272,15 @@
         let summaryLines = [];
 
         if (updateOps.length > 0) {
-            summaryLines.push("【修改】");
+            summaryLines.push(`[${t('ai_panel.modify_section')}]`);
             updateOps.forEach((op) => {
                 const updates = [];
                 if (op.updates.date)
                     updates.push(
-                        `时间→${formatDateTime(op.updates.date).split(" ")[0]}`,
+                        `${t('ai_panel.time_label')}→${formatDateTime(op.updates.date).split(" ")[0]}`,
                     );
                 if (op.updates.title)
-                    updates.push(`标题→"${op.updates.title}"`);
+                    updates.push(`${t('ai_panel.title_label')}→"${op.updates.title}"`);
                 summaryLines.push(
                     `  • ${op.task.title}: ${updates.join(", ")}`,
                 );
@@ -284,17 +288,17 @@
         }
 
         if (deleteOps.length > 0) {
-            summaryLines.push("【删除】");
+            summaryLines.push(`[${t('ai_panel.delete_section')}]`);
             deleteOps.forEach((task) => {
                 summaryLines.push(`  • ${task.title}`);
             });
         }
 
         const confirmed = await showConfirm({
-            title: "确认操作",
-            message: `确定要执行以下操作吗？\n\n${summaryLines.join("\n")}`,
-            confirmText: "确认执行",
-            cancelText: "取消",
+            title: t('ai_panel.confirm_execute'),
+            message: `${t('ai_panel.mixed_confirm_msg')}\n\n${summaryLines.join("\n")}`,
+            confirmText: t('ai_panel.confirm_execute'),
+            cancelText: t('common.cancel'),
             variant: "warning",
         });
 
@@ -308,9 +312,9 @@
 
             const resultParts = [];
             if (updateOps.length > 0)
-                resultParts.push(`修改了 ${updateOps.length} 个任务`);
+                resultParts.push(`${t('ai_panel.modify_section')} ${updateOps.length}`);
             if (deleteOps.length > 0)
-                resultParts.push(`删除了 ${deleteOps.length} 个任务`);
+                resultParts.push(`${t('ai_panel.delete_section')} ${deleteOps.length}`);
 
             chatHistory.update((h) => {
                 const newHistory = [...h];
@@ -342,13 +346,11 @@
     }
 
     function formatPriority(p) {
-        const map = { normal: "普通", urgent: "紧急", critical: "特急" };
-        return map[p] || "普通";
+        return t(`task_priority.${p}`) || t('task_priority.normal');
     }
 
     function formatStatus(s) {
-        const map = { todo: "未开始", doing: "进行中", done: "已完成" };
-        return map[s] || "未开始";
+        return t(`task_status.${s}`) || t('task_status.todo');
     }
 
     function getPriorityColor(p) {
@@ -384,10 +386,10 @@
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
 
-        if (date.getTime() === today.getTime()) return "今天";
-        if (date.getTime() === tomorrow.getTime()) return "明天";
-        if (date.getTime() === dayAfterTomorrow.getTime()) return "后天";
-        if (date.getTime() === yesterday.getTime()) return "昨天";
+        if (date.getTime() === today.getTime()) return t('ai_panel.today');
+        if (date.getTime() === tomorrow.getTime()) return t('ai_panel.tomorrow');
+        if (date.getTime() === dayAfterTomorrow.getTime()) return t('ai_panel.day_after');
+        if (date.getTime() === yesterday.getTime()) return t('ai_panel.yesterday');
 
         return formatDateOnly(dateStr);
     }
@@ -422,7 +424,7 @@
             newHistory[msgIndex] = {
                 role: 'assistant',
                 type: 'text',
-                content: `已完成对 "${task.title}" 的子任务操作`
+                content: t('ai_panel.subtask_completed_msg', { values: { title: task.title } })
             };
             return newHistory;
         });
@@ -436,16 +438,16 @@
 <div class="flex flex-col h-full bg-rose-50/30">
     <div class="h-16 border-b border-rose-100 flex items-center justify-between px-6 bg-white shrink-0">
         <h3 class="font-bold text-rose-600 flex items-center gap-2">
-            <i class="ph-fill ph-sparkle"></i> AI 助手
+            <i class="ph-fill ph-sparkle"></i> {$_('ai_panel.title')}
         </h3>
         <div class="flex items-center gap-2">
             <button on:click={() => showAiSettings.set(true)}
                 class="text-xs font-bold text-rose-500 hover:text-rose-700 px-2 py-1 rounded hover:bg-rose-100 flex items-center gap-1">
-                <i class="ph ph-gear"></i> 设置
+                <i class="ph ph-gear"></i> {$_('ai_panel.settings')}
             </button>
             <button on:click={() => showAiPanel.set(false)}
                 class="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded hover:bg-slate-100 flex items-center gap-1">
-                <i class="ph-bold ph-arrow-u-up-left"></i> 返回
+                <i class="ph-bold ph-arrow-u-up-left"></i> {$_('ai_panel.back')}
             </button>
         </div>
     </div>
@@ -463,23 +465,23 @@
             <div
                 class="bg-white border border-rose-100 p-2.5 md:p-3 rounded-2xl rounded-tl-none text-xs md:text-sm text-slate-700 shadow-sm max-w-[85%]"
             >
-                <div class="font-bold text-rose-600 mb-1">我是您的任务助手</div>
+                <div class="font-bold text-rose-600 mb-1">{$_('ai_panel.task_assistant')}</div>
                 <div class="text-slate-600 space-y-1">
                     <div>
-                        <span class="text-slate-500">添加：</span
-                        >"明天下午3点开会"
+                        <span class="text-slate-500">{$_('ai_panel.add_hint')}</span
+                        >{$_('ai_panel.add_example')}
                     </div>
                     <div>
-                        <span class="text-slate-500">删除：</span
-                        >"删除明天的会议任务"
+                        <span class="text-slate-500">{$_('ai_panel.delete_hint')}</span
+                        >{$_('ai_panel.delete_example')}
                     </div>
                     <div>
-                        <span class="text-slate-500">修改：</span
-                        >"把会议改到后天"
+                        <span class="text-slate-500">{$_('ai_panel.modify_hint')}</span
+                        >{$_('ai_panel.modify_example')}
                     </div>
                     <div>
-                        <span class="text-slate-500">查询：</span
-                        >"本周有什么任务"
+                        <span class="text-slate-500">{$_('ai_panel.query_hint')}</span
+                        >{$_('ai_panel.query_example')}
                     </div>
                 </div>
             </div>
@@ -539,20 +541,20 @@
                                 ></div>
                             </div>
                             <span class="text-[10px] text-slate-400"
-                                >正在分析您的需求...</span
+                                >{$_('ai_panel.analyzing')}</span
                             >
                         </div>
                     {:else if msg.type === "error"}
                         <div class="flex flex-col gap-2">
                             <div class="flex items-center gap-2">
                                 <i class="ph-fill ph-warning-circle"></i>
-                                <span>出错了: {msg.content}</span>
+                                <span>{$_('ai_panel.error_prefix')}: {msg.content}</span>
                             </div>
                             <button
                                 on:click={() => handleRetry(index)}
                                 class="self-start px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 flex items-center gap-1 transition"
                             >
-                                <i class="ph ph-arrow-clockwise"></i> 重试
+                                <i class="ph ph-arrow-clockwise"></i> {$_('ai_panel.retry')}
                             </button>
                         </div>
                     {:else if msg.type === "task_card"}
@@ -560,7 +562,7 @@
                             <div
                                 class="mb-2 font-bold text-rose-600 text-xs md:text-sm flex items-center gap-1"
                             >
-                                <i class="ph ph-plus-circle"></i> 确认添加此任务？
+                                <i class="ph ph-plus-circle"></i> {$_('ai_panel.confirm_add')}
                             </div>
                             <div
                                 class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 md:p-3 mb-3 text-left"
@@ -585,7 +587,7 @@
                                             <span class="text-slate-300">→</span
                                             >
                                             <span class="text-orange-500"
-                                                >截止 {formatTimeOnly(
+                                                >{$_('ai_panel.deadline')} {formatTimeOnly(
                                                     msg.data.deadline,
                                                 )}</span
                                             >
@@ -609,7 +611,7 @@
                                         <div
                                             class="text-[10px] text-slate-400 mb-1 font-bold"
                                         >
-                                            子任务 ({msg.data.subtasks.length})
+                                            {$_('ai_panel.subtasks')} ({msg.data.subtasks.length})
                                         </div>
                                         <ul class="space-y-0.5">
                                             {#each msg.data.subtasks as sub}
@@ -641,9 +643,9 @@
                                     disabled={msg.confirmed}
                                 >
                                     {#if msg.confirmed}
-                                        <i class="ph-bold ph-check"></i> 已添加
+                                        <i class="ph-bold ph-check"></i> {$_('ai_panel.added')}
                                     {:else}
-                                        <i class="ph ph-plus"></i> 确认添加
+                                        <i class="ph ph-plus"></i> {$_('ai_panel.confirm_btn')}
                                     {/if}
                                 </button>
                                 {#if !msg.confirmed}
@@ -651,7 +653,7 @@
                                         on:click={() => removeAiMessage(index)}
                                         class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
                                     >
-                                        取消
+                                        {$_('common.cancel')}
                                     </button>
                                 {/if}
                             </div>
@@ -661,8 +663,8 @@
                             <div
                                 class="mb-2 font-bold text-rose-600 text-xs md:text-sm flex items-center gap-1"
                             >
-                                <i class="ph ph-list-plus"></i> 识别到 {msg
-                                    .tasks.length} 个任务
+                                <i class="ph ph-list-plus"></i> {$_('ai_panel.found_tasks', { values: { count: msg
+                                    .tasks.length } })}
                             </div>
                             <div
                                 class="space-y-2 mb-3 max-h-64 overflow-y-auto"
@@ -711,8 +713,7 @@
                                                     <div
                                                         class="text-[10px] text-slate-400 mt-0.5"
                                                     >
-                                                        含 {task.subtasks
-                                                            .length} 个子任务
+                                                        {$_('ai_panel.contains_subtasks', { values: { count: task.subtasks.length } })}
                                                     </div>
                                                 {/if}
                                             </div>
@@ -730,8 +731,8 @@
                                                 disabled={isConfirmed}
                                             >
                                                 {isConfirmed
-                                                    ? "已添加"
-                                                    : "+ 添加"}
+                                                    ? $_('ai_panel.added')
+                                                    : $_('ai_panel.add_action')}
                                             </button>
                                         </div>
                                     </div>
@@ -748,7 +749,7 @@
                                             )}
                                         class="flex-1 bg-rose-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-rose-700 shadow-sm flex items-center justify-center gap-1"
                                     >
-                                        <i class="ph ph-checks"></i> 全部添加 ({msg
+                                        <i class="ph ph-checks"></i> {$_('ai_panel.add_all')} ({msg
                                             .tasks.length -
                                             (msg.confirmedIndexes?.length ||
                                                 0)})
@@ -757,14 +758,14 @@
                                         on:click={() => removeAiMessage(index)}
                                         class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
                                     >
-                                        取消
+                                        {$_('common.cancel')}
                                     </button>
                                 </div>
                             {:else}
                                 <div
                                     class="text-center text-[10px] text-green-600 font-bold py-1"
                                 >
-                                    所有任务已添加完成
+                                    {$_('ai_panel.all_added')}
                                 </div>
                             {/if}
                         </div>
@@ -820,14 +821,14 @@
                                         handleDeleteConfirm(msg.tasks, index)}
                                     class="flex-1 bg-red-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-red-700 flex items-center justify-center gap-1"
                                 >
-                                    <i class="ph ph-trash"></i> 确认删除 ({msg
+                                    <i class="ph ph-trash"></i> {$_('ai_panel.confirm_delete')} ({msg
                                         .tasks.length})
                                 </button>
                                 <button
                                     on:click={() => removeAiMessage(index)}
                                     class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
                                 >
-                                    取消
+                                    {$_('common.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -844,7 +845,7 @@
                                 <div class="text-[10px] space-y-1">
                                     {#if msg.updates.title}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">标题</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.title_label')}</span>
                                             <span class="text-slate-400 line-through">{msg.task.title}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{msg.updates.title}</span>
@@ -852,7 +853,7 @@
                                     {/if}
                                     {#if msg.updates.date}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">时间</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.time_label')}</span>
                                             <span class="text-slate-400">{getRelativeDate(msg.task.date)} {formatTimeOnly(msg.task.date)}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{getRelativeDate(msg.updates.date)} {formatTimeOnly(msg.updates.date)}</span>
@@ -860,7 +861,7 @@
                                     {/if}
                                     {#if msg.updates.priority && msg.updates.priority !== msg.task.priority}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">优先级</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.priority_label')}</span>
                                             <span class="text-slate-400">{formatPriority(msg.task.priority)}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{formatPriority(msg.updates.priority)}</span>
@@ -868,7 +869,7 @@
                                     {/if}
                                     {#if msg.updates.status && msg.updates.status !== msg.task.status}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">状态</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.status_label')}</span>
                                             <span class="text-slate-400">{formatStatus(msg.task.status)}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{formatStatus(msg.updates.status)}</span>
@@ -876,16 +877,16 @@
                                     {/if}
                                     {#if msg.updates.deadline}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">截止</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.deadline')}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{formatDateTime(msg.updates.deadline)}</span>
                                         </div>
                                     {/if}
                                     {#if msg.updates.note !== undefined}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">备注</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.note_label')}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
-                                            <span class="text-amber-700 font-bold">{msg.updates.note || "(清空)"}</span>
+                                            <span class="text-amber-700 font-bold">{msg.updates.note || $_('ai_panel.clear_note')}</span>
                                         </div>
                                     {/if}
                                 </div>
@@ -895,13 +896,13 @@
                                     on:click={() => handleUpdateConfirm(msg.task, msg.updates, index)}
                                     class="flex-1 bg-amber-500 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-amber-600 flex items-center justify-center gap-1"
                                 >
-                                    <i class="ph ph-check"></i> 确认修改
+                                    <i class="ph ph-check"></i> {$_('ai_panel.confirm_modify')}
                                 </button>
                                 <button
                                     on:click={() => removeAiMessage(index)}
                                     class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
                                 >
-                                    取消
+                                    {$_('common.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -911,11 +912,11 @@
                                 <i class="ph ph-pencil-simple"></i> {msg.message}
                             </div>
                             <div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3 text-left">
-                                <div class="font-bold text-slate-800 text-xs mb-2">原任务: {msg.task.title}</div>
+                                <div class="font-bold text-slate-800 text-xs mb-2">{$_('ai_panel.original_task')}: {msg.task.title}</div>
                                 <div class="text-[10px] space-y-1">
                                     {#if msg.updates.title}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">标题</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.title_label')}</span>
                                             <span class="text-slate-400 line-through">{msg.task.title}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{msg.updates.title}</span>
@@ -923,7 +924,7 @@
                                     {/if}
                                     {#if msg.updates.date}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">时间</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.time_label')}</span>
                                             <span class="text-slate-400">{getRelativeDate(msg.task.date)} {formatTimeOnly(msg.task.date)}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{getRelativeDate(msg.updates.date)} {formatTimeOnly(msg.updates.date)}</span>
@@ -931,7 +932,7 @@
                                     {/if}
                                     {#if msg.updates.priority && msg.updates.priority !== msg.task.priority}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">优先级</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.priority_label')}</span>
                                             <span class="text-slate-400">{formatPriority(msg.task.priority)}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{formatPriority(msg.updates.priority)}</span>
@@ -939,16 +940,16 @@
                                     {/if}
                                     {#if msg.updates.deadline}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">截止</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.deadline')}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
                                             <span class="text-amber-700 font-bold">{formatDateTime(msg.updates.deadline)}</span>
                                         </div>
                                     {/if}
                                     {#if msg.updates.note !== undefined}
                                         <div class="flex items-center gap-1">
-                                            <span class="text-slate-400 w-12">备注</span>
+                                            <span class="text-slate-400 w-12">{$_('ai_panel.note_label')}</span>
                                             <i class="ph ph-arrow-right text-amber-500"></i>
-                                            <span class="text-amber-700 font-bold">{msg.updates.note || '(清空)'}</span>
+                                            <span class="text-amber-700 font-bold">{msg.updates.note || $_('ai_panel.clear_note')}</span>
                                         </div>
                                     {/if}
                                 </div>
@@ -956,11 +957,11 @@
                             <div class="flex gap-2">
                                 <button on:click={() => handleUpdateConfirm(msg.task, msg.updates, index)}
                                     class="flex-1 bg-amber-500 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-amber-600 flex items-center justify-center gap-1">
-                                    <i class="ph ph-check"></i> 确认修改
+                                    <i class="ph ph-check"></i> {$_('ai_panel.confirm_modify')}
                                 </button>
                                 <button on:click={() => removeAiMessage(index)}
                                     class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200">
-                                    取消
+                                    {$_('common.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -976,16 +977,16 @@
                                         <div class="font-bold text-slate-800 text-xs">{op.task.title}</div>
                                         <div class="text-[10px] text-amber-700 mt-0.5">
                                             {#if op.updates.date}
-                                                时间 → {getRelativeDate(op.updates.date)} {formatTimeOnly(op.updates.date)}
+                                                {$_('ai_panel.time_label')} → {getRelativeDate(op.updates.date)} {formatTimeOnly(op.updates.date)}
                                             {/if}
                                             {#if op.updates.title}
-                                                标题 → {op.updates.title}
+                                                {$_('ai_panel.title_label')} → {op.updates.title}
                                             {/if}
                                             {#if op.updates.priority}
-                                                优先级 → {formatPriority(op.updates.priority)}
+                                                {$_('ai_panel.priority_label')} → {formatPriority(op.updates.priority)}
                                             {/if}
                                             {#if op.updates.status}
-                                                状态 → {formatStatus(op.updates.status)}
+                                                {$_('ai_panel.status_label')} → {formatStatus(op.updates.status)}
                                             {/if}
                                         </div>
                                     </div>
@@ -996,13 +997,13 @@
                                     on:click={() => handleMultiUpdateConfirm(msg.operations, index)}
                                     class="flex-1 bg-amber-500 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-amber-600 flex items-center justify-center gap-1"
                                 >
-                                    <i class="ph ph-checks"></i> 确认全部修改 ({msg.operations.length})
+                                    <i class="ph ph-checks"></i> {$_('ai_panel.confirm_all_modify')} ({msg.operations.length})
                                 </button>
                                 <button
                                     on:click={() => removeAiMessage(index)}
                                     class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
                                 >
-                                    取消
+                                    {$_('common.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -1042,14 +1043,14 @@
                                         )}
                                     class="flex-1 bg-green-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-green-700 flex items-center justify-center gap-1"
                                 >
-                                    <i class="ph ph-checks"></i> 标记完成 ({msg
+                                    <i class="ph ph-checks"></i> {$_('ai_panel.mark_complete')} ({msg
                                         .operations.length})
                                 </button>
                                 <button
                                     on:click={() => removeAiMessage(index)}
                                     class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
                                 >
-                                    取消
+                                    {$_('common.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -1067,7 +1068,7 @@
                                     <div
                                         class="text-[10px] text-amber-600 font-bold mb-1 flex items-center gap-1"
                                     >
-                                        <i class="ph ph-pencil-simple"></i> 修改
+                                        <i class="ph ph-pencil-simple"></i> {$_('ai_panel.modify_section')}
                                         ({msg.updateOps.length})
                                     </div>
                                     <div class="space-y-1">
@@ -1098,7 +1099,7 @@
                                     <div
                                         class="text-[10px] text-red-600 font-bold mb-1 flex items-center gap-1"
                                     >
-                                        <i class="ph ph-trash"></i> 删除 ({msg
+                                        <i class="ph ph-trash"></i> {$_('ai_panel.delete_section')} ({msg
                                             .deleteOps.length})
                                     </div>
                                     <div class="space-y-1">
@@ -1131,13 +1132,13 @@
                                         )}
                                     class="flex-1 bg-purple-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-purple-700 flex items-center justify-center gap-1"
                                 >
-                                    <i class="ph ph-check"></i> 确认执行
+                                    <i class="ph ph-check"></i> {$_('ai_panel.confirm_execute')}
                                 </button>
                                 <button
                                     on:click={() => removeAiMessage(index)}
                                     class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
                                 >
-                                    取消
+                                    {$_('common.cancel')}
                                 </button>
                             </div>
                         </div>
@@ -1203,10 +1204,9 @@
                                             <div
                                                 class="mt-1 pt-1 border-t border-blue-200 text-[10px] text-slate-500"
                                             >
-                                                子任务: {task.subtasks.filter(
+                                                {$_('ai_panel.subtask_progress', { values: { done: task.subtasks.filter(
                                                     (s) => s.status === "done",
-                                                ).length}/{task.subtasks.length}
-                                                完成
+                                                ).length, total: task.subtasks.length } })}
                                             </div>
                                         {/if}
                                     </div>
@@ -1221,24 +1221,24 @@
                             </div>
                             <div class="bg-purple-50 border border-purple-200 rounded-lg p-2.5 mb-3 text-left">
                                 <div class="font-bold text-slate-800 text-xs mb-2">
-                                    任务: {msg.task.title}
+                                    {$_('ai_panel.task_label')}: {msg.task.title}
                                 </div>
                                 <div class="text-[10px] space-y-1">
                                     {#each msg.subtaskChanges as change, idx}
                                         <div class="flex items-center gap-1 p-1 bg-white rounded border border-purple-100">
                                             {#if change.action === 'add'}
-                                                <span class="text-green-600 font-bold">+ 添加:</span>
+                                                <span class="text-green-600 font-bold">{$_('ai_panel.add_action')}:</span>
                                                 <span class="text-slate-700">{change.new_title}</span>
                                             {:else if change.action === 'delete'}
-                                                <span class="text-red-600 font-bold">- 删除:</span>
+                                                <span class="text-red-600 font-bold">{$_('ai_panel.delete_action')}:</span>
                                                 <span class="text-slate-400 line-through">{change.old_title}</span>
                                             {:else if change.action === 'update'}
-                                                <span class="text-amber-600 font-bold">✏ 修改:</span>
+                                                <span class="text-amber-600 font-bold">{$_('ai_panel.update_action')}:</span>
                                                 <span class="text-slate-400 line-through">{change.old_title}</span>
                                                 <i class="ph ph-arrow-right text-purple-400"></i>
                                                 <span class="text-slate-700">{change.new_title}</span>
                                             {:else if change.action === 'toggle'}
-                                                <span class="text-blue-600 font-bold">◐ 切换状态:</span>
+                                                <span class="text-blue-600 font-bold">{$_('ai_panel.toggle_action')}:</span>
                                                 <span class="text-slate-700">{change.old_title}</span>
                                             {/if}
                                         </div>
@@ -1251,16 +1251,16 @@
                                     class="flex-1 bg-purple-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-purple-700 flex items-center justify-center gap-1"
                                     disabled={msg.confirmed}>
                                     {#if msg.confirmed}
-                                        <i class="ph-bold ph-check"></i> 已执行
+                                        <i class="ph-bold ph-check"></i> {$_('ai_panel.executed')}
                                     {:else}
-                                        <i class="ph ph-check"></i> 确认执行
+                                        <i class="ph ph-check"></i> {$_('ai_panel.confirm_execute')}
                                     {/if}
                                 </button>
                                 {#if !msg.confirmed}
                                     <button
                                         on:click={() => removeAiMessage(index)}
                                         class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200">
-                                        取消
+                                        {$_('common.cancel')}
                                     </button>
                                 {/if}
                             </div>
@@ -1284,7 +1284,7 @@
                     !e.shiftKey &&
                     (e.preventDefault(), handleSend())}
                 rows="1"
-                placeholder="描述您的需求..."
+                placeholder={$_('ai_panel.placeholder')}
                 disabled={$isAiLoading}
                 class="flex-1 bg-transparent border-none focus:ring-0 text-xs md:text-sm resize-none max-h-20 md:max-h-24 py-2 text-slate-700 outline-none disabled:opacity-50"
             ></textarea>
@@ -1299,30 +1299,30 @@
         <div class="mt-1.5 flex justify-center gap-2 flex-wrap">
             <button
                 on:click={() => {
-                    inputText = "查询今天有什么任务";
+                    inputText = t('ai_panel.query_today_cmd');
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
             >
-                今天任务
+                {$_('ai_panel.quick_today')}
             </button>
             <button
                 on:click={() => {
-                    inputText = "查询本周有什么任务";
+                    inputText = t('ai_panel.query_week_cmd');
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
             >
-                本周任务
+                {$_('ai_panel.quick_week')}
             </button>
             <button
                 on:click={() => {
-                    inputText = "查询明天有什么任务";
+                    inputText = t('ai_panel.query_tomorrow_cmd');
                     handleSend();
                 }}
                 class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
             >
-                明天任务
+                {$_('ai_panel.quick_tomorrow')}
             </button>
         </div>
     </div>

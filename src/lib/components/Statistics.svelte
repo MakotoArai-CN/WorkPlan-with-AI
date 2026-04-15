@@ -4,6 +4,7 @@
     import { aiConfig, generateReport } from '../stores/ai.js';
     import { showAlert } from '../stores/modal.js';
     import { get } from 'svelte/store';
+    import { _ } from 'svelte-i18n';
     import MarkdownRenderer from './MarkdownRenderer.svelte';
     import GanttChart from './GanttChart.svelte';
     import Charts from './Charts.svelte';
@@ -17,13 +18,13 @@
     let showReport = false;
     let activeChartType = 'pie';
 
-    const chartTypes = [
-        { id: 'pie', name: '饼图', icon: 'ph-chart-pie-slice' },
-        { id: 'doughnut', name: '环形图', icon: 'ph-chart-donut' },
-        { id: 'bar', name: '柱状图', icon: 'ph-chart-bar' },
-        { id: 'line', name: '折线图', icon: 'ph-chart-line' },
-        { id: 'radar', name: '雷达图', icon: 'ph-radar' },
-        { id: 'polarArea', name: '极坐标', icon: 'ph-circle-notch' }
+    $: chartTypes = [
+        { id: 'pie', name: $_('statistics_page.chart_pie'), icon: 'ph-chart-pie-slice' },
+        { id: 'doughnut', name: $_('statistics_page.chart_doughnut'), icon: 'ph-chart-donut' },
+        { id: 'bar', name: $_('statistics_page.chart_bar'), icon: 'ph-chart-bar' },
+        { id: 'line', name: $_('statistics_page.chart_line'), icon: 'ph-chart-line' },
+        { id: 'radar', name: $_('statistics_page.chart_radar'), icon: 'ph-radar' },
+        { id: 'polarArea', name: $_('statistics_page.chart_polar'), icon: 'ph-circle-notch' }
     ];
 
     $: statsData = (() => {
@@ -96,10 +97,15 @@
     }
 
     function getStatusLabel(t) {
+        const tr = get(_);
         if (t.status === 'done') {
-            return t.deadline && t.completedDate > t.deadline ? '超时完成' : '已完成';
+            return t.deadline && t.completedDate > t.deadline
+                ? tr('statistics_page.status_overdue')
+                : tr('statistics_page.status_done');
         }
-        return { todo: '未开始', doing: '进行中' }[t.status];
+        return t.status === 'todo'
+            ? tr('statistics_page.status_todo')
+            : tr('statistics_page.status_doing');
     }
 
     function selectTask(task) {
@@ -107,13 +113,14 @@
     }
 
     async function handleGenerateReport(type) {
+        const t = get(_);
         if (statsData.list.length === 0) {
-            await showAlert({ title: '无数据', message: '当前时间段内没有任务数据', variant: 'warning' });
+            await showAlert({ title: t('statistics_page.no_data_title'), message: t('statistics_page.no_data_msg'), variant: 'warning' });
             return;
         }
         const config = get(aiConfig);
-        if (!config.apiKey && config.provider !== 'g4f' && !config.provider.startsWith('g4f-') && config.provider !== 'ollama' && config.provider !== 'lmstudio') {
-            await showAlert({ title: '未配置 AI', message: '请先在 AI 设置中配置 API Key', variant: 'warning' });
+        if (!config.apiKey && config.provider !== 'ollama' && config.provider !== 'lmstudio') {
+            await showAlert({ title: t('statistics_page.no_ai_title'), message: t('statistics_page.no_ai_msg'), variant: 'warning' });
             return;
         }
         generatingReport = true;
@@ -123,7 +130,7 @@
             reportContent = result;
             showReport = true;
         } catch (error) {
-            await showAlert({ title: '生成失败', message: error.message, variant: 'danger' });
+            await showAlert({ title: t('statistics_page.gen_failed'), message: error.message, variant: 'danger' });
         } finally {
             generatingReport = false;
         }
@@ -135,9 +142,10 @@
     }
 
     function copyReport() {
+        const t = get(_);
         if (navigator.clipboard && reportContent) {
             navigator.clipboard.writeText(reportContent);
-            showAlert({ title: '复制成功', message: '报告内容已复制到剪贴板', variant: 'success' });
+            showAlert({ title: t('statistics_page.copy_ok'), message: t('statistics_page.copy_msg'), variant: 'success' });
         }
     }
 
@@ -147,25 +155,25 @@
 <div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
     <header class="h-auto bg-white/90 backdrop-blur px-4 md:px-6 flex flex-col md:flex-row justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0 py-2 gap-2">
         <div class="w-full md:w-auto">
-            <h2 class="text-lg font-bold text-indigo-800">数据统计</h2>
+            <h2 class="text-lg font-bold text-indigo-800">{$_('statistics_page.title')}</h2>
         </div>
         <div class="flex flex-col md:flex-row items-center gap-2 w-full md:w-auto">
             <select bind:value={statsStatus}
                 class="w-full md:w-auto text-xs border border-slate-200 rounded px-2 py-1.5 outline-none bg-white text-slate-600 font-bold">
-                <option value="all">全部状态</option>
-                <option value="done">已完成</option>
-                <option value="incomplete">未完成</option>
-                <option value="doing">进行中</option>
-                <option value="todo">未开始</option>
+                <option value="all">{$_('statistics_page.all_status')}</option>
+                <option value="done">{$_('statistics_page.done')}</option>
+                <option value="incomplete">{$_('statistics_page.undone')}</option>
+                <option value="doing">{$_('statistics_page.doing')}</option>
+                <option value="todo">{$_('statistics_page.todo')}</option>
             </select>
             <div class="w-full md:w-auto flex bg-slate-100 p-1 rounded-lg gap-1 overflow-x-auto justify-start">
                 {#each [
-                    { key: 'today', label: '今日' },
-                    { key: 'yesterday', label: '昨日' },
-                    { key: 'week', label: '本周' },
-                    { key: 'lastWeek', label: '上周' },
-                    { key: 'month', label: '本月' },
-                    { key: 'lastMonth', label: '上月' }
+                    { key: 'today', label: $_('statistics_page.today') },
+                    { key: 'yesterday', label: $_('statistics_page.yesterday') },
+                    { key: 'week', label: $_('statistics_page.this_week') },
+                    { key: 'lastWeek', label: $_('statistics_page.last_week') },
+                    { key: 'month', label: $_('statistics_page.this_month') },
+                    { key: 'lastMonth', label: $_('statistics_page.last_month') }
                 ] as item}
                     <button on:click={() => setStatsRange(item.key)}
                         class="px-2 py-1 text-[10px] rounded hover:bg-white hover:shadow-sm transition whitespace-nowrap"
@@ -192,22 +200,22 @@
         <div class="p-4 md:p-6 space-y-6 pb-32">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                 <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100">
-                    <div class="text-[10px] md:text-xs font-bold text-slate-400 uppercase mb-1">总任务</div>
+                    <div class="text-[10px] md:text-xs font-bold text-slate-400 uppercase mb-1">{$_('statistics_page.total')}</div>
                     <div class="text-2xl md:text-3xl font-black text-slate-700">{statsData.total}</div>
                 </div>
                 <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100">
-                    <div class="text-[10px] md:text-xs font-bold text-green-500 uppercase mb-1">已完成</div>
+                    <div class="text-[10px] md:text-xs font-bold text-green-500 uppercase mb-1">{$_('statistics_page.done')}</div>
                     <div class="text-2xl md:text-3xl font-black text-green-600">
                         {statsData.done}
                         <span class="text-xs md:text-sm font-medium text-slate-400">({statsData.rate}%)</span>
                     </div>
                 </div>
                 <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100">
-                    <div class="text-[10px] md:text-xs font-bold text-blue-500 uppercase mb-1">进行中</div>
+                    <div class="text-[10px] md:text-xs font-bold text-blue-500 uppercase mb-1">{$_('statistics_page.doing')}</div>
                     <div class="text-2xl md:text-3xl font-black text-blue-600">{statsData.doing}</div>
                 </div>
                 <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100">
-                    <div class="text-[10px] md:text-xs font-bold text-gray-500 uppercase mb-1">未开始</div>
+                    <div class="text-[10px] md:text-xs font-bold text-gray-500 uppercase mb-1">{$_('statistics_page.todo')}</div>
                     <div class="text-2xl md:text-3xl font-black text-gray-600">{statsData.todo}</div>
                 </div>
             </div>
@@ -217,7 +225,7 @@
                     <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
                         <div class="flex items-center gap-2">
                             <i class="ph-fill ph-sparkle text-indigo-600 text-xl"></i>
-                            <span class="font-bold text-indigo-800">AI 报告生成</span>
+                            <span class="font-bold text-indigo-800">{$_('statistics_page.ai_report')}</span>
                         </div>
                         <div class="flex gap-2 w-full md:w-auto">
                             <button on:click={() => handleGenerateReport('daily')}
@@ -228,7 +236,7 @@
                                 {:else}
                                     <i class="ph ph-sun"></i>
                                 {/if}
-                                日报
+                                {$_('statistics_page.daily')}
                             </button>
                             <button on:click={() => handleGenerateReport('weekly')}
                                 disabled={generatingReport || statsData.list.length === 0}
@@ -238,7 +246,7 @@
                                 {:else}
                                     <i class="ph ph-calendar-check"></i>
                                 {/if}
-                                周报
+                                {$_('statistics_page.weekly')}
                             </button>
                         </div>
                     </div>
@@ -249,7 +257,7 @@
                 <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
                     <div class="px-4 md:px-6 py-3 border-b border-slate-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
                         <span class="font-bold text-slate-700 flex items-center gap-2">
-                            <i class="ph-fill ph-chart-pie-slice"></i> 数据图表
+                            <i class="ph-fill ph-chart-pie-slice"></i> {$_('statistics_page.chart')}
                         </span>
                         <div class="flex flex-wrap gap-1">
                             {#each chartTypes as chart}
@@ -270,7 +278,7 @@
                             <div class="flex items-center justify-center h-full text-slate-400">
                                 <div class="text-center">
                                     <i class="ph ph-chart-bar text-4xl mb-2"></i>
-                                    <p class="text-sm">暂无数据</p>
+                                    <p class="text-sm">{$_('statistics_page.no_data')}</p>
                                 </div>
                             </div>
                         {:else}
@@ -287,10 +295,10 @@
             <div class="space-y-3">
                 <div class="px-2 text-xs font-bold text-slate-400 flex items-center gap-2">
                     <i class="ph ph-list"></i>
-                    任务明细 ({statsStart} ~ {statsEnd})
+                    {$_('statistics_page.task_list')} ({statsStart} ~ {statsEnd})
                 </div>
                 {#if statsData.list.length === 0}
-                    <div class="text-center py-8 text-slate-400 text-sm">暂无数据</div>
+                    <div class="text-center py-8 text-slate-400 text-sm">{$_('statistics_page.no_data')}</div>
                 {:else}
                     {#each statsData.list as t (t.id)}
                         <div on:click={() => selectTask(t)} on:keydown={() => selectTask(t)} role="button" tabindex="0"
@@ -304,14 +312,14 @@
                             <div class="flex justify-between items-center text-[10px] text-slate-400">
                                 <div class="flex gap-2">
                                     <span class:text-red-500={isOverdue(t)} class:font-bold={isOverdue(t)}>
-                                        截止: {formatDateTime(t.deadline) || '-'}
+                                        {$_('statistics_page.due')} {formatDateTime(t.deadline) || '-'}
                                     </span>
                                 </div>
                                 <div class="font-mono">
                                     {#if t.completedDate}
-                                        <span class="text-green-600">完: {formatDateTime(t.completedDate).split(' ')[0]}</span>
+                                        <span class="text-green-600">{$_('statistics_page.finished')} {formatDateTime(t.completedDate).split(' ')[0]}</span>
                                     {:else}
-                                        <span class="text-slate-300">未完成</span>
+                                        <span class="text-slate-300">{$_('statistics_page.not_done')}</span>
                                     {/if}
                                 </div>
                             </div>
@@ -329,12 +337,12 @@
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative flex flex-col max-h-[85vh] overflow-hidden">
             <div class="px-4 md:px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-indigo-50 shrink-0">
                 <h3 class="font-bold text-base md:text-lg text-indigo-700 flex items-center gap-2">
-                    <i class="ph-fill ph-file-text"></i> AI 生成报告
+                    <i class="ph-fill ph-file-text"></i> {$_('statistics_page.report_title')}
                 </h3>
                 <div class="flex items-center gap-2">
                     <button on:click={copyReport}
                         class="text-sm text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1 px-3 py-1 rounded hover:bg-indigo-100">
-                        <i class="ph ph-copy"></i> 复制
+                        <i class="ph ph-copy"></i> {$_('statistics_page.copy')}
                     </button>
                     <button on:click={closeReport} class="text-slate-500 hover:text-slate-700">
                         <i class="ph ph-x text-xl"></i>

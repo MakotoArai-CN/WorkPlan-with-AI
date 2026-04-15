@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import { encrypt, decrypt, hashPassword, verifyPassword, generateSessionToken, encryptSessionData, decryptSessionData } from '../utils/crypto.js';
+import { encrypt, decrypt, hashPassword, verifyPassword, generateSessionToken, encryptSessionData, decryptSessionData, needsMigration, migrateEncryption } from '../utils/crypto.js';
 
 const STORAGE_KEY = 'planpro_passwords';
 const MASTER_KEY = 'planpro_master_hash';
@@ -19,6 +19,7 @@ function createPasswordsStore() {
     let currentMasterPassword = null;
     let sessionToken = null;
     let saveTimer = null;
+    let migrationDone = false;
 
     function loadSettings() {
         if (typeof window === 'undefined') return {};
@@ -41,10 +42,12 @@ function createPasswordsStore() {
         if (currentState.initialized && currentState.isUnlocked) {
             return;
         }
+
         const masterHash = localStorage.getItem(MASTER_KEY);
         const settings = loadSettings();
         const saved = localStorage.getItem(STORAGE_KEY);
         let passwords = [];
+
         if (saved) {
             try {
                 passwords = JSON.parse(saved);
@@ -77,6 +80,33 @@ function createPasswordsStore() {
             rememberSession: settings.rememberSession || false,
             initialized: true
         });
+
+        if (sessionUnlocked && !migrationDone) {
+            migrateAllPasswords();
+        }
+    }
+
+    function migrateAllPasswords() {
+        if (migrationDone || !currentMasterPassword) return;
+        
+        const state = get({ subscribe });
+        let needsSave = false;
+        const migratedPasswords = state.passwords.map(p => {
+            if (needsMigration(p.password)) {
+                const migrated = migrateEncryption(p.password, currentMasterPassword);
+                if (migrated) {
+                    needsSave = true;
+                    return { ...p, password: migrated };
+                }
+            }
+            return p;
+        });
+
+        if (needsSave) {
+            update(s => ({ ...s, passwords: migratedPasswords }));
+            saveImmediate({ ...state, passwords: migratedPasswords });
+        }
+        migrationDone = true;
     }
 
     function save(state) {
@@ -132,10 +162,8 @@ function createPasswordsStore() {
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
             if (state.isUnlocked && currentMasterPassword && sessionToken) return true;
-
             const encryptedSession = sessionStorage.getItem(SESSION_KEY);
             if (!encryptedSession || !state.masterPasswordHash) return false;
-
             try {
                 const sessionData = decryptSessionData(encryptedSession, state.masterPasswordHash);
                 return !!(sessionData && sessionData.token && sessionData.key);
@@ -146,16 +174,17 @@ function createPasswordsStore() {
         restoreSession: () => {
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
-
             const encryptedSession = sessionStorage.getItem(SESSION_KEY);
             if (!encryptedSession || !state.masterPasswordHash) return false;
-
             try {
                 const sessionData = decryptSessionData(encryptedSession, state.masterPasswordHash);
                 if (sessionData && sessionData.token && sessionData.key) {
                     sessionToken = sessionData.token;
                     currentMasterPassword = sessionData.key;
                     update(s => ({ ...s, isUnlocked: true }));
+                    if (!migrationDone) {
+                        setTimeout(() => migrateAllPasswords(), 100);
+                    }
                     return true;
                 }
             } catch {
@@ -177,6 +206,9 @@ function createPasswordsStore() {
                 currentMasterPassword = password;
                 update(s => ({ ...s, isUnlocked: true }));
                 saveSession(password, state.masterPasswordHash);
+                if (!migrationDone) {
+                    setTimeout(() => migrateAllPasswords(), 100);
+                }
                 return true;
             }
             return false;
@@ -270,6 +302,7 @@ function createPasswordsStore() {
         clearAll: () => {
             currentMasterPassword = null;
             sessionToken = null;
+            migrationDone = false;
             clearSession();
             if (typeof window !== 'undefined') {
                 localStorage.removeItem(STORAGE_KEY);
@@ -285,38 +318,38 @@ function createPasswordsStore() {
                 initialized: false
             });
         },
-        changeMasterPassword: (oldPassword, newPassword) => {
+        changeMasterPassword: async (oldPassword, newPassword) => {
             const state = get({ subscribe });
-
             if (!verifyPassword(oldPassword, state.masterPasswordHash)) {
                 return { success: false, error: '原密码错误' };
             }
-
             if (!newPassword || newPassword.length < 8) {
                 return { success: false, error: '新密码至少需要8个字符' };
             }
 
-            const decryptedPasswords = state.passwords.map(p => ({
-                ...p,
-                password: decrypt(p.password, oldPassword) || ''
-            }));
+            const BATCH_SIZE = 50;
+            const passwords = state.passwords;
+            const reEncryptedPasswords = [];
+            const now = new Date().toISOString();
+
+            for (let i = 0; i < passwords.length; i += BATCH_SIZE) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+                const batch = passwords.slice(i, i + BATCH_SIZE);
+                for (const p of batch) {
+                    const plain = decrypt(p.password, oldPassword) || '';
+                    reEncryptedPasswords.push({
+                        ...p,
+                        password: encrypt(plain, newPassword),
+                        updatedAt: now
+                    });
+                }
+            }
 
             const newHash = hashPassword(newPassword);
-
-            const reEncryptedPasswords = decryptedPasswords.map(p => ({
-                ...p,
-                password: encrypt(p.password, newPassword),
-                updatedAt: new Date().toISOString()
-            }));
-
             currentMasterPassword = newPassword;
 
             update(s => {
-                const newState = {
-                    ...s,
-                    passwords: reEncryptedPasswords,
-                    masterPasswordHash: newHash
-                };
+                const newState = { ...s, passwords: reEncryptedPasswords, masterPasswordHash: newHash };
                 saveImmediate(newState);
                 return newState;
             });

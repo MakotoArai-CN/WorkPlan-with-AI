@@ -14,8 +14,19 @@ async function getSupabase() {
         return null;
     }
     const { createClient } = await import('@supabase/supabase-js');
-    supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false }
+    });
     return supabase;
+}
+
+function isRetryableError(error) {
+    if (!error) return false;
+    const retryableCodes = ['PGRST301', '503', '504', '522', '524'];
+    const msg = (error.message || '').toLowerCase();
+    return retryableCodes.includes(String(error.code)) ||
+        msg.includes('paused') || msg.includes('timeout') ||
+        msg.includes('unavailable') || msg.includes('network');
 }
 
 function createTaskStore() {
@@ -58,11 +69,17 @@ function createTaskStore() {
                 .maybeSingle();
 
             if (error) {
-                if (error.code === 'PGRST116' || error.message.includes('not find')) {
+                const msg = error.message || '';
+                if (error.code === 'PGRST116' || msg.includes('not find')) {
                     update(s => ({ ...s, syncStatus: 'idle' }));
                     return;
                 }
-                console.error('Load data error:', error.message);
+                if (error.code === '42P01' || msg.includes('does not exist')) {
+                    console.warn('Table not found. Please create the planpro_data table in Supabase.');
+                    update(s => ({ ...s, syncStatus: 'idle' }));
+                    return;
+                }
+                console.error('Load data error:', error.code, error.message);
                 update(s => ({ ...s, syncStatus: 'error' }));
                 return;
             }

@@ -1,5 +1,4 @@
 import { writable, get } from 'svelte/store';
-import { registerBackEvent } from "@kingsword/tauri-plugin-mobile-onbackpressed-listener";
 
 export const navigationStack = writable([]);
 export const lastBackPress = writable(0);
@@ -7,9 +6,7 @@ export const showExitToast = writable(false);
 
 const DOUBLE_BACK_THRESHOLD = 2000;
 
-// 用于防止重复注册监听器
-let isBackListenerRegistered = false;
-let backListener = null;
+let backListenerCleanup = null;
 
 export function pushNavigation(view) {
     navigationStack.update(stack => {
@@ -71,7 +68,7 @@ export function handleBackPress(closeToQuit, callbacks = {}) {
     if (closeToQuit) {
         const now = Date.now();
         const last = get(lastBackPress);
-        
+
         if (now - last < DOUBLE_BACK_THRESHOLD) {
             showExitToast.set(false);
             if (onExit) onExit();
@@ -91,39 +88,25 @@ export function handleBackPress(closeToQuit, callbacks = {}) {
 export async function setupAndroidBackHandler(closeToQuit, callbacks) {
     if (typeof window === 'undefined') return () => {};
 
-    const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (!isMobile) return () => {};
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (!isAndroid) return () => {};
 
-    // 防止重复注册
-    if (isBackListenerRegistered) {
-        return async () => {
-            if (backListener) {
-                await backListener.unregister();
-                backListener = null;
-                isBackListenerRegistered = false;
-            }
-        };
+    if (backListenerCleanup) {
+        backListenerCleanup();
+        backListenerCleanup = null;
     }
 
-    try {
-        isBackListenerRegistered = true;
-        
-        backListener = await registerBackEvent(() => {
-            handleBackPress(closeToQuit, callbacks);
-        });
+    const handler = () => {
+        handleBackPress(closeToQuit, callbacks);
+    };
 
-        return async () => {
-            if (backListener) {
-                await backListener.unregister();
-                backListener = null;
-                isBackListenerRegistered = false;
-            }
-        };
-    } catch (e) {
-        console.log('Back button handler not available:', e);
-        isBackListenerRegistered = false;
-        return () => {};
-    }
+    window.addEventListener('androidbackbutton', handler);
+
+    backListenerCleanup = () => {
+        window.removeEventListener('androidbackbutton', handler);
+    };
+
+    return backListenerCleanup;
 }
 
 export function initializeNavigation(initialView = 'dashboard') {

@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store';
+import { _ as i18n } from 'svelte-i18n';
 
 function getInitialSettings() {
     if (typeof window === 'undefined') {
@@ -13,12 +14,13 @@ function getInitialSettings() {
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.2.6',
+            appVersion: '0.2.7',
             dailyReportPrompt: '',
-            weeklyReportPrompt: ''
+            weeklyReportPrompt: '',
+            theme: 'auto',
+            markdownEditor: 'vditor'
         };
     }
-
     const saved = localStorage.getItem('planpro_system_settings');
     if (saved) {
         try {
@@ -34,9 +36,11 @@ function getInitialSettings() {
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.2.6',
+                appVersion: '0.2.7',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
-                weeklyReportPrompt: parsed.weeklyReportPrompt || ''
+                weeklyReportPrompt: parsed.weeklyReportPrompt || '',
+                theme: parsed.theme || 'auto',
+                markdownEditor: parsed.markdownEditor || 'vditor'
             };
         } catch {
             return getDefaultSettings();
@@ -57,9 +61,11 @@ function getDefaultSettings() {
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.2.6',
+        appVersion: '0.2.7',
         dailyReportPrompt: '',
-        weeklyReportPrompt: ''
+        weeklyReportPrompt: '',
+        theme: 'auto',
+        markdownEditor: 'vditor'
     };
 }
 
@@ -76,8 +82,20 @@ function createSettingsStore() {
             agreementAccepted: state.agreementAccepted,
             autoSaveApiKey: state.autoSaveApiKey,
             dailyReportPrompt: state.dailyReportPrompt,
-            weeklyReportPrompt: state.weeklyReportPrompt
+            weeklyReportPrompt: state.weeklyReportPrompt,
+            theme: state.theme,
+            markdownEditor: state.markdownEditor
         }));
+    }
+
+    function applyTheme(theme) {
+        if (typeof window === 'undefined') return;
+        const isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', isDark);
+        document.body.classList.toggle('dark', isDark);
+        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+        const metaTheme = document.querySelector('meta[name="theme-color"]');
+        if (metaTheme) metaTheme.setAttribute('content', isDark ? '#0f172a' : '#ffffff');
     }
 
     async function syncCloseToQuit(value) {
@@ -92,12 +110,22 @@ function createSettingsStore() {
     async function init() {
         if (typeof window === 'undefined') return;
 
+        const current = get({ subscribe });
+        applyTheme(current.theme);
+
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            const state = get({ subscribe });
+            if (state.theme === 'auto') {
+                applyTheme('auto');
+            }
+        });
+
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.2.6' }));
+            update(s => ({ ...s, appVersion: '0.2.7' }));
         }
 
         try {
@@ -120,7 +148,6 @@ function createSettingsStore() {
             update(s => ({ ...s, autoStart: false }));
         }
 
-        const current = get({ subscribe });
         if (current.closeToQuit) {
             syncCloseToQuit(true);
         }
@@ -172,30 +199,43 @@ function createSettingsStore() {
                 throw e;
             }
         },
+        setTheme: (theme) => update(s => {
+            applyTheme(theme);
+            const newState = { ...s, theme };
+            save(newState);
+            return newState;
+        }),
+        setMarkdownEditor: (editor) => update(s => {
+            const newState = { ...s, markdownEditor: editor };
+            save(newState);
+            return newState;
+        }),
         testNotification: async () => {
             const state = get({ subscribe });
+            const t = get(i18n);
             if (!state.notificationAvailable) {
-                throw new Error('通知权限未授予');
+                throw new Error(t('settings.notification_permission') || '通知权限未授予');
             }
             try {
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
                 await sendNotification({
-                    title: 'WorkPlan 测试通知',
-                    body: '通知功能正常工作！'
+                    title: t('settings.notification_test_title') || 'WorkPlan',
+                    body: t('settings.notification_test_body') || 'OK'
                 });
             } catch (e) {
-                throw new Error('发送通知失败: ' + e.message);
+                throw new Error((t('settings.notification_failed') || 'Error: ').replace('{error}', e.message));
             }
         },
         showTaskNotification: async (tasks) => {
             const state = get({ subscribe });
             if (!state.enableNotification || !state.notificationAvailable || !tasks?.length) return;
             try {
+                const t = get(i18n);
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
-                const titles = tasks.slice(0, 5).map(t => t.title).join('、');
-                const extra = tasks.length > 5 ? `...等 ${tasks.length} 项任务` : '';
+                const titles = tasks.slice(0, 5).map(t2 => t2.title).join('、');
+                const extra = tasks.length > 5 ? ` +${tasks.length}` : '';
                 await sendNotification({
-                    title: `今日待办 (${tasks.length})`,
+                    title: `${t('settings.today_tasks') || 'Today'} (${tasks.length})`,
                     body: titles + extra
                 });
             } catch (e) {

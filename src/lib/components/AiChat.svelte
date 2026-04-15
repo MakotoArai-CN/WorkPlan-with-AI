@@ -10,6 +10,8 @@
     import { showConfirm } from "../stores/modal.js";
     import { popNavigation, getNavigationDepth } from "../stores/navigation.js";
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
 
     export let onBack = null;
 
@@ -17,22 +19,12 @@
     let chatContainer;
     let chatStyle = "default";
 
-    const chatStyles = [
-        { id: "default", name: "默认", icon: "ph-chat-circle", color: "blue" },
-        { id: "fun", name: "有趣", icon: "ph-smiley", color: "yellow" },
-        {
-            id: "professional",
-            name: "专业",
-            icon: "ph-briefcase",
-            color: "slate",
-        },
-        { id: "concise", name: "简洁", icon: "ph-lightning", color: "green" },
-        {
-            id: "teacher",
-            name: "老师",
-            icon: "ph-chalkboard-teacher",
-            color: "orange",
-        },
+    $: chatStyles = [
+        { id: "default", name: $_('ai_chat.chat_style_default'), icon: "ph-chat-circle", color: "blue" },
+        { id: "fun", name: $_('ai_chat.chat_style_fun'), icon: "ph-smiley", color: "yellow" },
+        { id: "professional", name: $_('ai_chat.chat_style_pro'), icon: "ph-briefcase", color: "slate" },
+        { id: "concise", name: $_('ai_chat.chat_style_concise'), icon: "ph-lightning", color: "green" },
+        { id: "teacher", name: $_('ai_chat.chat_style_teacher'), icon: "ph-chalkboard-teacher", color: "orange" },
     ];
 
     function scrollToBottom() {
@@ -76,11 +68,12 @@
     }
 
     async function handleClear() {
+        const t = get(_);
         const confirmed = await showConfirm({
-            title: "清空对话",
-            message: "确定要清空所有对话记录吗？",
-            confirmText: "清空",
-            cancelText: "取消",
+            title: t('ai_chat.confirm_clear'),
+            message: t('ai_chat.confirm_clear'),
+            confirmText: t('ai_chat.confirm_clear_btn'),
+            cancelText: t('common.cancel'),
             variant: "warning",
         });
         if (confirmed) {
@@ -118,12 +111,12 @@
             </div>
             <div>
                 <h2 class="text-base md:text-lg font-bold text-slate-800">
-                    AI 聊天
+                    {$_('ai_chat.title')}
                 </h2>
                 <div
                     class="text-[10px] md:text-xs text-slate-500 hidden md:block"
                 >
-                    智能对话助手 · 支持上下文记忆
+                    {$_('ai_chat.subtitle')}
                 </div>
             </div>
         </div>
@@ -133,14 +126,14 @@
                 class="h-8 md:h-9 px-4 md:px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium flex items-center gap-1 md:gap-2 transition"
             >
                 <i class="ph ph-gear"></i>
-                <span class="hidden md:inline">设置</span>
+                <span class="hidden md:inline">{$_('ai_chat.settings')}</span>
             </button>
             <button
                 on:click={handleClear}
                 class="h-8 md:h-9 px-4 md:px-4 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium flex items-center gap-1 md:gap-2 transition"
             >
                 <i class="ph ph-trash"></i>
-                <span class="hidden md:inline">清空</span>
+                <span class="hidden md:inline">{$_('ai_chat.clear_btn')}</span>
             </button>
         </div>
     </header>
@@ -183,47 +176,47 @@
                     ></i>
                 </div>
                 <h3 class="text-base md:text-lg font-bold text-slate-700 mb-2">
-                    开始对话
+                    {$_('ai_chat.start')}
                 </h3>
                 <p class="text-xs md:text-sm text-slate-500 max-w-xs px-4">
-                    选择聊天风格，输入您的问题，AI 将为您解答
+                    {$_('ai_chat.empty_hint')}
                 </p>
                 <div class="mt-4 md:mt-6 grid grid-cols-2 gap-2 max-w-xs px-4">
                     <button
                         on:click={() => {
-                            inputText = "你好，介绍一下你自己";
+                            inputText = "Hello, introduce yourself";
                             handleSend();
                         }}
                         class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
                     >
-                        👋 自我介绍
+                        👋 {$_('ai_chat.quick_intro')}
                     </button>
                     <button
                         on:click={() => {
-                            inputText = "今天的天气怎么样？";
+                            inputText = "How's the weather today?";
                             handleSend();
                         }}
                         class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
                     >
-                        🌤️ 聊聊天气
+                        🌤️ {$_('ai_chat.quick_weather')}
                     </button>
                     <button
                         on:click={() => {
-                            inputText = "给我讲个笑话";
+                            inputText = "Tell me a joke";
                             handleSend();
                         }}
                         class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
                     >
-                        😄 讲个笑话
+                        😄 {$_('ai_chat.quick_joke')}
                     </button>
                     <button
                         on:click={() => {
-                            inputText = "帮我写一首诗";
+                            inputText = "Write me a poem";
                             handleSend();
                         }}
                         class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
                     >
-                        ✨ 写首诗
+                        ✨ {$_('ai_chat.quick_poem')}
                     </button>
                 </div>
             </div>
@@ -270,7 +263,7 @@
                                 <button
                                     on:click={() => copyMessage(msg.content)}
                                     class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition"
-                                    title="复制"
+                                    title={$_('ai.copy')}
                                 >
                                     <i class="ph ph-copy text-sm"></i>
                                 </button>
@@ -317,7 +310,7 @@
                                         ></div>
                                     </div>
                                     <span class="text-xs text-slate-400"
-                                        >AI 正在思考...</span
+                                        >{$_('ai.loading')}</span
                                     >
                                 </div>
                             </div>
@@ -329,13 +322,13 @@
                                     <div class="flex items-center gap-2">
                                         <i class="ph-fill ph-warning-circle"
                                         ></i>
-                                        <span>发送失败: {msg.content}</span>
+                                        <span>{$_('ai.retry')}: {msg.content}</span>
                                     </div>
                                     <button
                                         on:click={() => handleRetry(index)}
                                         class="self-start px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 flex items-center gap-1 transition"
                                     >
-                                        <i class="ph ph-arrow-clockwise"></i> 重试
+                                        <i class="ph ph-arrow-clockwise"></i> {$_('ai.retry')}
                                     </button>
                                 </div>
                             </div>
@@ -359,7 +352,7 @@
                     !e.shiftKey &&
                     (e.preventDefault(), handleSend())}
                 rows="1"
-                placeholder="输入消息..."
+                placeholder={$_('ai_chat.ph')}
                 disabled={$isAiLoading}
                 class="flex-1 bg-transparent border-none focus:ring-0 text-sm resize-none max-h-24 md:max-h-32 py-2 text-slate-700 outline-none disabled:opacity-50"
             ></textarea>
@@ -373,8 +366,7 @@
             </button>
         </div>
         <div class="mt-2 text-center text-[10px] text-slate-400">
-            当前风格: {chatStyles.find((s) => s.id === chatStyle)?.name ||
-                "默认"} · Enter 发送
+            {$_('ai_chat.style_hint', { values: { style: chatStyles.find((s) => s.id === chatStyle)?.name || $_('ai_chat.chat_style_default') } })}
         </div>
     </div>
 </div>

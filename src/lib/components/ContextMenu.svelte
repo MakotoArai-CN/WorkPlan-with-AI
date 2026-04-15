@@ -2,6 +2,8 @@
     import { createEventDispatcher, onMount, onDestroy } from 'svelte';
     import { currentView, taskStore } from '../stores/tasks.js';
     import { showToast } from '../stores/modal.js';
+    import { _ } from 'svelte-i18n';
+    import { get } from 'svelte/store';
     const dispatch = createEventDispatcher();
     let visible = false;
     let x = 0;
@@ -16,25 +18,26 @@
         hasSelection = window.getSelection().toString().length > 0;
         const activeEl = document.activeElement;
         hasFocusedInput = activeEl && (
-            activeEl.tagName === 'INPUT' || 
+            activeEl.tagName === 'INPUT' ||
             activeEl.tagName === 'TEXTAREA' ||
             activeEl.isContentEditable
         );
     }
+    function t(key) { return get(_)(key); }
     $: menuItems = visible ? [
-        { id: 'refresh', label: '刷新', icon: 'ph-arrow-clockwise', shortcut: 'F5', show: true },
+        { id: 'refresh', label: $_('context_menu.refresh'), icon: 'ph-arrow-clockwise', shortcut: 'F5', show: true },
         { id: 'divider1', type: 'divider', show: frozenState.hasSelection || frozenState.hasFocusedInput },
-        { id: 'copy', label: '复制', icon: 'ph-copy', shortcut: 'Ctrl+C', show: frozenState.hasSelection },
-        { id: 'paste', label: '粘贴', icon: 'ph-clipboard', shortcut: 'Ctrl+V', show: frozenState.hasFocusedInput },
+        { id: 'copy', label: $_('context_menu.copy'), icon: 'ph-copy', shortcut: 'Ctrl+C', show: frozenState.hasSelection },
+        { id: 'paste', label: $_('context_menu.paste'), icon: 'ph-clipboard', shortcut: 'Ctrl+V', show: frozenState.hasFocusedInput },
         { id: 'divider2', type: 'divider', show: true },
-        { id: 'createTask', label: '创建任务', icon: 'ph-plus-circle', shortcut: 'Ctrl+N', show: true },
-        { id: 'aiChat', label: 'AI Chat', icon: 'ph-robot', shortcut: 'Ctrl+I', show: true },
+        { id: 'createTask', label: $_('context_menu.create_task'), icon: 'ph-plus-circle', shortcut: 'Ctrl+N', show: true },
+        { id: 'aiChat', label: $_('nav.ai_chat'), icon: 'ph-robot', shortcut: 'Ctrl+I', show: true },
         { id: 'divider3', type: 'divider', show: true },
-        { id: 'dailyReport', label: '生成日报', icon: 'ph-sun', shortcut: '', show: true },
-        { id: 'weeklyReport', label: '生成周报', icon: 'ph-calendar-check', shortcut: '', show: true },
+        { id: 'dailyReport', label: $_('context_menu.daily_report'), icon: 'ph-sun', shortcut: '', show: true },
+        { id: 'weeklyReport', label: $_('context_menu.weekly_report'), icon: 'ph-calendar-check', shortcut: '', show: true },
         { id: 'divider4', type: 'divider', show: true },
-        { id: 'syncData', label: '同步数据', icon: 'ph-cloud-arrow-up', shortcut: '', show: true },
-        { id: 'about', label: '关于项目', icon: 'ph-github-logo', shortcut: '', show: true }
+        { id: 'syncData', label: $_('context_menu.sync_data'), icon: 'ph-cloud-arrow-up', shortcut: '', show: true },
+        { id: 'about', label: $_('context_menu.about'), icon: 'ph-github-logo', shortcut: '', show: true }
     ].filter(item => item.show !== false) : [];
     function show(event) {
         event.preventDefault();
@@ -84,7 +87,7 @@
                     const selection = window.getSelection().toString();
                     if (selection) {
                         await navigator.clipboard.writeText(selection);
-                        showToast({ message: '已复制', type: 'success', duration: 1500 });
+                        showToast({ message: t('context_menu.copied'), type: 'success', duration: 1500 });
                     }
                 } catch {
                     document.execCommand('copy');
@@ -94,7 +97,7 @@
                 try {
                     const text = await navigator.clipboard.readText();
                     if (!text) {
-                        showToast({ message: '剪贴板为空', type: 'warning', duration: 1500 });
+                        showToast({ message: t('context_menu.clipboard_empty'), type: 'warning', duration: 1500 });
                         break;
                     }
                     if (targetElement && (targetElement.tagName === 'INPUT' || targetElement.tagName === 'TEXTAREA')) {
@@ -107,19 +110,19 @@
                         targetElement.selectionStart = newPos;
                         targetElement.selectionEnd = newPos;
                         targetElement.dispatchEvent(new Event('input', { bubbles: true }));
-                        showToast({ message: '已粘贴', type: 'success', duration: 1500 });
+                        showToast({ message: t('context_menu.pasted'), type: 'success', duration: 1500 });
                     } else if (targetElement && targetElement.isContentEditable) {
                         targetElement.focus();
                         document.execCommand('insertText', false, text);
-                        showToast({ message: '已粘贴', type: 'success', duration: 1500 });
+                        showToast({ message: t('context_menu.pasted'), type: 'success', duration: 1500 });
                     } else {
-                        showToast({ message: '请先选择输入框', type: 'warning', duration: 1500 });
+                        showToast({ message: t('context_menu.focus_input'), type: 'warning', duration: 1500 });
                     }
                 } catch (e) {
                     try {
                         document.execCommand('paste');
                     } catch {
-                        showToast({ message: '粘贴失败', type: 'error', duration: 1500 });
+                        showToast({ message: t('context_menu.paste_failed'), type: 'error', duration: 1500 });
                     }
                 }
                 break;
@@ -137,7 +140,7 @@
                 break;
             case 'syncData':
                 taskStore.loadFromLocal();
-                showToast({ message: '数据同步中...', type: 'info', duration: 1500 });
+                showToast({ message: t('context_menu.syncing'), type: 'info', duration: 1500 });
                 break;
             case 'about':
                 window.open('https://github.com/MakotoArai-CN/WorkPlan-with-AI', '_blank');
