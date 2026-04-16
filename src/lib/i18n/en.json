@@ -537,6 +537,7 @@
     "get_key": "Get Key",
     "prompt_ph": "Leave empty to use default template...",
     "docs": "Docs",
+    "group_g4f": "G4F Free",
     "group_international": "International",
     "group_domestic": "China Providers",
     "group_local": "Local Deploy",

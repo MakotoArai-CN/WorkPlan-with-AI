@@ -537,6 +537,7 @@
     "get_key": "Keyを取得",
     "prompt_ph": "空欄の場合はデフォルトテンプレートを使用...",
     "docs": "ドキュメント",
+    "group_g4f": "G4F無料サービス",
     "group_international": "海外プロバイダー",
     "group_domestic": "中国プロバイダー",
     "group_local": "ローカルデプロイ",

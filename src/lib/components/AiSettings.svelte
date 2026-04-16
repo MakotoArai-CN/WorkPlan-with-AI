@@ -18,6 +18,7 @@
     import { onMount } from "svelte";
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { isG4FProvider } from "../utils/g4f-client.js";
 
     function t(key, opts) { return get(_)(key, opts); }
 
@@ -163,6 +164,7 @@
 
     $: isCustomProvider = $aiConfig.provider === "custom";
     $: needsApiKey = (() => {
+        if (isG4FProvider($aiConfig.provider)) return false;
         if (
             $aiConfig.provider === "ollama" ||
             $aiConfig.provider === "lmstudio"
@@ -256,8 +258,15 @@
                             on:change={handleProviderChange}
                             class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
                         >
+                            <optgroup label={$_('ai_settings_page.group_g4f')}>
+                                {#each providers.filter((p) => p.id.startsWith("g4f-")) as provider}
+                                    <option value={provider.id}
+                                        >{provider.name}</option
+                                    >
+                                {/each}
+                            </optgroup>
                             <optgroup label={$_('ai_settings_page.group_international')}>
-                                {#each providers.filter((p) => ["openai", "anthropic", "google", "mistral", "cohere", "perplexity", "together", "fireworks", "openrouter", "groq", "huggingface", "novita", "cloudflare"].includes(p.id)) as provider}
+                                {#each providers.filter((p) => !p.id.startsWith("g4f-") && ["openai", "anthropic", "google", "mistral", "cohere", "perplexity", "together", "fireworks", "openrouter", "groq", "huggingface", "novita", "cloudflare"].includes(p.id)) as provider}
                                     <option value={provider.id}
                                         >{provider.name}</option
                                     >

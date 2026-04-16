@@ -537,6 +537,7 @@
     "get_key": "获取 Key",
     "prompt_ph": "留空则使用默认模板...",
     "docs": "文档",
+    "group_g4f": "G4F 免费服务",
     "group_international": "国际服务商",
     "group_domestic": "国内服务商",
     "group_local": "本地部署",
