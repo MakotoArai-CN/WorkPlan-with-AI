@@ -8,6 +8,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+G4F_DEV_REPOSITORY="${G4F_DEV_REPOSITORY:-https://github.com/MakotoArai-CN/g4f.dev.git}"
+G4F_DEV_REF="${G4F_DEV_REF:-194fceb5d75de62feae5acb919f8abd57bb3fa30}"
+G4F_DEV_DIR="${G4F_DEV_DIR:-g4f.dev}"
+
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
@@ -30,6 +34,50 @@ check_command() {
     else
         return 1
     fi
+}
+
+has_g4f_assets() {
+    [ -f "$G4F_DEV_DIR/dist/js/providers.json" ] && [ -f "$G4F_DEV_DIR/dist/js/client.js" ]
+}
+
+ensure_g4f_assets() {
+    if has_g4f_assets; then
+        log_success "G4F 资源已就绪"
+        return 0
+    fi
+
+    if ! check_command git; then
+        log_error "缺少 git，无法自动拉取 G4F 资源"
+        return 1
+    fi
+
+    log_info "准备 G4F 资源..."
+
+    if [ -d "$G4F_DEV_DIR/.git" ]; then
+        log_info "更新现有 g4f.dev 仓库到固定版本 $G4F_DEV_REF"
+        git -C "$G4F_DEV_DIR" sparse-checkout init --cone
+        git -C "$G4F_DEV_DIR" sparse-checkout set dist
+        git -C "$G4F_DEV_DIR" fetch --depth 1 "$G4F_DEV_REPOSITORY" "$G4F_DEV_REF"
+        git -C "$G4F_DEV_DIR" checkout --force FETCH_HEAD
+    elif [ -d "$G4F_DEV_DIR" ]; then
+        log_error "$G4F_DEV_DIR 目录存在但不是 Git 仓库，无法自动拉取 G4F 资源"
+        log_error "请删除该目录后重试，或手动补齐 dist/js/providers.json 与 dist/js/client.js"
+        return 1
+    else
+        log_info "克隆固定版本的 g4f.dev 资源"
+        git clone --filter=blob:none --sparse "$G4F_DEV_REPOSITORY" "$G4F_DEV_DIR"
+        git -C "$G4F_DEV_DIR" sparse-checkout set dist
+        git -C "$G4F_DEV_DIR" fetch --depth 1 "$G4F_DEV_REPOSITORY" "$G4F_DEV_REF"
+        git -C "$G4F_DEV_DIR" checkout --force FETCH_HEAD
+    fi
+
+    if has_g4f_assets; then
+        log_success "G4F 资源准备完成"
+        return 0
+    fi
+
+    log_error "G4F 资源拉取后仍不完整"
+    return 1
 }
 
 detect_os() {
@@ -256,6 +304,10 @@ main() {
     fi
     
     check_bun
+
+    if ! ensure_g4f_assets; then
+        exit 1
+    fi
     
     ANDROID_AVAILABLE=false
     IOS_AVAILABLE=false
