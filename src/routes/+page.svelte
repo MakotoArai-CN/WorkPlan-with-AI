@@ -26,9 +26,12 @@
     import AiSettings from '$lib/components/AiSettings.svelte';
     import AgreementModal from '$lib/components/AgreementModal.svelte';
 
+    const DESKTOP_DETAIL_VIEWS = new Set(['dashboard', 'templates', 'scheduled', 'statistics', 'notes']);
+
     let showModal = false;
     let editTask = null;
     let isMobile = false;
+    let previousView = 'dashboard';
 
     $: needsAgreement = !$settingsStore.agreementAccepted;
 
@@ -37,6 +40,16 @@
             /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
         initializeNavigation('dashboard');
     });
+
+    $: if ($currentView !== previousView) {
+        activeTask.set(null);
+        previousView = $currentView;
+    }
+
+    $: showDetailPanel =
+        !isMobile &&
+        DESKTOP_DETAIL_VIEWS.has($currentView) &&
+        (Boolean($activeTask) || $showAiPanel);
 
     function openModal(task = null) {
         editTask = task;
@@ -87,6 +100,26 @@
     function handleTaskDetailBack() {
         activeTask.set(null);
     }
+
+    function openDesktopDetailPanel(mode = 'detail') {
+        if (mode === 'ai') {
+            if ($showAiPanel) {
+                showAiPanel.set(false);
+                return;
+            }
+            activeTask.set(null);
+            showAiPanel.set(true);
+            return;
+        }
+
+        if (isMobile || !DESKTOP_DETAIL_VIEWS.has($currentView)) return;
+        showAiPanel.set(false);
+    }
+
+    function closeDesktopDetailPanel() {
+        showAiPanel.set(false);
+        activeTask.set(null);
+    }
 </script>
 
 <div class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800 safe-area-container">
@@ -107,17 +140,17 @@
 
         <main class="flex-1 flex flex-col relative bg-slate-100 min-w-0 border-r border-slate-200 pb-14 md:pb-0">
             {#if $currentView === 'dashboard'}
-                <Dashboard {openModal} />
+                <Dashboard {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'aichat'}
                 <AiChat onBack={handleAiPanelBack} />
             {:else if $currentView === 'templates'}
-                <Templates {openModal} />
+                <Templates {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'scheduled'}
-                <Scheduled {openModal} />
+                <Scheduled {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'statistics'}
-                <Statistics />
+                <Statistics openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'notes'}
-                <Notes />
+                <Notes openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'passwords'}
                 <Passwords />
             {:else if $currentView === 'settings'}
@@ -127,17 +160,21 @@
             {/if}
         </main>
 
-        {#if $currentView !== 'aichat' && $currentView !== 'notes'}
-            <TaskDetail {openModal}>
+        {#if DESKTOP_DETAIL_VIEWS.has($currentView)}
+            <div
+                class={`hidden md:flex overflow-hidden shrink-0 transition-[width,opacity,transform] duration-300 ease-out ${showDetailPanel ? 'w-[350px] opacity-100 translate-x-0 pointer-events-auto' : 'w-0 opacity-0 translate-x-6 pointer-events-none'}`}
+            >
+            <TaskDetail {openModal} closePanel={closeDesktopDetailPanel}>
                 <svelte:fragment slot="ai-panel">
                     <AiPanel />
                 </svelte:fragment>
             </TaskDetail>
+            </div>
         {/if}
 
         <MobileTaskDetail {openModal} />
 
-        {#if $showAiPanel && $currentView !== 'aichat' && $currentView !== 'notes'}
+        {#if $showAiPanel && $currentView !== 'aichat' && $currentView !== 'passwords' && $currentView !== 'settings'}
             <div class="md:hidden fixed inset-0 z-50 bg-white flex flex-col safe-area-container">
                 <div class="h-14 border-b border-rose-100 flex items-center justify-between px-4 bg-white shrink-0 mobile-header">
                     <button on:click={handleAiPanelBack}

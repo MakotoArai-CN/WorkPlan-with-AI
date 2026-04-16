@@ -1,5 +1,5 @@
 <script>
-    import { notesStore, activeNote, notesList, noteCategories, noteAiPrompts } from "../stores/notes.js";
+    import { notesStore, activeNote, notesList, noteCategories } from "../stores/notes.js";
     import { showConfirm, showToast } from "../stores/modal.js";
     import { renderMarkdown } from "../utils/markdown.js";
     import {
@@ -8,13 +8,14 @@
         exportToPDF,
     } from "../utils/export.js";
     import {
-        aiConfig,
         getEffectiveConfig,
-        streamingContent,
+        configureAiPanel,
+        showAiPanel,
     } from "../stores/ai.js";
     import { settingsStore } from "../stores/settings.js";
-    import { _ } from 'svelte-i18n';
+    import { _, locale } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { toIntlLocale } from '../i18n/index.js';
 
     function t(key, opts) { return get(_)(key, opts); }
 
@@ -40,17 +41,10 @@
     $: if (selectedCategory === null) selectedCategory = $_('notes.category_all');
     let showCategoryPanel = false;
     let newCategoryName = '';
-    let showAiPromptPanel = false;
-    let editingPromptId = null;
-    let editingPromptText = '';
     let aiSuggestion = '';
-    let aiSuggestionLoading = false;
     let aiSuggestionTimer = null;
-    let summarizing = false;
     let autoSaveEnabled = true;
-    let showAiPanel = false;
-    let aiMessages = [];
-    let aiLoading = false;
+    export let openDetailPanel = null;
 
     onMount(async () => {
         notesStore.load();
@@ -365,101 +359,37 @@
         });
         if (confirmed) {
             notesStore.deleteNote($activeNote.id);
-            showAiPanel = false;
-            aiMessages = [];
         }
     }
 
-    function toggleAiPanel() {
-        showAiPanel = !showAiPanel;
-        if (showAiPanel && aiMessages.length === 0 && $activeNote) {
-            const t = get(_);
-            aiMessages = [
-                {
-                    role: "assistant",
-                    type: "text",
-                    content: t('notes.ai_greeting', { values: { title: $activeNote.title } }),
-                },
-            ];
-        }
-    }
+    function openNoteAiAssistant(mode = 'general') {
+        if (!$activeNote) return;
 
-    async function summarizeNote() {
-        if (!$activeNote || !$activeNote.content) {
-            showToast({ message: get(_)('notes.ai_empty'), type: "warning" });
+        const noteTitle = $activeNote.title || $_('notes.new_note_title');
+        const noteCategory = $activeNote.category || $_('notes.category_all');
+        const noteContent = ($activeNote.content || '').trim();
+        const draft = mode === 'summary'
+            ? `我正在整理一篇工作笔记，请基于下面的内容生成一份结构清晰的摘要，并给出后续可执行建议。\n\n标题：${noteTitle}\n分类：${noteCategory}\n内容：\n${noteContent || '（当前为空）'}`
+            : `我正在处理一篇工作笔记，请结合下面这篇笔记继续协助我。你可以帮我总结、扩写、润色、拆分行动项，或者回答与内容相关的问题。\n\n标题：${noteTitle}\n分类：${noteCategory}\n内容：\n${noteContent || '（当前为空）'}`;
+
+        configureAiPanel({
+            scope: 'notes',
+            mode: 'note',
+            source: 'notes',
+            title: `${noteTitle} · AI`,
+            description: noteContent.slice(0, 140) || $_('notes.blank_note'),
+            entityLabel: '笔记',
+            draft,
+            activeNoteId: $activeNote.id,
+            noteTitle,
+            noteCategory,
+            noteContent
+        }, true);
+        if (openDetailPanel) {
+            openDetailPanel('ai');
             return;
         }
-        const config = getEffectiveConfig();
-        const needsApiKey =
-            config.provider !== "ollama" &&
-            config.provider !== "lmstudio";
-        if (needsApiKey && !config.apiKey) {
-            showToast({ message: get(_)('notes.ai_no_key'), type: "warning" });
-            return;
-        }
-        aiLoading = true;
-        aiMessages = [
-            ...aiMessages,
-            { role: "user", type: "text", content: get(_)('notes.ai_summarize_request') },
-        ];
-        aiMessages = [
-            ...aiMessages,
-            {
-                role: "assistant",
-                type: "streaming",
-                content: "",
-                isStreaming: true,
-            },
-        ];
-        const streamingIndex = aiMessages.length - 1;
-        try {
-            const { callAIWithMessagesStream } = await import(
-                "../utils/ai-providers.js"
-            );
-            const systemPrompt = t('notes.ai_summary_system_prompt', { values: { title: $activeNote.title, content: $activeNote.content } });
-            const messages = [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: t('notes.ai_summarize_request') },
-            ];
-            const onChunk = (delta, fullContent) => {
-                aiMessages = aiMessages.map((msg, idx) =>
-                    idx === streamingIndex
-                        ? { ...msg, content: fullContent, isStreaming: true }
-                        : msg,
-                );
-            };
-            const result = await callAIWithMessagesStream(
-                config,
-                messages,
-                onChunk,
-            );
-            aiMessages = aiMessages.map((msg, idx) =>
-                idx === streamingIndex
-                    ? {
-                          role: "assistant",
-                          type: "text",
-                          content: result || get(_)('notes.ai_gen_failed'),
-                          isStreaming: false,
-                      }
-                    : msg,
-            );
-        } catch (error) {
-            aiMessages = aiMessages.map((msg, idx) =>
-                idx === streamingIndex
-                    ? {
-                          role: "assistant",
-                          type: "error",
-                          content: error.message,
-                      }
-                    : msg,
-            );
-            showToast({
-                message: get(_)('notes.ai_failed') + ": " + error.message,
-                type: "error",
-            });
-        } finally {
-            aiLoading = false;
-        }
+        showAiPanel.set(true);
     }
 
     async function handleExport(type) {
@@ -494,8 +424,7 @@
 
     function formatDate(dateStr) {
         const date = new Date(dateStr);
-        const lang = $settingsStore?.locale || 'zh-CN';
-        const localeCode = lang === 'zh' ? 'zh-CN' : lang === 'ja' ? 'ja-JP' : 'en-US';
+        const localeCode = toIntlLocale($locale || 'zh');
         return date.toLocaleDateString(localeCode, {
             month: "short",
             day: "numeric",
@@ -516,108 +445,35 @@
         if (isMobile) showSidebar = false;
     }
 
-    function sendAiPrompt(prompt) {
-        if (!$activeNote) return;
-        const fullPrompt = prompt + '\n\n' + get(_)('notes.note_content_label') + ':\n' + ($activeNote.content || '');
-        aiMessages = [
-            ...aiMessages,
-            { role: 'user', type: 'text', content: prompt },
-            { role: 'assistant', type: 'streaming', content: '', isStreaming: true }
-        ];
-        const streamingIndex = aiMessages.length - 1;
-        aiLoading = true;
-        showAiPanel = true;
-        import('../utils/ai-providers.js').then(async ({ callAIWithMessagesStream }) => {
-            try {
-                const config = getEffectiveConfig();
-                const systemPrompt = t('notes.ai_writing_system_prompt', { values: { title: $activeNote.title } });
-                let result = '';
-                await callAIWithMessagesStream(
-                    [{ role: 'system', content: systemPrompt }, { role: 'user', content: fullPrompt }],
-                    config,
-                    (chunk) => {
-                        result += chunk;
-                        aiMessages = aiMessages.map((m, i) =>
-                            i === streamingIndex ? { ...m, content: result } : m
-                        );
-                    }
-                );
-                aiMessages = aiMessages.map((m, i) =>
-                    i === streamingIndex ? { ...m, type: 'text', isStreaming: false } : m
-                );
-            } catch (e) {
-                aiMessages = aiMessages.map((m, i) =>
-                    i === streamingIndex ? { ...m, type: 'error', content: e.message, isStreaming: false } : m
-                );
-            } finally {
-                aiLoading = false;
-            }
-        });
-    }
-
     async function requestAiSuggestion(currentText) {
         if (!currentText || currentText.length < 20) return;
         const config = getEffectiveConfig();
-        if (!config.apiKey && config.provider !== 'ollama') return;
+        const needsApiKey =
+            config.provider !== 'ollama' &&
+            config.provider !== 'lmstudio' &&
+            !String(config.provider || '').startsWith('g4f');
+        if (needsApiKey && !config.apiKey) return;
         const lastLines = currentText.split('\n').slice(-3).join('\n');
         if (lastLines.trim().length < 10) return;
-        aiSuggestionLoading = true;
         try {
             const { callAIWithMessages } = await import('../utils/ai-providers.js');
             const result = await callAIWithMessages(
+                config,
                 [
                     { role: 'system', content: t('notes.ai_autocomplete_system_prompt') },
                     { role: 'user', content: lastLines }
-                ],
-                config
+                ]
             );
             if (result && result.trim()) {
                 aiSuggestion = result.trim().split('\n')[0].slice(0, 100);
             }
         } catch (e) {
             aiSuggestion = '';
-        } finally {
-            aiSuggestionLoading = false;
-        }
-    }
-
-    function startEditPrompt(prompt) {
-        editingPromptId = prompt.id;
-        editingPromptText = prompt.prompt;
-    }
-
-    function saveEditPrompt() {
-        if (editingPromptId) {
-            notesStore.updateAiPrompt(editingPromptId, { prompt: editingPromptText });
-            editingPromptId = null;
-            editingPromptText = '';
         }
     }
 
     function toggleSidebar() {
         showSidebar = !showSidebar;
-    }
-
-    function copyAiMessage(content) {
-        if (navigator.clipboard && content) {
-            navigator.clipboard.writeText(content);
-            showToast({ message: get(_)('common.copied'), type: "success", duration: 1500 });
-        }
-    }
-
-    function saveAsSummaryNote() {
-        const lastAssistantMsg = aiMessages
-            .filter((m) => m.role === "assistant" && m.type === "text")
-            .pop();
-        if (lastAssistantMsg && lastAssistantMsg.content) {
-            const t = get(_);
-            const summaryNote = {
-                title: `[${t('notes.summary_prefix')}] ${$activeNote.title}`,
-                content: `# ${$activeNote.title} - ${t('notes.ai_summarize')}\n\n${lastAssistantMsg.content}\n\n---\n*${t('notes.ai_generated_at')} ${new Date().toLocaleString()}*`,
-            };
-            notesStore.addNote(summaryNote);
-            showToast({ message: t('notes.ai_summary_saved'), type: "success" });
-        }
     }
 </script>
 
@@ -802,27 +658,18 @@
                                 <i class="ph ph-pencil-simple text-lg"></i>
                             </button>
                             <button
-                                on:click={toggleAiPanel}
-                                class="p-2 rounded-lg transition"
-                                class:text-indigo-600={showAiPanel}
-                                class:bg-indigo-50={showAiPanel}
-                                class:text-slate-400={!showAiPanel}
-                                class:hover:text-indigo-600={!showAiPanel}
-                                class:hover:bg-indigo-50={!showAiPanel}
+                                on:click={() => openNoteAiAssistant('general')}
+                                class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
                                 title={$_('notes.ai_assistant')}
                             >
                                 <i class="ph ph-sparkle text-lg"></i>
                             </button>
                             <button
-                                on:click={() => showAiPromptPanel = !showAiPromptPanel}
-                                class="p-2 rounded-lg transition"
-                                class:text-purple-600={showAiPromptPanel}
-                                class:bg-purple-50={showAiPromptPanel}
-                                class:text-slate-400={!showAiPromptPanel}
-                                class:hover:text-purple-600={!showAiPromptPanel}
+                                on:click={() => openNoteAiAssistant('summary')}
+                                class="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition"
                                 title={$_('notes.ai_preset_prompts')}
                             >
-                                <i class="ph ph-magic-wand text-lg"></i>
+                                <i class="ph ph-text-align-left text-lg"></i>
                             </button>
                             <div class="relative">
                                 <button
@@ -874,42 +721,30 @@
                         {/if}
                     </div>
                 </div>
-                {#if showAiPromptPanel}
-                    <div class="bg-purple-50 border-b border-purple-100 px-4 py-2">
-                        <div class="text-xs font-bold text-purple-700 mb-2 flex items-center justify-between">
-                            <span>{$_('notes.ai_preset_prompts')}</span>
-                            <button on:click={() => showAiPromptPanel = false} class="text-purple-400 hover:text-purple-700"><i class="ph ph-x"></i></button>
-                        </div>
-                        <div class="flex flex-wrap gap-1.5">
-                            {#each $noteAiPrompts as prompt}
-                                {#if editingPromptId === prompt.id}
-                                    <div class="flex gap-1 w-full">
-                                        <input bind:value={editingPromptText} class="flex-1 text-xs border border-purple-300 rounded px-2 py-1 bg-white focus:outline-none" />
-                                        <button on:click={saveEditPrompt} class="px-2 py-1 bg-purple-600 text-white rounded text-xs"><i class="ph ph-check"></i></button>
-                                        <button on:click={() => editingPromptId = null} class="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs"><i class="ph ph-x"></i></button>
-                                    </div>
-                                {:else}
-                                    <div class="flex items-center gap-1 bg-white border border-purple-200 rounded-full px-2 py-0.5">
-                                        <button on:click={() => sendAiPrompt(prompt.prompt)} class="text-xs text-purple-700 font-bold hover:text-purple-900">{prompt.label}</button>
-                                        <button on:click={() => startEditPrompt(prompt)} class="text-purple-300 hover:text-purple-600 text-[10px]"><i class="ph ph-pencil"></i></button>
-                                    </div>
-                                {/if}
-                            {/each}
-                        </div>
-                    </div>
-                {/if}
                 {#if $activeNote}
-                    <div class="px-4 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
-                        <span class="text-[10px] text-slate-400 font-bold">{$_('notes.category')}：</span>
-                        <select
-                            value={$activeNote.category || $_('notes.category_all')}
-                            on:change={(e) => notesStore.updateNote($activeNote.id, { category: e.target.value })}
-                            class="text-xs border border-slate-200 rounded px-2 py-0.5 bg-white text-slate-600 focus:outline-none focus:border-emerald-400"
-                        >
-                            {#each $noteCategories as cat}
-                                <option value={cat}>{cat}</option>
-                            {/each}
-                        </select>
+                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                        <div class="flex items-center gap-2 rounded-2xl border border-emerald-100 bg-white/90 px-2 py-1 shadow-sm">
+                            <div class="hidden md:flex items-center gap-1 text-[10px] text-emerald-700 font-bold tracking-[0.14em] uppercase shrink-0">
+                                <i class="ph ph-tag text-xs"></i>
+                                <span>{$_('notes.category')}</span>
+                            </div>
+                            <div class="relative">
+                                <i class="ph ph-tag absolute left-3 top-1/2 -translate-y-1/2 text-sm text-emerald-500 pointer-events-none md:hidden"></i>
+                                <i class="ph ph-caret-down absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none"></i>
+                                <select
+                                    value={$activeNote.category || $_('notes.category_all')}
+                                    on:change={(e) => notesStore.updateNote($activeNote.id, { category: e.target.value })}
+                                    class="appearance-none h-10 min-w-[180px] md:min-w-[220px] rounded-2xl border border-transparent bg-slate-50 px-3 pr-10 md:pl-3 pl-9 text-sm font-semibold text-slate-700 transition focus:outline-none focus:border-emerald-300 focus:bg-white focus:ring-4 focus:ring-emerald-50"
+                                >
+                                    {#each $noteCategories as cat}
+                                        <option value={cat}>{cat}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="ml-auto text-[10px] text-slate-400 font-medium hidden md:block">
+                            {$_('notes.ai_panel_followup_hint')}
+                        </div>
                     </div>
                 {/if}
                 <div class="flex-1 overflow-hidden flex flex-col relative">
@@ -963,259 +798,8 @@
                 </div>
             {/if}
         </div>
-        {#if showAiPanel && !isMobile && $activeNote}
-            <aside
-                class="w-[350px] bg-white border-l border-slate-200 flex flex-col shrink-0 h-full shadow-[-4px_0_15px_rgba(0,0,0,0.02)]"
-            >
-                <div
-                    class="h-12 border-b border-indigo-100 flex items-center justify-between px-4 bg-indigo-50/50"
-                >
-                    <div
-                        class="font-bold text-indigo-700 flex items-center gap-2 text-sm"
-                    >
-                        <i class="ph-fill ph-sparkle"></i> {$_('notes.ai_assistant')}
-                    </div>
-                    <button
-                        on:click={() => (showAiPanel = false)}
-                        class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded"
-                    >
-                        <i class="ph ph-x text-lg"></i>
-                    </button>
-                </div>
-                <div class="flex-1 overflow-y-auto p-4 space-y-3">
-                    {#each aiMessages as msg, index}
-                        <div
-                            class="flex gap-2"
-                            class:flex-row-reverse={msg.role === "user"}
-                        >
-                            <div
-                                class="w-7 h-7 rounded-full shrink-0 flex items-center justify-center"
-                                class:bg-blue-100={msg.role === "user"}
-                                class:text-blue-600={msg.role === "user"}
-                                class:bg-indigo-100={msg.role !== "user"}
-                                class:text-indigo-600={msg.role !== "user"}
-                            >
-                                <i
-                                    class={msg.role === "user"
-                                        ? "ph-fill ph-user text-sm"
-                                        : "ph-fill ph-sparkle text-sm"}
-                                ></i>
-                            </div>
-                            <div class="max-w-[85%] group">
-                                {#if msg.type === "text"}
-                                    <div
-                                        class="p-2.5 rounded-2xl text-xs shadow-sm"
-                                        class:bg-blue-600={msg.role === "user"}
-                                        class:text-white={msg.role === "user"}
-                                        class:rounded-tr-none={msg.role ===
-                                            "user"}
-                                        class:bg-white={msg.role !== "user"}
-                                        class:border={msg.role !== "user"}
-                                        class:border-indigo-100={msg.role !==
-                                            "user"}
-                                        class:text-slate-700={msg.role !==
-                                            "user"}
-                                        class:rounded-tl-none={msg.role !==
-                                            "user"}
-                                    >
-                                        <MarkdownRenderer
-                                            content={msg.content}
-                                        />
-                                    </div>
-                                    {#if msg.role === "assistant"}
-                                        <div
-                                            class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        >
-                                            <button
-                                                on:click={() =>
-                                                    copyAiMessage(msg.content)}
-                                                class="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded text-xs"
-                                            >
-                                                <i class="ph ph-copy"></i>
-                                            </button>
-                                            <button
-                                                on:click={saveAsSummaryNote}
-                                                class="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded text-xs"
-                                                title={$_('notes.save_as_note')}
-                                            >
-                                                <i class="ph ph-floppy-disk"
-                                                ></i>
-                                            </button>
-                                        </div>
-                                    {/if}
-                                {:else if msg.type === "streaming"}
-                                    <div
-                                        class="p-2.5 rounded-2xl text-xs shadow-sm bg-white border border-indigo-100 text-slate-700 rounded-tl-none"
-                                    >
-                                        <MarkdownRenderer
-                                            content={msg.content || ""}
-                                        />
-                                        {#if msg.isStreaming}
-                                            <div class="flex gap-1 mt-2">
-                                                <div
-                                                    class="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"
-                                                    style="animation-delay: 0ms"
-                                                ></div>
-                                                <div
-                                                    class="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"
-                                                    style="animation-delay: 150ms"
-                                                ></div>
-                                                <div
-                                                    class="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"
-                                                    style="animation-delay: 300ms"
-                                                ></div>
-                                            </div>
-                                        {/if}
-                                    </div>
-                                {:else if msg.type === "error"}
-                                    <div
-                                        class="p-2.5 rounded-2xl text-xs shadow-sm bg-red-50 border border-red-200 text-red-700 rounded-tl-none"
-                                    >
-                                        <i class="ph-fill ph-warning-circle"
-                                        ></i>
-                                        {msg.content}
-                                    </div>
-                                {/if}
-                            </div>
-                        </div>
-                    {/each}
-                </div>
-                <div class="p-3 border-t border-slate-100 bg-white">
-                    <button
-                        on:click={summarizeNote}
-                        disabled={aiLoading || !$activeNote?.content}
-                        class="w-full py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                        {#if aiLoading}
-                            <i class="ph ph-spinner animate-spin"></i> {$_('notes.generating')}
-                        {:else}
-                            <i class="ph ph-sparkle"></i> {$_('notes.ai_summarize_btn')}
-                        {/if}
-                    </button>
-                </div>
-            </aside>
-        {/if}
     </div>
 </div>
-
-{#if showAiPanel && isMobile && $activeNote}
-    <div class="fixed inset-0 z-50 bg-white flex flex-col">
-        <div
-            class="h-14 border-b border-indigo-100 flex items-center justify-between px-4 bg-indigo-50/50 shrink-0"
-        >
-            <button
-                on:click={() => (showAiPanel = false)}
-                class="text-slate-500 flex items-center gap-1 font-bold text-sm"
-            >
-                <i class="ph-bold ph-caret-left text-lg"></i> {$_('common.back')}
-            </button>
-            <div
-                class="font-bold text-indigo-700 flex items-center gap-2 text-sm"
-            >
-                <i class="ph-fill ph-sparkle"></i> {$_('notes.ai_assistant')}
-            </div>
-            <div class="w-16"></div>
-        </div>
-        <div class="flex-1 overflow-y-auto p-4 space-y-3">
-            {#each aiMessages as msg}
-                <div
-                    class="flex gap-2"
-                    class:flex-row-reverse={msg.role === "user"}
-                >
-                    <div
-                        class="w-8 h-8 rounded-full shrink-0 flex items-center justify-center"
-                        class:bg-blue-100={msg.role === "user"}
-                        class:text-blue-600={msg.role === "user"}
-                        class:bg-indigo-100={msg.role !== "user"}
-                        class:text-indigo-600={msg.role !== "user"}
-                    >
-                        <i
-                            class={msg.role === "user"
-                                ? "ph-fill ph-user"
-                                : "ph-fill ph-sparkle"}
-                        ></i>
-                    </div>
-                    <div class="max-w-[85%]">
-                        {#if msg.type === "text"}
-                            <div
-                                class="p-3 rounded-2xl text-sm shadow-sm"
-                                class:bg-blue-600={msg.role === "user"}
-                                class:text-white={msg.role === "user"}
-                                class:rounded-tr-none={msg.role === "user"}
-                                class:bg-white={msg.role !== "user"}
-                                class:border={msg.role !== "user"}
-                                class:border-indigo-100={msg.role !== "user"}
-                                class:text-slate-700={msg.role !== "user"}
-                                class:rounded-tl-none={msg.role !== "user"}
-                            >
-                                <MarkdownRenderer content={msg.content} />
-                            </div>
-                            {#if msg.role === "assistant"}
-                                <div class="mt-2 flex gap-2">
-                                    <button
-                                        on:click={() =>
-                                            copyAiMessage(msg.content)}
-                                        class="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold"
-                                    >
-                                        <i class="ph ph-copy"></i> {$_('common.copy')}
-                                    </button>
-                                    <button
-                                        on:click={saveAsSummaryNote}
-                                        class="px-3 py-1.5 bg-emerald-100 text-emerald-600 rounded-lg text-xs font-bold"
-                                    >
-                                        <i class="ph ph-floppy-disk"></i> {$_('common.save')}
-                                    </button>
-                                </div>
-                            {/if}
-                        {:else if msg.type === "streaming"}
-                            <div
-                                class="p-3 rounded-2xl text-sm shadow-sm bg-white border border-indigo-100 text-slate-700 rounded-tl-none"
-                            >
-                                <MarkdownRenderer content={msg.content || ""} />
-                                {#if msg.isStreaming}
-                                    <div class="flex gap-1.5 mt-2">
-                                        <div
-                                            class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce"
-                                            style="animation-delay: 0ms"
-                                        ></div>
-                                        <div
-                                            class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce"
-                                            style="animation-delay: 150ms"
-                                        ></div>
-                                        <div
-                                            class="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce"
-                                            style="animation-delay: 300ms"
-                                        ></div>
-                                    </div>
-                                {/if}
-                            </div>
-                        {:else if msg.type === "error"}
-                            <div
-                                class="p-3 rounded-2xl text-sm shadow-sm bg-red-50 border border-red-200 text-red-700 rounded-tl-none"
-                            >
-                                <i class="ph-fill ph-warning-circle"></i>
-                                {msg.content}
-                            </div>
-                        {/if}
-                    </div>
-                </div>
-            {/each}
-        </div>
-        <div class="p-4 border-t border-slate-100 bg-white safe-bottom">
-            <button
-                on:click={summarizeNote}
-                disabled={aiLoading || !$activeNote?.content}
-                class="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-                {#if aiLoading}
-                    <i class="ph ph-spinner animate-spin"></i> {$_('notes.generating')}
-                {:else}
-                    <i class="ph ph-sparkle"></i> {$_('notes.ai_summarize_btn')}
-                {/if}
-            </button>
-        </div>
-    </div>
-{/if}
 
 {#if showExportMenu}
     <div
@@ -1258,7 +842,58 @@
     :global(.vditor-tooltipped::before) {
         z-index: 101 !important;
     }
-    .safe-bottom {
-        padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    :global(.milkdown-container) {
+        height: 100%;
+        overflow-y: auto;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        color: #0f172a;
+        padding: 24px;
+    }
+    :global(.milkdown-container .editor) {
+        min-height: 100%;
+    }
+    :global(.milkdown-container .ProseMirror) {
+        min-height: calc(100vh - 16rem);
+        max-width: none;
+        padding: 28px 32px;
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid #dbeafe;
+        border-radius: 20px;
+        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+        font-size: 15px;
+        line-height: 1.8;
+        color: #0f172a;
+    }
+    :global(.milkdown-container .ProseMirror:focus) {
+        outline: none;
+        border-color: #60a5fa;
+        box-shadow: 0 20px 50px rgba(59, 130, 246, 0.16);
+    }
+    :global(.milkdown-container .ProseMirror h1),
+    :global(.milkdown-container .ProseMirror h2),
+    :global(.milkdown-container .ProseMirror h3) {
+        color: #0f172a;
+    }
+    :global(.dark .milkdown-container) {
+        background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+        color: #e2e8f0;
+    }
+    :global(.dark .milkdown-container .ProseMirror) {
+        background: rgba(15, 23, 42, 0.92);
+        border-color: #334155;
+        color: #e2e8f0;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    }
+    :global(.dark .milkdown-container .ProseMirror h1),
+    :global(.dark .milkdown-container .ProseMirror h2),
+    :global(.dark .milkdown-container .ProseMirror h3),
+    :global(.dark .milkdown-container .ProseMirror p),
+    :global(.dark .milkdown-container .ProseMirror li),
+    :global(.dark .milkdown-container .ProseMirror strong) {
+        color: #e2e8f0;
+    }
+    :global(.dark .milkdown-container .ProseMirror code) {
+        background: #0f172a;
+        color: #fda4af;
     }
 </style>

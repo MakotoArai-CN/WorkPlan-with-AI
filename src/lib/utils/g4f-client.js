@@ -47,20 +47,20 @@ const G4F_PROVIDER_DEFAULT_MODELS = Object.fromEntries(
 );
 
 const G4F_FALLBACK_MODELS = {
-    default: ['auto', 'gpt-4o-mini', 'gpt-4o', 'claude-3.5-sonnet', 'deepseek-v3'],
-    pollinations: ['openai', 'openai-fast', 'deepseek', 'gemini', 'mistral'],
-    deepinfra: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3'],
-    groq: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
-    openrouter: ['openrouter/free', 'openai/gpt-4o', 'meta-llama/llama-3.3-70b-instruct:free'],
-    nvidia: ['deepseek-ai/deepseek-v3.2', 'meta/llama-3.3-70b-instruct'],
-    puter: ['anthropic:anthropic/claude-sonnet-4-6', 'gpt-4o', 'gpt-4o-mini'],
-    gemini: ['models/gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-1.5-flash'],
-    huggingface: ['meta-llama/Llama-3.3-70B-Instruct', 'meta-llama/Llama-3.2-3B-Instruct'],
-    ollama: ['deepseek-v3.2', 'llama3.3', 'qwen2.5'],
-    azure: ['model-router3', 'model-router'],
+    default: ['auto', 'gpt-4o-mini', 'gpt-4o', 'claude-3.5-sonnet', 'claude-sonnet-4-6', 'deepseek-v3', 'deepseek-v3.2'],
+    pollinations: ['openai', 'openai-fast', 'deepseek', 'gemini', 'mistral', 'claude', 'llama'],
+    deepinfra: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct', 'microsoft/WizardLM-2-8x22B'],
+    groq: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'qwen-qwq-32b', 'deepseek-r1-distill-llama-70b'],
+    openrouter: ['openrouter/free', 'openai/gpt-4o', 'openai/gpt-4.1-mini', 'anthropic/claude-sonnet-4-6', 'meta-llama/llama-3.3-70b-instruct:free'],
+    nvidia: ['deepseek-ai/deepseek-v3.2', 'meta/llama-3.3-70b-instruct', 'qwen/qwen2.5-72b-instruct', 'mistralai/mistral-large-2-instruct'],
+    puter: ['anthropic:anthropic/claude-sonnet-4-6', 'gpt-4o', 'gpt-4o-mini', 'grok-beta', 'deepseek-chat'],
+    gemini: ['models/gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    huggingface: ['meta-llama/Llama-3.3-70B-Instruct', 'meta-llama/Llama-3.2-3B-Instruct', 'Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B'],
+    ollama: ['deepseek-v3.2', 'llama3.3', 'qwen2.5', 'gemma3', 'mistral-small'],
+    azure: ['model-router3', 'model-router', 'gpt-4o', 'gpt-4.1-mini'],
     audio: ['gpt-audio'],
-    'api.airforce': ['gpt-4o', 'claude-sonnet-4.5', 'deepseek-v3.2'],
-    perplexity: ['turbo', 'sonar', 'sonar-pro']
+    'api.airforce': ['gpt-4o', 'gpt-4.1-mini', 'claude-sonnet-4.5', 'deepseek-v3.2', 'gemini-2.5-pro'],
+    perplexity: ['turbo', 'sonar', 'sonar-pro', 'sonar-reasoning']
 };
 
 export const G4F_PROVIDER_CATALOG = (() => {
@@ -216,12 +216,12 @@ export async function fetchG4FModels(providerId, options = {}) {
         const models = await client.models.list();
 
         if (Array.isArray(models) && models.length > 0) {
-            return models
+            return [...new Set(models
                 .map((model) => {
                     if (typeof model === 'string') return model;
                     return model.id || model.name || String(model);
                 })
-                .filter(Boolean);
+                .filter(Boolean))];
         }
     } catch (error) {
         console.error(`Failed to fetch G4F models for ${providerId}:`, error);

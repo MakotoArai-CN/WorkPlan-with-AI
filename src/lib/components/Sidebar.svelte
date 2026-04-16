@@ -1,13 +1,113 @@
 <script>
     import { currentView, taskStore, enabledScheduledCount, activeTasks } from '../stores/tasks.js';
-    import { showAiPanel } from '../stores/ai.js';
-    import { showConfirm, showAlert, showToast } from '../stores/modal.js';
+    import { showConfirm, showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
+    const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
+
+    let fileInput;
+    let collapsed = false;
+    let lastView = 'dashboard';
+
+    $: if (AUTO_COLLAPSE_VIEWS.has($currentView)) {
+        collapsed = true;
+    } else if (AUTO_COLLAPSE_VIEWS.has(lastView) && lastView !== $currentView) {
+        collapsed = false;
+    }
+
+    $: lastView = $currentView;
+
+    $: navItems = [
+        {
+            id: 'dashboard',
+            label: $_('nav.dashboard'),
+            icon: 'ph-sun',
+            activeBg: 'bg-blue-50',
+            activeText: 'text-blue-700',
+            hoverBg: 'hover:bg-slate-50',
+            badge: $activeTasks.length > 0 ? $activeTasks.length : null,
+            badgeClass: 'bg-blue-600 text-white'
+        },
+        {
+            id: 'templates',
+            label: $_('nav.templates_full'),
+            icon: 'ph-copy',
+            activeBg: 'bg-purple-50',
+            activeText: 'text-purple-700',
+            hoverBg: 'hover:bg-slate-50'
+        },
+        {
+            id: 'scheduled',
+            label: $_('nav.scheduled'),
+            icon: 'ph-clock-countdown',
+            activeBg: 'bg-teal-50',
+            activeText: 'text-teal-700',
+            hoverBg: 'hover:bg-slate-50',
+            badge: $enabledScheduledCount > 0 ? $enabledScheduledCount : null,
+            badgeClass: 'bg-teal-100 text-teal-700'
+        },
+        {
+            id: 'statistics',
+            label: $_('nav.statistics'),
+            icon: 'ph-chart-bar',
+            activeBg: 'bg-indigo-50',
+            activeText: 'text-indigo-700',
+            hoverBg: 'hover:bg-slate-50'
+        },
+        {
+            id: 'notes',
+            label: $_('nav.notes'),
+            icon: 'ph-notebook',
+            activeBg: 'bg-emerald-50',
+            activeText: 'text-emerald-700',
+            hoverBg: 'hover:bg-slate-50'
+        },
+        {
+            id: 'aichat',
+            label: $_('nav.ai_chat'),
+            icon: 'ph-robot',
+            activeBg: 'bg-gradient-to-r from-indigo-50 to-purple-50',
+            activeText: 'text-indigo-700',
+            hoverBg: 'hover:bg-slate-50'
+        },
+        {
+            id: 'passwords',
+            label: $_('nav.passwords'),
+            icon: 'ph-key',
+            activeBg: 'bg-amber-50',
+            activeText: 'text-amber-700',
+            hoverBg: 'hover:bg-slate-50'
+        },
+        {
+            id: 'settings',
+            label: $_('nav.settings'),
+            icon: 'ph-gear',
+            activeBg: 'bg-slate-100',
+            activeText: 'text-slate-700',
+            hoverBg: 'hover:bg-slate-50'
+        }
+    ];
+
     function switchView(view) {
         currentView.set(view);
-        showAiPanel.set(false);
+    }
+
+    function toggleCollapse() {
+        collapsed = !collapsed;
+    }
+
+    function getSyncStatusClasses(status) {
+        if (status === 'syncing') {
+            return 'bg-blue-50 text-blue-600 border-blue-200';
+        }
+        if (status === 'done') {
+            return 'bg-green-50 text-green-600 border-green-200';
+        }
+        if (status === 'error') {
+            return 'bg-red-50 text-red-600 border-red-200';
+        }
+        return 'bg-slate-50 text-slate-400 border-slate-200';
     }
 
     function exportData() {
@@ -74,147 +174,142 @@
             location.reload();
         }
     }
-
-    let fileInput;
 </script>
 
-<aside class="hidden md:flex w-64 bg-white border-r border-slate-200 flex-col z-20 shadow-lg shrink-0">
-    <div class="p-6 flex items-center gap-3 border-b border-slate-100 h-16">
-        <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md">
+<aside
+    class="hidden md:flex bg-white border-r border-slate-200 flex-col z-20 shadow-lg shrink-0 transition-[width,padding] duration-300 ease-out"
+    class:w-72={!collapsed}
+    class:w-24={collapsed}
+>
+    <div class="px-4 py-3 flex items-center border-b border-slate-100 h-16 gap-3">
+        <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md shrink-0">
             <i class="ph ph-check-square-offset text-xl"></i>
         </div>
-        <div class="flex-1 min-w-0">
-            <h1 class="text-lg font-bold tracking-tight text-slate-800 leading-tight">WorkPlan</h1>
-            <div class="text-[10px] text-slate-400 font-mono truncate" title={$_('sidebar.current_key')}>🔑 {$taskStore.accessKey}</div>
+
+        <div
+            class="flex-1 min-w-0 transition-all duration-300 overflow-hidden"
+            class:opacity-0={collapsed}
+            class:w-0={collapsed}
+        >
+            <h1 class="text-lg font-bold tracking-tight text-slate-800 leading-tight truncate">WorkPlan</h1>
+            <div class="text-[10px] text-slate-400 font-mono truncate" title={$_('sidebar.current_key')}>
+                {$taskStore.accessKey}
+            </div>
         </div>
+
+        <button
+            on:click={toggleCollapse}
+            class="w-9 h-9 rounded-xl border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-50 flex items-center justify-center shrink-0 transition-transform duration-300"
+            title={collapsed ? $_('common.expand') || 'Expand' : $_('common.collapse') || 'Collapse'}
+        >
+            <i class:ph-caret-double-right={collapsed} class:ph-caret-double-left={!collapsed} class="ph text-lg"></i>
+        </button>
     </div>
 
-    <div class="px-6 py-2">
-        <div class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-colors"
-            class:bg-blue-50={$taskStore.syncStatus === 'syncing'}
-            class:text-blue-600={$taskStore.syncStatus === 'syncing'}
-            class:border-blue-200={$taskStore.syncStatus === 'syncing'}
-            class:bg-green-50={$taskStore.syncStatus === 'done'}
-            class:text-green-600={$taskStore.syncStatus === 'done'}
-            class:border-green-200={$taskStore.syncStatus === 'done'}
-            class:bg-red-50={$taskStore.syncStatus === 'error'}
-            class:text-red-600={$taskStore.syncStatus === 'error'}
-            class:border-red-200={$taskStore.syncStatus === 'error'}
-            class:bg-slate-50={$taskStore.syncStatus === 'idle'}
-            class:text-slate-400={$taskStore.syncStatus === 'idle'}
-            class:border-slate-200={$taskStore.syncStatus === 'idle'}>
+    <div class="px-4 py-3">
+        <div
+            class={`relative flex items-center rounded-2xl border text-xs font-bold transition-all duration-300 ${getSyncStatusClasses($taskStore.syncStatus)} ${collapsed ? 'justify-center px-2 py-2.5' : 'gap-2 px-3 py-2.5'}`}
+            title={$taskStore.syncStatus === 'syncing'
+                ? $_('sync.syncing')
+                : $taskStore.syncStatus === 'done'
+                    ? $_('sync.synced')
+                    : $taskStore.syncStatus === 'error'
+                        ? $_('sync.sync_failed')
+                        : $_('sync.ready')}
+        >
             {#if $taskStore.syncStatus === 'syncing'}
-                <i class="ph ph-spinner animate-spin"></i>
+                <i class="ph ph-spinner animate-spin shrink-0"></i>
             {:else if $taskStore.syncStatus === 'done'}
-                <i class="ph-bold ph-check"></i>
+                <i class="ph-bold ph-check shrink-0"></i>
             {:else if $taskStore.syncStatus === 'error'}
-                <i class="ph-bold ph-warning"></i>
+                <i class="ph-bold ph-warning shrink-0"></i>
             {:else}
-                <i class="ph ph-cloud"></i>
+                <i class="ph ph-cloud shrink-0"></i>
             {/if}
-            <span class="font-bold">
-                {#if $taskStore.syncStatus === 'syncing'}{$_('sync.syncing')}
-                {:else if $taskStore.syncStatus === 'done'}{$_('sync.synced')}
-                {:else if $taskStore.syncStatus === 'error'}{$_('sync.sync_failed')}
-                {:else}{$_('sync.ready')}{/if}
-            </span>
+
+            {#if !collapsed}
+                <span class="truncate">
+                    {#if $taskStore.syncStatus === 'syncing'}{$_('sync.syncing')}
+                    {:else if $taskStore.syncStatus === 'done'}{$_('sync.synced')}
+                    {:else if $taskStore.syncStatus === 'error'}{$_('sync.sync_failed')}
+                    {:else}{$_('sync.ready')}{/if}
+                </span>
+            {/if}
         </div>
     </div>
 
-    <nav class="flex-1 p-4 space-y-2">
-        <button on:click={() => switchView('dashboard')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-blue-50={$currentView === 'dashboard'}
-            class:text-blue-700={$currentView === 'dashboard'}
-            class:text-slate-600={$currentView !== 'dashboard'}
-            class:hover:bg-slate-50={$currentView !== 'dashboard'}>
-            <i class="ph ph-sun text-lg"></i> {$_('nav.dashboard')}
-            {#if $activeTasks.length > 0}
-                <span class="ml-auto bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full">{$activeTasks.length}</span>
-            {/if}
-        </button>
-        <button on:click={() => switchView('templates')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-purple-50={$currentView === 'templates'}
-            class:text-purple-700={$currentView === 'templates'}
-            class:text-slate-600={$currentView !== 'templates'}
-            class:hover:bg-slate-50={$currentView !== 'templates'}>
-            <i class="ph ph-copy text-lg"></i> {$_('nav.templates_full')}
-        </button>
-        <button on:click={() => switchView('scheduled')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-teal-50={$currentView === 'scheduled'}
-            class:text-teal-700={$currentView === 'scheduled'}
-            class:text-slate-600={$currentView !== 'scheduled'}
-            class:hover:bg-slate-50={$currentView !== 'scheduled'}>
-            <i class="ph ph-clock-countdown text-lg"></i> {$_('nav.scheduled')}
-            {#if $enabledScheduledCount > 0}
-                <span class="ml-auto bg-teal-100 text-teal-700 text-[10px] px-2 py-0.5 rounded-full">{$enabledScheduledCount}</span>
-            {/if}
-        </button>
-        <button on:click={() => switchView('statistics')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-indigo-50={$currentView === 'statistics'}
-            class:text-indigo-700={$currentView === 'statistics'}
-            class:text-slate-600={$currentView !== 'statistics'}
-            class:hover:bg-slate-50={$currentView !== 'statistics'}>
-            <i class="ph ph-chart-bar text-lg"></i> {$_('nav.statistics')}
-        </button>
-        <button on:click={() => switchView('notes')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-emerald-50={$currentView === 'notes'}
-            class:text-emerald-700={$currentView === 'notes'}
-            class:text-slate-600={$currentView !== 'notes'}
-            class:hover:bg-slate-50={$currentView !== 'notes'}>
-            <i class="ph ph-notebook text-lg"></i> {$_('nav.notes')}
-        </button>
-        <button on:click={() => switchView('aichat')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-gradient-to-r={$currentView === 'aichat'}
-            class:from-indigo-50={$currentView === 'aichat'}
-            class:to-purple-50={$currentView === 'aichat'}
-            class:text-indigo-700={$currentView === 'aichat'}
-            class:text-slate-600={$currentView !== 'aichat'}
-            class:hover:bg-slate-50={$currentView !== 'aichat'}>
-            <i class="ph ph-robot text-lg"></i> {$_('nav.ai_chat')}
-        </button>
-        <button on:click={() => switchView('passwords')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-amber-50={$currentView === 'passwords'}
-            class:text-amber-700={$currentView === 'passwords'}
-            class:text-slate-600={$currentView !== 'passwords'}
-            class:hover:bg-slate-50={$currentView !== 'passwords'}>
-            <i class="ph ph-key text-lg"></i> {$_('nav.passwords')}
-        </button>
-        <button on:click={() => switchView('settings')}
-            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-bold"
-            class:bg-slate-100={$currentView === 'settings'}
-            class:text-slate-700={$currentView === 'settings'}
-            class:text-slate-600={$currentView !== 'settings'}
-            class:hover:bg-slate-50={$currentView !== 'settings'}>
-            <i class="ph ph-gear text-lg"></i> {$_('nav.settings')}
-        </button>
+    <nav class="flex-1 px-3 pb-3 space-y-1.5">
+        {#each navItems as item}
+            <button
+                on:click={() => switchView(item.id)}
+                class={`relative w-full flex items-center rounded-2xl py-3 transition-all duration-300 text-sm font-bold ${collapsed ? 'justify-center px-2' : 'justify-start gap-3 px-3 text-left'} ${$currentView === item.id ? `${item.activeBg} ${item.activeText} shadow-sm` : `text-slate-600 ${item.hoverBg}`}`}
+                title={item.label}
+            >
+                <span class="w-5 flex items-center justify-center shrink-0">
+                    <i class={`ph ${item.icon} text-lg shrink-0`}></i>
+                </span>
+
+                {#if !collapsed}
+                    <span class="truncate">{item.label}</span>
+                {/if}
+
+                {#if item.badge}
+                    {#if collapsed}
+                        <span class={`absolute top-2 right-2 min-w-4 h-4 px-1 rounded-full text-[10px] leading-4 font-bold ${item.badgeClass}`}>
+                            {item.badge}
+                        </span>
+                    {:else}
+                        <span class={`ml-auto min-w-5 h-5 px-1.5 rounded-full text-[10px] leading-5 font-bold ${item.badgeClass}`}>
+                            {item.badge}
+                        </span>
+                    {/if}
+                {/if}
+            </button>
+        {/each}
     </nav>
 
-    <div class="p-4 border-t border-slate-100 bg-slate-50">
-        <div class="text-[10px] font-bold text-slate-400 uppercase mb-2">{$_('settings.management')}</div>
-        <div class="grid grid-cols-2 gap-2">
-            <button on:click={exportData}
-                class="flex items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 hover:text-blue-600">
-                <i class="ph ph-download-simple"></i> {$_('settings.backup')}
+    <div class="p-3 border-t border-slate-100 bg-slate-50">
+        {#if !collapsed}
+            <div class="text-[10px] font-bold text-slate-400 uppercase mb-2">{$_('settings.management')}</div>
+        {/if}
+
+        <div class={`grid gap-2 ${collapsed ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            <button
+                on:click={exportData}
+                class={`flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-xs'}`}
+                title={$_('settings.backup')}
+            >
+                <i class="ph ph-download-simple"></i>
+                {#if !collapsed}<span>{$_('settings.backup')}</span>{/if}
             </button>
-            <button on:click={() => fileInput.click()}
-                class="flex items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 hover:text-blue-600">
-                <i class="ph ph-upload-simple"></i> {$_('settings.restore')}
+
+            <button
+                on:click={() => fileInput.click()}
+                class={`flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-xs'}`}
+                title={$_('settings.restore')}
+            >
+                <i class="ph ph-upload-simple"></i>
+                {#if !collapsed}<span>{$_('settings.restore')}</span>{/if}
             </button>
-            <button on:click={logout}
-                class="col-span-2 flex items-center justify-center gap-1 py-2 bg-white border border-red-100 rounded-lg text-xs text-red-500 hover:bg-red-50 font-bold">
-                <i class="ph-bold ph-sign-out"></i> {$_('settings.switch_account')}
+
+            <button
+                on:click={logout}
+                class={`${collapsed ? '' : 'col-span-2'} flex items-center justify-center rounded-xl border border-red-100 bg-white text-red-500 hover:bg-red-50 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-xs font-bold'}`}
+                title={$_('settings.switch_account')}
+            >
+                <i class="ph-bold ph-sign-out"></i>
+                {#if !collapsed}<span>{$_('settings.switch_account')}</span>{/if}
             </button>
-            <button on:click={clearData}
-                class="col-span-2 flex items-center justify-center gap-1 py-2 text-[10px] text-slate-400 hover:text-red-600 mt-1">
-                <i class="ph ph-trash"></i> {$_('settings.danger_zone')}
+
+            <button
+                on:click={clearData}
+                class={`${collapsed ? '' : 'col-span-2'} flex items-center justify-center rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-[10px]'}`}
+                title={$_('settings.danger_zone')}
+            >
+                <i class="ph ph-trash"></i>
+                {#if !collapsed}<span>{$_('settings.danger_zone')}</span>{/if}
             </button>
+
             <input type="file" bind:this={fileInput} on:change={handleImport} class="hidden" accept=".json">
         </div>
     </div>

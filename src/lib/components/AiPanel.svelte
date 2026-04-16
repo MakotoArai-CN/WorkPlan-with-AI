@@ -1,20 +1,23 @@
 <script>
+    import { tick } from "svelte";
     import {
         chatHistory,
+        aiPanelContext,
         isAiLoading,
         showAiPanel,
         showAiSettings,
         sendAiMessage,
         retryLastMessage,
+        confirmLocalFileOperation,
         confirmAiTask,
         confirmMultiTask,
         confirmAllMultiTasks,
-        markMessageProcessed,
-        removeAiMessage,
-        getCurrentProvider,
+        removeAiMessage
     } from "../stores/ai.js";
     import { taskStore } from "../stores/tasks.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
+    import { openExternalUrl } from "../utils/open-external.js";
+    import { resizeTextarea } from "../utils/textarea-autosize.js";
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
@@ -22,6 +25,181 @@
 
     let inputText = "";
     let chatContainer;
+    let composerTextarea;
+    let panelMeta = {
+        title: '',
+        introTitle: '',
+        introLines: [],
+        placeholder: '',
+        quickActions: []
+    };
+
+    function getExistingItems() {
+        if ($aiPanelContext.source === 'templates') {
+            return $taskStore.templates || [];
+        }
+        if ($aiPanelContext.source === 'scheduled') {
+            return $taskStore.scheduledTasks || [];
+        }
+        return $taskStore.tasks || [];
+    }
+
+    function getAssistantPayload() {
+        return {
+            ...$aiPanelContext,
+            items: getExistingItems()
+        };
+    }
+
+    function addScopedItem(data) {
+        const normalized = {
+            ...data,
+            id: data.id || Date.now().toString(),
+            status: data.status || "todo",
+            subtasks: (data.subtasks || []).map((s) => ({
+                title: typeof s === "string" ? s : s.title,
+                status: s.status || "todo",
+            })),
+        };
+
+        if ($aiPanelContext.source === 'templates') {
+            taskStore.addTemplate(normalized);
+            return;
+        }
+
+        if ($aiPanelContext.source === 'scheduled') {
+            taskStore.addScheduledTask({
+                ...normalized,
+                repeatDays: Array.isArray(normalized.repeatDays) ? normalized.repeatDays : [],
+                enabled: normalized.enabled ?? true,
+                date: normalized.date || '',
+                deadline: normalized.deadline || ''
+            });
+            return;
+        }
+
+        taskStore.addTask(normalized);
+    }
+
+    function updateScopedItem(id, updates) {
+        if ($aiPanelContext.source === 'templates') {
+            taskStore.updateTemplate(id, updates);
+            return;
+        }
+        if ($aiPanelContext.source === 'scheduled') {
+            taskStore.updateScheduledTask(id, updates);
+            return;
+        }
+        taskStore.updateTask(id, updates);
+    }
+
+    function deleteScopedItem(id) {
+        if ($aiPanelContext.source === 'templates') {
+            taskStore.deleteTemplate(id);
+            return;
+        }
+        if ($aiPanelContext.source === 'scheduled') {
+            taskStore.deleteScheduledTask(id);
+            return;
+        }
+        taskStore.deleteTask(id);
+    }
+
+    function getPanelMeta() {
+        if ($aiPanelContext.scope === 'notes') {
+            return {
+                title: $_('notes.ai_assistant'),
+                introTitle: $_('notes.title'),
+                introLines: [
+                    $_('notes.ai_panel_summary_hint'),
+                    $_('notes.ai_panel_polish_hint'),
+                    $_('notes.ai_panel_followup_hint')
+                ],
+                placeholder: $_('notes.ai_panel_placeholder'),
+                quickActions: [
+                    { label: $_('notes.ai_panel_quick_summary'), value: $_('notes.ai_panel_quick_summary') },
+                    { label: $_('notes.ai_panel_quick_polish'), value: $_('notes.ai_panel_quick_polish') },
+                    { label: $_('notes.ai_panel_quick_actions'), value: $_('notes.ai_panel_quick_actions') }
+                ]
+            };
+        }
+
+        if ($aiPanelContext.scope === 'templates') {
+            return {
+                title: '模板 AI 助手',
+                introTitle: $aiPanelContext.title || '任务模板助手',
+                introLines: [
+                    '你可以让我创建、整理或优化任务模板结构。',
+                    '我可以补全模板步骤、适用场景、优先级和备注建议。',
+                    '例如：创建周报模板 / 优化入职模板 / 列出当前模板。'
+                ],
+                placeholder: '描述你想新建、调整或查询的任务模板...',
+                quickActions: [
+                    { label: '新建模板', value: '帮我创建一个任务模板，包含标题、说明和子任务结构。' },
+                    { label: '优化模板', value: '请帮我优化当前模板的结构，让它更清晰易复用。' },
+                    { label: '模板清单', value: '请列出当前已有模板，并说明各自适用场景。' }
+                ]
+            };
+        }
+
+        if ($aiPanelContext.scope === 'scheduled') {
+            return {
+                title: '定时任务 AI 助手',
+                introTitle: $aiPanelContext.title || '定时任务助手',
+                introLines: [
+                    '你可以让我创建周期提醒、整理执行频率或排查冲突。',
+                    '我可以补全重复规则、截止时间、启用状态和备注说明。',
+                    '例如：创建工作日晨会提醒 / 检查重复冲突 / 汇总已启用任务。'
+                ],
+                placeholder: '描述你想新增、修改或分析的定时任务...',
+                quickActions: [
+                    { label: '工作日提醒', value: '帮我创建一个工作日执行的定时任务，并补全合理时间与说明。' },
+                    { label: '检查冲突', value: '请帮我检查当前定时任务是否存在时间冲突或重复安排。' },
+                    { label: '启用清单', value: '请汇总当前已启用的定时任务，并按频率分类说明。' }
+                ]
+            };
+        }
+
+        if ($aiPanelContext.scope === 'statistics') {
+            return {
+                title: '统计 AI 助手',
+                introTitle: $aiPanelContext.title || '数据统计助手',
+                introLines: [
+                    '你可以让我总结统计区间、分析延期风险，或提出改进建议。',
+                    '我可以基于当前筛选范围输出复盘、瓶颈和执行建议。',
+                    '例如：总结本周完成情况 / 分析延期任务 / 给出优化建议。'
+                ],
+                placeholder: '输入你想分析的统计问题或复盘目标...',
+                quickActions: [
+                    { label: '完成总结', value: '请总结当前统计区间内的任务完成情况，并给出一句结论。' },
+                    { label: '延期分析', value: '请分析当前统计区间内的延期任务和主要风险点。' },
+                    { label: '优化建议', value: '请根据当前统计数据，给我三个最值得执行的改进建议。' }
+                ]
+            };
+        }
+
+        return {
+            title: $_('ai_panel.title'),
+            introTitle: $aiPanelContext.title || $_('ai_panel.task_assistant'),
+            introLines: [
+                $_('ai_panel.add_hint') + $_('ai_panel.add_example'),
+                $_('ai_panel.delete_hint') + $_('ai_panel.delete_example'),
+                $_('ai_panel.modify_hint') + $_('ai_panel.modify_example'),
+                $_('ai_panel.query_hint') + $_('ai_panel.query_example')
+            ],
+            placeholder: $_('ai_panel.placeholder'),
+            quickActions: [
+                { label: $_('ai_panel.quick_today'), value: $_('ai_panel.query_today_cmd') },
+                { label: $_('ai_panel.quick_week'), value: $_('ai_panel.query_week_cmd') },
+                { label: $_('ai_panel.quick_tomorrow'), value: $_('ai_panel.query_tomorrow_cmd') }
+            ]
+        };
+    }
+
+    async function syncComposerHeight() {
+        await tick();
+        resizeTextarea(composerTextarea, 0.5);
+    }
 
     function scrollToBottom() {
         if (chatContainer) {
@@ -31,17 +209,12 @@
         }
     }
 
-    function getExistingTasks() {
-        const state = $taskStore;
-        return state.tasks || [];
-    }
-
     async function handleSend() {
         if (!inputText.trim()) return;
         const text = inputText;
         inputText = "";
         try {
-            await sendAiMessage(text, getExistingTasks());
+            await sendAiMessage(text, getAssistantPayload());
             scrollToBottom();
         } catch (error) {
             await showAlert({
@@ -54,7 +227,7 @@
 
     async function handleRetry(index) {
         try {
-            await retryLastMessage(index, getExistingTasks());
+            await retryLastMessage(index, getAssistantPayload());
             scrollToBottom();
         } catch (error) {
             await showAlert({
@@ -66,16 +239,7 @@
     }
 
     function handleConfirmTask(data, index) {
-        const taskToAdd = {
-            ...data,
-            id: data.id || Date.now().toString(),
-            status: "todo",
-            subtasks: (data.subtasks || []).map((s) => ({
-                title: typeof s === "string" ? s : s.title,
-                status: "todo",
-            })),
-        };
-        taskStore.addTask(taskToAdd);
+        addScopedItem(data);
         confirmAiTask(index);
         chatHistory.update((h) => [
             ...h,
@@ -89,16 +253,10 @@
     }
 
     function handleConfirmMultiTask(msgIndex, taskIndex, task) {
-        const taskToAdd = {
+        addScopedItem({
             ...task,
-            id: task.id || (Date.now() + taskIndex).toString(),
-            status: "todo",
-            subtasks: (task.subtasks || []).map((s) => ({
-                title: typeof s === "string" ? s : s.title,
-                status: "todo",
-            })),
-        };
-        taskStore.addTask(taskToAdd);
+            id: task.id || (Date.now() + taskIndex).toString()
+        });
         confirmMultiTask(msgIndex, taskIndex);
         scrollToBottom();
     }
@@ -108,16 +266,10 @@
             (_, i) => !confirmedIndexes.includes(i),
         );
         unconfirmed.forEach((task, idx) => {
-            const taskToAdd = {
+            addScopedItem({
                 ...task,
-                id: task.id || (Date.now() + idx).toString(),
-                status: "todo",
-                subtasks: (task.subtasks || []).map((s) => ({
-                    title: typeof s === "string" ? s : s.title,
-                    status: "todo",
-                })),
-            };
-            taskStore.addTask(taskToAdd);
+                id: task.id || (Date.now() + idx).toString()
+            });
         });
         confirmAllMultiTasks(msgIndex);
         chatHistory.update((h) => [
@@ -142,7 +294,7 @@
         });
         if (confirmed) {
             tasks.forEach((task) => {
-                taskStore.deleteTask(task.id);
+                deleteScopedItem(task.id);
             });
             chatHistory.update((h) => {
                 const newHistory = [...h];
@@ -182,7 +334,7 @@
             variant: "warning",
         });
         if (confirmed) {
-            taskStore.updateTask(task.id, updates);
+            updateScopedItem(task.id, updates);
             chatHistory.update((h) => {
                 const newHistory = [...h];
                 newHistory[msgIndex] = {
@@ -223,7 +375,7 @@
         });
         if (confirmed) {
             operations.forEach((op) => {
-                taskStore.updateTask(op.task.id, op.updates);
+                updateScopedItem(op.task.id, op.updates);
             });
             chatHistory.update((h) => {
                 const newHistory = [...h];
@@ -253,7 +405,7 @@
 
         if (confirmed) {
             operations.forEach((op) => {
-                taskStore.updateTask(op.task.id, op.updates);
+                updateScopedItem(op.task.id, op.updates);
             });
             chatHistory.update((h) => {
                 const newHistory = [...h];
@@ -304,10 +456,10 @@
 
         if (confirmed) {
             updateOps.forEach((op) => {
-                taskStore.updateTask(op.task.id, op.updates);
+                updateScopedItem(op.task.id, op.updates);
             });
             deleteOps.forEach((task) => {
-                taskStore.deleteTask(task.id);
+                deleteScopedItem(task.id);
             });
 
             const resultParts = [];
@@ -417,7 +569,7 @@
             }
         }
         
-        taskStore.updateTask(task.id, { subtasks: newSubtasks });
+        updateScopedItem(task.id, { subtasks: newSubtasks });
         
         chatHistory.update(h => {
             const newHistory = [...h];
@@ -433,12 +585,20 @@
     }
 
     $: if ($chatHistory.length) scrollToBottom();
+    $: panelMeta = getPanelMeta();
+    $: if ($aiPanelContext.draft && !$chatHistory.length) {
+        inputText = $aiPanelContext.draft;
+    }
+    $: {
+        inputText;
+        syncComposerHeight();
+    }
 </script>
 
-<div class="flex flex-col h-full bg-rose-50/30">
+<div class="flex flex-col h-full bg-rose-50/30" data-ai-shell>
     <div class="h-16 border-b border-rose-100 flex items-center justify-between px-6 bg-white shrink-0">
         <h3 class="font-bold text-rose-600 flex items-center gap-2">
-            <i class="ph-fill ph-sparkle"></i> {$_('ai_panel.title')}
+            <i class="ph-fill ph-sparkle"></i> {panelMeta.title}
         </h3>
         <div class="flex items-center gap-2">
             <button on:click={() => showAiSettings.set(true)}
@@ -465,24 +625,14 @@
             <div
                 class="bg-white border border-rose-100 p-2.5 md:p-3 rounded-2xl rounded-tl-none text-xs md:text-sm text-slate-700 shadow-sm max-w-[85%]"
             >
-                <div class="font-bold text-rose-600 mb-1">{$_('ai_panel.task_assistant')}</div>
+                <div class="font-bold text-rose-600 mb-1">{panelMeta.introTitle}</div>
                 <div class="text-slate-600 space-y-1">
-                    <div>
-                        <span class="text-slate-500">{$_('ai_panel.add_hint')}</span
-                        >{$_('ai_panel.add_example')}
-                    </div>
-                    <div>
-                        <span class="text-slate-500">{$_('ai_panel.delete_hint')}</span
-                        >{$_('ai_panel.delete_example')}
-                    </div>
-                    <div>
-                        <span class="text-slate-500">{$_('ai_panel.modify_hint')}</span
-                        >{$_('ai_panel.modify_example')}
-                    </div>
-                    <div>
-                        <span class="text-slate-500">{$_('ai_panel.query_hint')}</span
-                        >{$_('ai_panel.query_example')}
-                    </div>
+                    {#if $aiPanelContext.description}
+                        <div class="text-slate-500 leading-6">{$aiPanelContext.description}</div>
+                    {/if}
+                    {#each panelMeta.introLines as line}
+                        <div>{line}</div>
+                    {/each}
                 </div>
             </div>
         </div>
@@ -556,6 +706,48 @@
                             >
                                 <i class="ph ph-arrow-clockwise"></i> {$_('ai_panel.retry')}
                             </button>
+                        </div>
+                    {:else if msg.type === "file_confirm"}
+                        <div class="mt-1">
+                            <div class="mb-2 font-bold text-fuchsia-600 text-xs md:text-sm flex items-center gap-1">
+                                <i class="ph ph-folder-open"></i>
+                                {msg.message}
+                            </div>
+                            <div class="bg-fuchsia-50 border border-fuchsia-200 rounded-xl p-3 mb-3 text-left">
+                                <div class="text-[10px] uppercase tracking-[0.16em] font-bold text-fuchsia-500">
+                                    {msg.operation.operation}
+                                </div>
+                                <div class="mt-1 text-xs font-mono break-all text-slate-700">
+                                    {msg.operation.path}
+                                </div>
+                                {#if msg.operation.root}
+                                    <div class="mt-2 text-[10px] text-slate-500 break-all">
+                                        root: {msg.operation.root}
+                                    </div>
+                                {/if}
+                                {#if msg.operation.query}
+                                    <div class="mt-1 text-[10px] text-slate-500">
+                                        query: {msg.operation.query}
+                                    </div>
+                                {/if}
+                                {#if msg.operation.content}
+                                    <pre class="mt-3 text-[10px] leading-6 rounded-lg bg-white border border-fuchsia-100 p-3 overflow-x-auto text-slate-600"><code>{msg.operation.content.slice(0, 400)}{msg.operation.content.length > 400 ? '\n...' : ''}</code></pre>
+                                {/if}
+                            </div>
+                            <div class="flex gap-2">
+                                <button
+                                    on:click={() => confirmLocalFileOperation(index, msg.operation)}
+                                    class="flex-1 bg-fuchsia-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-fuchsia-700 flex items-center justify-center gap-1"
+                                >
+                                    <i class="ph ph-check"></i> {$_('common.confirm')}
+                                </button>
+                                <button
+                                    on:click={() => removeAiMessage(index)}
+                                    class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
+                                >
+                                    {$_('common.cancel')}
+                                </button>
+                            </div>
                         </div>
                     {:else if msg.type === "task_card"}
                         <div class="mt-1">
@@ -1213,6 +1405,59 @@
                                 {/each}
                             </div>
                         </div>
+                    {:else if msg.type === "web_search_result"}
+                        <div class="mt-1">
+                            <div
+                                class="mb-2 font-bold text-cyan-700 text-xs md:text-sm flex items-center gap-1"
+                            >
+                                <i class="ph ph-globe-hemisphere-west"></i>
+                                {msg.message || '网页搜索结果'}
+                            </div>
+                            {#if msg.query}
+                                <div class="text-[10px] text-cyan-700/80 mb-2">
+                                    搜索词：{msg.query}
+                                </div>
+                            {/if}
+                            {#if msg.summary}
+                                <div class="bg-cyan-50 border border-cyan-200 rounded-lg p-2.5 text-[11px] text-slate-600 whitespace-pre-wrap leading-6 mb-3">
+                                    {msg.summary}
+                                </div>
+                            {/if}
+                            <div class="space-y-2 max-h-72 overflow-y-auto">
+                                {#if msg.entries?.length}
+                                    {#each msg.entries as entry, entryIndex}
+                                        <div class="bg-white border border-cyan-100 rounded-lg p-2.5 text-left">
+                                            <div class="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-500">
+                                                {entry.source || 'Web'} #{entryIndex + 1}
+                                            </div>
+                                            <div class="mt-1 font-bold text-slate-800 text-xs break-words">
+                                                {entry.title}
+                                            </div>
+                                            <div class="mt-1 text-[10px] text-slate-500 break-all">
+                                                {entry.url}
+                                            </div>
+                                            {#if entry.snippet}
+                                                <div class="mt-2 text-[10px] text-slate-600 leading-5">
+                                                    {entry.snippet}
+                                                </div>
+                                            {/if}
+                                            <div class="mt-2 flex justify-end">
+                                                <button
+                                                    on:click={() => openExternalUrl(entry.url)}
+                                                    class="px-3 py-1.5 bg-cyan-600 text-white rounded-lg text-xs font-bold hover:bg-cyan-700 transition"
+                                                >
+                                                    打开
+                                                </button>
+                                            </div>
+                                        </div>
+                                    {/each}
+                                {:else}
+                                    <div class="bg-white border border-cyan-100 rounded-lg p-2.5 text-[10px] text-slate-500">
+                                        未找到可用结果。
+                                    </div>
+                                {/if}
+                            </div>
+                        </div>
                                         {:else if msg.type === 'subtask_confirm'}
                         <div class="mt-1">
                             <div class="mb-2 font-bold text-purple-600 text-xs md:text-sm flex items-center gap-1">
@@ -1278,15 +1523,17 @@
             class="flex gap-2 items-end bg-slate-50 p-2 rounded-xl border border-rose-100 focus-within:border-rose-400 focus-within:ring-2 focus-within:ring-rose-50 transition-all"
         >
             <textarea
+                bind:this={composerTextarea}
                 bind:value={inputText}
+                on:input={syncComposerHeight}
                 on:keydown={(e) =>
                     e.key === "Enter" &&
                     !e.shiftKey &&
                     (e.preventDefault(), handleSend())}
                 rows="1"
-                placeholder={$_('ai_panel.placeholder')}
+                placeholder={panelMeta.placeholder}
                 disabled={$isAiLoading}
-                class="flex-1 bg-transparent border-none focus:ring-0 text-xs md:text-sm resize-none max-h-20 md:max-h-24 py-2 text-slate-700 outline-none disabled:opacity-50"
+                class="flex-1 min-h-[44px] bg-transparent border-none focus:ring-0 text-xs md:text-sm resize-none py-2 text-slate-700 outline-none disabled:opacity-50"
             ></textarea>
             <button
                 on:click={handleSend}
@@ -1297,33 +1544,17 @@
             </button>
         </div>
         <div class="mt-1.5 flex justify-center gap-2 flex-wrap">
-            <button
-                on:click={() => {
-                    inputText = t('ai_panel.query_today_cmd');
-                    handleSend();
-                }}
-                class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
-            >
-                {$_('ai_panel.quick_today')}
-            </button>
-            <button
-                on:click={() => {
-                    inputText = t('ai_panel.query_week_cmd');
-                    handleSend();
-                }}
-                class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
-            >
-                {$_('ai_panel.quick_week')}
-            </button>
-            <button
-                on:click={() => {
-                    inputText = t('ai_panel.query_tomorrow_cmd');
-                    handleSend();
-                }}
-                class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
-            >
-                {$_('ai_panel.quick_tomorrow')}
-            </button>
+            {#each panelMeta.quickActions as action}
+                <button
+                    on:click={() => {
+                        inputText = action.value;
+                        handleSend();
+                    }}
+                    class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
+                >
+                    {action.label}
+                </button>
+            {/each}
         </div>
     </div>
 </div>

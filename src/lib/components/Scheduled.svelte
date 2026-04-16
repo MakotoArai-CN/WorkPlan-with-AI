@@ -1,12 +1,34 @@
 <script>
     import { taskStore, activeTask } from '../stores/tasks.js';
+    import { configureAiPanel, showAiPanel } from '../stores/ai.js';
     import { showConfirm } from '../stores/modal.js';
+    import { get } from 'svelte/store';
     import { _ } from 'svelte-i18n';
 
     export let openModal;
+    export let openDetailPanel = null;
+
+    function toggleAiAssistant() {
+        configureAiPanel({
+            scope: 'scheduled',
+            mode: 'task',
+            source: 'scheduled',
+            title: $_('scheduled_page.title'),
+            description: $_('scheduled_page.subtitle'),
+            entityLabel: '定时任务'
+        }, true);
+        activeTask.set(null);
+        if (openDetailPanel) {
+            openDetailPanel('ai');
+            return;
+        }
+        showAiPanel.set(true);
+    }
 
     function selectTask(task) {
+        showAiPanel.set(false);
         activeTask.set(task);
+        openDetailPanel?.('detail');
     }
 
     async function deleteTask(id) {
@@ -48,10 +70,18 @@
         <h2 class="text-lg font-bold text-teal-800">{$_('scheduled_page.title')}</h2>
         <div class="text-xs text-slate-500">{$_('scheduled_page.subtitle')}</div>
     </div>
-    <button on:click={() => openModal()}
-        class="h-9 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold shadow-md shadow-teal-200 flex items-center gap-2">
-        <i class="ph-bold ph-plus"></i>{$_('scheduled_page.new')}
-    </button>
+    <div class="flex items-center gap-2">
+        <button
+            on:click={toggleAiAssistant}
+            class="h-9 px-3 bg-white border border-teal-200 hover:bg-teal-50 text-teal-700 rounded-lg text-sm font-bold flex items-center gap-2"
+        >
+            <i class="ph ph-sparkle"></i> AI
+        </button>
+        <button on:click={() => openModal()}
+            class="h-9 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold shadow-md shadow-teal-200 flex items-center gap-2">
+            <i class="ph-bold ph-plus"></i>{$_('scheduled_page.new')}
+        </button>
+    </div>
 </header>
 
 <div class="flex-1 overflow-y-auto p-4 space-y-3 pb-20">

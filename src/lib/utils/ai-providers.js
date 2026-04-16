@@ -95,7 +95,7 @@ const PROVIDER_CONFIGS = {
     spark: {
         name: '讯飞星火',
         endpoint: 'https://spark-api-open.xf-yun.com/v1/chat/completions',
-        defaultModels: ['4.0Ultra', 'max-32k', 'pro-128k', 'generalv3.5', 'spark-x1'],
+        defaultModels: ['4.0Ultra', 'spark-x1', 'max-32k', 'pro-128k', 'generalv3.5', 'lite', 'generalv4'],
         defaultModel: '4.0Ultra',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -107,7 +107,7 @@ const PROVIDER_CONFIGS = {
         name: '百度文心一言',
         endpoint: 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions_pro',
         tokenEndpoint: 'https://aip.baidubce.com/oauth/2.0/token',
-        defaultModels: ['ERNIE-4.5-8K', 'ERNIE-4.0-8K', 'ERNIE-3.5-8K'],
+        defaultModels: ['ERNIE-4.5-8K', 'ERNIE-4.0-8K', 'ERNIE-4.0-Turbo-8K', 'ERNIE-3.5-8K', 'ERNIE-Speed-8K', 'ERNIE-Lite-8K'],
         defaultModel: 'ERNIE-4.5-8K',
         authType: 'baidu_token',
         bodyFormat: 'baidu',
@@ -118,7 +118,7 @@ const PROVIDER_CONFIGS = {
     hunyuan: {
         name: '腾讯混元',
         endpoint: 'https://api.hunyuan.cloud.tencent.com/v1/chat/completions',
-        defaultModels: ['hunyuan-turbo', 'hunyuan-pro', 'hunyuan-2.0'],
+        defaultModels: ['hunyuan-turbo', 'hunyuan-lite', 'hunyuan-standard', 'hunyuan-pro', 'hunyuan-2.0'],
         defaultModel: 'hunyuan-turbo',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -141,7 +141,7 @@ const PROVIDER_CONFIGS = {
     anthropic: {
         name: 'Anthropic Claude',
         endpoint: 'https://api.anthropic.com/v1/messages',
-        defaultModels: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+        defaultModels: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4', 'claude-haiku-4-5-20251001', 'claude-3-5-sonnet-latest'],
         defaultModel: 'claude-sonnet-4-6',
         authType: 'x-api-key',
         headers: { 'anthropic-version': '2023-06-01' },
@@ -225,7 +225,7 @@ const PROVIDER_CONFIGS = {
     baichuan: {
         name: '百川智能',
         endpoint: 'https://api.baichuan-ai.com/v1/chat/completions',
-        defaultModels: ['Baichuan4', 'Baichuan3-Turbo'],
+        defaultModels: ['Baichuan4', 'Baichuan4-Turbo', 'Baichuan3-Turbo', 'Baichuan3-Turbo-128k'],
         defaultModel: 'Baichuan4',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -236,7 +236,7 @@ const PROVIDER_CONFIGS = {
     minimax: {
         name: 'MiniMax',
         endpoint: 'https://api.minimax.chat/v1/text/chatcompletion_v2',
-        defaultModels: ['abab6.5s-chat', 'abab7-chat'],
+        defaultModels: ['abab7-chat', 'abab6.5s-chat', 'abab6.5g-chat', 'MiniMax-M1'],
         defaultModel: 'abab6.5s-chat',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -247,7 +247,7 @@ const PROVIDER_CONFIGS = {
     stepfun: {
         name: '阶跃星辰',
         endpoint: 'https://api.stepfun.com/v1/chat/completions',
-        defaultModels: ['step-1-8k', 'step-2-16k', 'step-3'],
+        defaultModels: ['step-3', 'step-2-16k', 'step-1-8k', 'step-1v-8k', 'step-r-mini'],
         defaultModel: 'step-1-8k',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -258,7 +258,7 @@ const PROVIDER_CONFIGS = {
     doubao: {
         name: '字节豆包',
         endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-        defaultModels: ['doubao-2.0', 'doubao-seed-2.0', 'doubao-1.5-pro-256k'],
+        defaultModels: ['doubao-2.0', 'doubao-seed-2.0', 'doubao-1.5-pro-256k', 'doubao-1.5-lite-32k', 'doubao-pro-32k'],
         defaultModel: 'doubao-2.0',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -269,7 +269,7 @@ const PROVIDER_CONFIGS = {
     sensetime: {
         name: '商汤日日新',
         endpoint: 'https://api.sensenova.cn/v1/llm/chat-completions',
-        defaultModels: ['SenseChat-5', 'SenseChat-Turbo', 'SenseChat-5.5'],
+        defaultModels: ['SenseChat-5.5', 'SenseChat-5', 'SenseChat-Turbo', 'SenseNova-V6-Pro'],
         defaultModel: 'SenseChat-5',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -292,7 +292,7 @@ const PROVIDER_CONFIGS = {
     perplexity: {
         name: 'Perplexity',
         endpoint: 'https://api.perplexity.ai/chat/completions',
-        defaultModels: ['llama-3.1-sonar-large-128k-online', 'llama-3.1-sonar-small-128k-online', 'sonar-reasoning'],
+        defaultModels: ['sonar-pro', 'sonar-reasoning', 'sonar', 'llama-3.1-sonar-large-128k-online', 'llama-3.1-sonar-small-128k-online'],
         defaultModel: 'llama-3.1-sonar-large-128k-online',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -303,7 +303,7 @@ const PROVIDER_CONFIGS = {
     cloudflare: {
         name: 'Cloudflare Workers AI',
         endpoint: 'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}',
-        defaultModels: ['@cf/meta/llama-3.3-70b-instruct', '@cf/meta/llama-3-8b-instruct', '@cf/deepseek/deepseek-r1'],
+        defaultModels: ['@cf/meta/llama-3.3-70b-instruct', '@cf/meta/llama-3.1-8b-instruct', '@cf/meta/llama-3-8b-instruct', '@cf/deepseek/deepseek-r1', '@cf/qwen/qwen1.5-14b-chat-awq'],
         defaultModel: '@cf/meta/llama-3.3-70b-instruct',
         authType: 'bearer',
         bodyFormat: 'cloudflare',
@@ -314,7 +314,7 @@ const PROVIDER_CONFIGS = {
     huggingface: {
         name: 'Hugging Face',
         endpoint: 'https://api-inference.huggingface.co/models/{model}/v1/chat/completions',
-        defaultModels: ['meta-llama/Llama-3.3-70B-Instruct', 'Qwen/Qwen2.5-72B-Instruct'],
+        defaultModels: ['meta-llama/Llama-3.3-70B-Instruct', 'Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B', 'mistralai/Mistral-7B-Instruct-v0.3'],
         defaultModel: 'meta-llama/Llama-3.3-70B-Instruct',
         authType: 'bearer',
         bodyFormat: 'openai',
@@ -443,7 +443,7 @@ async function getBaiduAccessToken(apiKey, secretKey) {
 }
 
 export async function fetchProviderModels(providerId, apiKey = '', customEndpoint = '') {
-    const cacheKey = `${providerId}_${apiKey ? 'auth' : 'noauth'}`;
+    const cacheKey = `${providerId}_${customEndpoint || 'default'}_${apiKey ? 'auth' : 'noauth'}`;
     if (modelCache[cacheKey] && modelCache[cacheKey].expireTime > Date.now()) {
         return modelCache[cacheKey].models;
     }
