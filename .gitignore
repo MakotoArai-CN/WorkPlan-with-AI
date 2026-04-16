@@ -27,7 +27,6 @@ build/
 # ========================================
 src-tauri/target/
 src-tauri/gen/
-src-tauri/Cargo.lock
 src-tauri/.cargo/
 
 # Android 生成文件
