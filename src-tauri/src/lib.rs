@@ -4,13 +4,138 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, RunEvent, WindowEvent,
 };
-use tauri_plugin_opener::OpenerExt;
+use scraper::{Html, Selector};
+use serde::Serialize;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tauri_plugin_opener::OpenerExt;
+use url::Url;
+use walkdir::WalkDir;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod autostart;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalFileEntry {
+    path: String,
+    name: String,
+    kind: String,
+    size: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalFileReadResult {
+    path: String,
+    content: String,
+    size: usize,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalFileMutationResult {
+    path: String,
+    action: String,
+    size: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebSearchEntry {
+    title: String,
+    url: String,
+    snippet: String,
+    source: String,
+}
+
+fn current_workspace_root() -> Result<PathBuf, String> {
+    std::env::current_dir().map_err(|e| e.to_string())
+}
+
+fn normalize_pathbuf(path: PathBuf) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        current_workspace_root()?.join(path)
+    };
+
+    let mut cursor = absolute.clone();
+    let mut missing_segments = Vec::new();
+
+    while !cursor.exists() {
+        let Some(file_name) = cursor.file_name() else {
+            return Err("无法解析目标路径".to_string());
+        };
+        missing_segments.push(file_name.to_os_string());
+        let Some(parent) = cursor.parent() else {
+            return Err("无法解析目标路径".to_string());
+        };
+        cursor = parent.to_path_buf();
+    }
+
+    let mut normalized = fs::canonicalize(&cursor).map_err(|e| e.to_string())?;
+    for segment in missing_segments.iter().rev() {
+        normalized.push(segment);
+    }
+
+    Ok(normalized)
+}
+
+fn normalize_path(path: &str) -> Result<PathBuf, String> {
+    normalize_pathbuf(PathBuf::from(path))
+}
+
+fn allowed_write_roots(trusted_dirs: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut roots = vec![normalize_pathbuf(current_workspace_root()?)?];
+    for dir in trusted_dirs {
+        if dir.trim().is_empty() {
+            continue;
+        }
+        roots.push(normalize_path(dir)?);
+    }
+    Ok(roots)
+}
+
+fn ensure_mutation_allowed(path: &str, trusted_dirs: &[String]) -> Result<PathBuf, String> {
+    let normalized = normalize_path(path)?;
+    let roots = allowed_write_roots(trusted_dirs)?;
+    if roots.iter().any(|root| normalized.starts_with(root)) {
+        return Ok(normalized);
+    }
+
+    Err(format!(
+        "拒绝操作未授权路径：{}。仅允许工作目录和用户授权目录。",
+        normalized.to_string_lossy()
+    ))
+}
+
+fn extract_duckduckgo_url(raw_url: &str) -> String {
+    if raw_url.starts_with("http://") || raw_url.starts_with("https://") {
+        return raw_url.to_string();
+    }
+
+    let prefixed = if raw_url.starts_with('/') {
+        format!("https://html.duckduckgo.com{}", raw_url)
+    } else {
+        raw_url.to_string()
+    };
+
+    if let Ok(parsed) = Url::parse(&prefixed) {
+        if let Some(decoded) = parsed
+            .query_pairs()
+            .find_map(|(key, value)| (key == "uddg").then(|| value.to_string()))
+        {
+            return decoded;
+        }
+    }
+
+    prefixed
+}
 
 fn is_newer_version(current: &str, latest: &str) -> bool {
     let parse_version = |v: &str| -> Vec<u32> {
@@ -89,6 +214,206 @@ fn get_app_version() -> String {
 }
 
 #[tauri::command]
+fn get_workspace_root() -> Result<String, String> {
+    Ok(normalize_pathbuf(current_workspace_root()?)?
+        .to_string_lossy()
+        .to_string())
+}
+
+#[tauri::command]
+fn search_local_files(
+    root: Option<String>,
+    query: String,
+    max_results: Option<usize>,
+) -> Result<Vec<LocalFileEntry>, String> {
+    let root_path = match root {
+        Some(value) if !value.trim().is_empty() => normalize_path(&value)?,
+        _ => normalize_pathbuf(current_workspace_root()?)?,
+    };
+    if !root_path.exists() {
+        return Err(format!("搜索根目录不存在：{}", root_path.to_string_lossy()));
+    }
+
+    let limit = max_results.unwrap_or(40).clamp(1, 200);
+    let needle = query.trim().to_lowercase();
+    let mut entries = Vec::new();
+
+    for entry in WalkDir::new(&root_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|item| item.ok())
+    {
+        if entries.len() >= limit {
+            break;
+        }
+        let path = entry.path();
+        if path == root_path {
+            continue;
+        }
+
+        let path_text = path.to_string_lossy().to_lowercase();
+        let name_text = entry.file_name().to_string_lossy().to_lowercase();
+        if !needle.is_empty() && !path_text.contains(&needle) && !name_text.contains(&needle) {
+            continue;
+        }
+
+        let metadata = entry.metadata().ok();
+        entries.push(LocalFileEntry {
+            path: path.to_string_lossy().to_string(),
+            name: entry.file_name().to_string_lossy().to_string(),
+            kind: if entry.file_type().is_dir() {
+                "directory".to_string()
+            } else {
+                "file".to_string()
+            },
+            size: metadata.map(|item| item.len()).unwrap_or(0),
+        });
+    }
+
+    Ok(entries)
+}
+
+#[tauri::command]
+fn read_local_file(path: String, max_bytes: Option<usize>) -> Result<LocalFileReadResult, String> {
+    let normalized = normalize_path(&path)?;
+    let bytes = fs::read(&normalized)
+        .map_err(|e| format!("读取文件失败 {}: {}", normalized.to_string_lossy(), e))?;
+    let limit = max_bytes.unwrap_or(16_000).clamp(512, 256_000);
+    let truncated = bytes.len() > limit;
+    let slice = if truncated { &bytes[..limit] } else { bytes.as_slice() };
+    let content = String::from_utf8_lossy(slice).to_string();
+
+    Ok(LocalFileReadResult {
+        path: normalized.to_string_lossy().to_string(),
+        content,
+        size: bytes.len(),
+        truncated,
+    })
+}
+
+#[tauri::command]
+fn write_local_file(
+    path: String,
+    content: String,
+    trusted_dirs: Vec<String>,
+) -> Result<LocalFileMutationResult, String> {
+    let normalized = ensure_mutation_allowed(&path, &trusted_dirs)?;
+    let Some(parent) = normalized.parent() else {
+        return Err("目标文件缺少父目录".to_string());
+    };
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("创建目录失败 {}: {}", parent.to_string_lossy(), e))?;
+    fs::write(&normalized, content.as_bytes())
+        .map_err(|e| format!("写入文件失败 {}: {}", normalized.to_string_lossy(), e))?;
+
+    Ok(LocalFileMutationResult {
+        path: normalized.to_string_lossy().to_string(),
+        action: "write".to_string(),
+        size: content.len(),
+    })
+}
+
+#[tauri::command]
+fn delete_local_file(
+    path: String,
+    trusted_dirs: Vec<String>,
+) -> Result<LocalFileMutationResult, String> {
+    let normalized = ensure_mutation_allowed(&path, &trusted_dirs)?;
+    let metadata = fs::metadata(&normalized)
+        .map_err(|e| format!("读取文件元数据失败 {}: {}", normalized.to_string_lossy(), e))?;
+    if metadata.is_dir() {
+        return Err(format!(
+            "当前仅支持删除单个文件，不支持删除目录：{}",
+            normalized.to_string_lossy()
+        ));
+    }
+    fs::remove_file(&normalized)
+        .map_err(|e| format!("删除文件失败 {}: {}", normalized.to_string_lossy(), e))?;
+
+    Ok(LocalFileMutationResult {
+        path: normalized.to_string_lossy().to_string(),
+        action: "delete".to_string(),
+        size: metadata.len() as usize,
+    })
+}
+
+#[tauri::command]
+async fn search_web(
+    query: String,
+    max_results: Option<usize>,
+) -> Result<Vec<WebSearchEntry>, String> {
+    let needle = query.trim();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let limit = max_results.unwrap_or(6).clamp(1, 10);
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.0; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get("https://html.duckduckgo.com/html/")
+        .query(&[("q", needle)])
+        .send()
+        .await
+        .map_err(|e| format!("网页搜索请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("网页搜索失败: HTTP {}", response.status()));
+    }
+
+    let html = response
+        .text()
+        .await
+        .map_err(|e| format!("读取搜索结果失败: {}", e))?;
+
+    let document = Html::parse_document(&html);
+    let result_selector = Selector::parse(".result").map_err(|e| e.to_string())?;
+    let title_selector = Selector::parse("a.result__a").map_err(|e| e.to_string())?;
+    let snippet_selector = Selector::parse(".result__snippet").map_err(|e| e.to_string())?;
+
+    let mut entries = Vec::new();
+    for result in document.select(&result_selector) {
+        if entries.len() >= limit {
+            break;
+        }
+
+        let Some(title_link) = result.select(&title_selector).next() else {
+            continue;
+        };
+
+        let title = title_link
+            .text()
+            .collect::<Vec<_>>()
+            .join("")
+            .trim()
+            .to_string();
+        let raw_url = title_link.value().attr("href").unwrap_or("").trim();
+        let url = extract_duckduckgo_url(raw_url);
+        let snippet = result
+            .select(&snippet_selector)
+            .next()
+            .map(|item| item.text().collect::<Vec<_>>().join("").trim().to_string())
+            .unwrap_or_default();
+
+        if title.is_empty() || url.is_empty() {
+            continue;
+        }
+
+        entries.push(WebSearchEntry {
+            title,
+            url,
+            snippet,
+            source: "DuckDuckGo".to_string(),
+        });
+    }
+
+    Ok(entries)
+}
+
+#[tauri::command]
 async fn open_github(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url(
@@ -136,6 +461,12 @@ pub fn run() {
             set_autostart,
             get_autostart_status,
             get_app_version,
+            get_workspace_root,
+            search_local_files,
+            read_local_file,
+            write_local_file,
+            delete_local_file,
+            search_web,
             open_github,
             open_releases,
             set_close_to_quit,

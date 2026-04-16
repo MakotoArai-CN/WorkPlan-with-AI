@@ -1,13 +1,15 @@
 <script>
     import { taskStore, activeTask } from '../stores/tasks.js';
     import { settingsStore } from '../stores/settings.js';
-    import { aiConfig, generateReport } from '../stores/ai.js';
+    import { aiConfig, configureAiPanel, generateReport, showAiPanel } from '../stores/ai.js';
     import { showAlert } from '../stores/modal.js';
     import { get } from 'svelte/store';
     import { _ } from 'svelte-i18n';
     import MarkdownRenderer from './MarkdownRenderer.svelte';
     import GanttChart from './GanttChart.svelte';
     import Charts from './Charts.svelte';
+
+    export let openDetailPanel = null;
 
     let statsStart = new Date().toISOString().split('T')[0];
     let statsEnd = new Date().toISOString().split('T')[0];
@@ -109,7 +111,26 @@
     }
 
     function selectTask(task) {
+        showAiPanel.set(false);
         activeTask.set(task);
+        openDetailPanel?.('detail');
+    }
+
+    function toggleAiAssistant() {
+        configureAiPanel({
+            scope: 'statistics',
+            mode: 'task',
+            source: 'tasks',
+            title: $_('statistics_page.title'),
+            description: `${$_('statistics_page.task_list')} (${statsStart} ~ ${statsEnd})`,
+            entityLabel: '统计任务'
+        }, true);
+        activeTask.set(null);
+        if (openDetailPanel) {
+            openDetailPanel('ai');
+            return;
+        }
+        showAiPanel.set(true);
     }
 
     async function handleGenerateReport(type) {
@@ -158,6 +179,12 @@
             <h2 class="text-lg font-bold text-indigo-800">{$_('statistics_page.title')}</h2>
         </div>
         <div class="flex flex-col md:flex-row items-center gap-2 w-full md:w-auto">
+            <button
+                on:click={toggleAiAssistant}
+                class="w-full md:w-auto h-9 px-3 bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-700 rounded-lg text-sm font-bold flex items-center justify-center gap-2"
+            >
+                <i class="ph ph-sparkle"></i> AI
+            </button>
             <select bind:value={statsStatus}
                 class="w-full md:w-auto text-xs border border-slate-200 rounded px-2 py-1.5 outline-none bg-white text-slate-600 font-bold">
                 <option value="all">{$_('statistics_page.all_status')}</option>

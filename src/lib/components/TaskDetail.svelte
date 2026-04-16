@@ -6,6 +6,7 @@
     import { get } from 'svelte/store';
 
     export let openModal;
+    export let closePanel = null;
 
     function formatDateTime(d) {
         return d ? d.replace('T', ' ') : '';
@@ -51,14 +52,23 @@
     }
 </script>
 
-<aside class="hidden md:flex w-[350px] bg-white border-l border-slate-200 flex-col z-10 shrink-0 h-full shadow-[-4px_0_15px_rgba(0,0,0,0.02)]">
+<aside class="hidden md:flex w-full bg-white border-l border-slate-200 flex-col z-10 shrink-0 h-full shadow-[-4px_0_15px_rgba(0,0,0,0.02)]">
     {#if $showAiPanel}
         <slot name="ai-panel"></slot>
     {:else if $activeTask}
-        <div class="h-16 border-b border-slate-100 flex items-center px-6 bg-slate-50/80">
+        <div class="h-16 border-b border-slate-100 flex items-center justify-between px-6 bg-slate-50/80">
             <h3 class="font-bold text-slate-700 flex items-center gap-2">
                 <i class="ph ph-sliders-horizontal"></i> {$_('task_detail.title')}
             </h3>
+            {#if closePanel}
+                <button
+                    on:click={closePanel}
+                    class="w-9 h-9 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-white transition"
+                    aria-label={$_('common.close')}
+                >
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            {/if}
         </div>
 
         <div class="flex-1 overflow-y-auto p-6 flex flex-col h-full">

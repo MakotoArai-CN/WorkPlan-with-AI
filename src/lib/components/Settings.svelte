@@ -7,10 +7,16 @@
     import { _, locale } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { setLocale, supportedLocales } from '../i18n/index.js';
+    import {
+        DATABASE_PROVIDER_CATALOG,
+        DATABASE_SETUP_SQL,
+        getDatabaseProviderMeta,
+    } from "../utils/database-providers.js";
 
     let checkingUpdate = false;
     let isMobile = false;
     let fileInput;
+    let trustedDirectoryInput = '';
 
     onMount(() => {
         isMobile =
@@ -155,6 +161,44 @@
     function handleEditorChange(editor) {
         settingsStore.setMarkdownEditor(editor);
     }
+
+    function updateDatabaseField(field, value) {
+        settingsStore.updateDatabaseConfig({ [field]: value });
+    }
+
+    function updateLocalFileField(field, value) {
+        settingsStore.updateLocalFileConfig({ [field]: value });
+    }
+
+    function addTrustedDirectory() {
+        const value = trustedDirectoryInput.trim();
+        if (!value) return;
+        settingsStore.addTrustedDirectory(value);
+        trustedDirectoryInput = '';
+    }
+
+    async function copyDatabaseSql() {
+        const t = get(_);
+        try {
+            await navigator.clipboard.writeText(DATABASE_SETUP_SQL);
+            showToast({ message: t('common.copied'), type: 'success' });
+        } catch (error) {
+            showToast({ message: String(error), type: 'error' });
+        }
+    }
+
+    $: activeDatabaseMeta = getDatabaseProviderMeta($settingsStore.databaseConfig?.service || 'supabase');
+    $: useCustomDatabaseConfig = $settingsStore.databaseConfig?.useCustomConfig ?? false;
+    $: themeOptions = [
+        { id: 'light', label: $_('settings.theme_light'), icon: 'ph-sun', preview: 'bg-white border border-slate-200', accent: 'text-amber-500' },
+        { id: 'dark', label: $_('settings.theme_dark'), icon: 'ph-moon', preview: 'bg-slate-800 border border-slate-600', accent: 'text-indigo-400' },
+        { id: 'auto', label: $_('settings.theme_auto'), icon: 'ph-circle-half', preview: 'bg-gradient-to-br from-white to-slate-800 border border-slate-300', accent: 'text-slate-600' },
+        { id: 'ocean', label: $_('settings.theme_ocean'), icon: 'ph-wave-sine', preview: 'bg-gradient-to-br from-sky-100 to-cyan-200 border border-sky-200', accent: 'text-sky-600' },
+        { id: 'forest', label: $_('settings.theme_forest'), icon: 'ph-tree-evergreen', preview: 'bg-gradient-to-br from-emerald-100 to-lime-200 border border-emerald-200', accent: 'text-emerald-600' },
+        { id: 'sunset', label: $_('settings.theme_sunset'), icon: 'ph-sun-horizon', preview: 'bg-gradient-to-br from-orange-100 to-rose-200 border border-orange-200', accent: 'text-orange-500' },
+        { id: 'rose', label: $_('settings.theme_rose'), icon: 'ph-flower-lotus', preview: 'bg-gradient-to-br from-rose-100 to-pink-200 border border-pink-200', accent: 'text-rose-500' },
+        { id: 'graphite', label: $_('settings.theme_graphite'), icon: 'ph-moon-stars', preview: 'bg-gradient-to-br from-slate-700 to-slate-950 border border-slate-600', accent: 'text-slate-200' },
+    ];
 </script>
 
 <div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50 dark:bg-slate-900">
@@ -184,34 +228,18 @@
                 <div>
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.theme_mode')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.theme_desc')}</div>
-                    <div class="grid grid-cols-3 gap-2">
-                        <button
-                            on:click={() => handleThemeChange('light')}
-                            class="flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all {$settingsStore.theme === 'light' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
-                        >
-                            <div class="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shadow-sm">
-                                <i class="ph ph-sun text-xl text-amber-500"></i>
-                            </div>
-                            <span class="text-xs font-bold text-slate-600 dark:text-slate-300">{$_('settings.theme_light')}</span>
-                        </button>
-                        <button
-                            on:click={() => handleThemeChange('dark')}
-                            class="flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all {$settingsStore.theme === 'dark' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
-                        >
-                            <div class="w-10 h-10 rounded-lg bg-slate-800 border border-slate-600 flex items-center justify-center shadow-sm">
-                                <i class="ph ph-moon text-xl text-indigo-400"></i>
-                            </div>
-                            <span class="text-xs font-bold text-slate-600 dark:text-slate-300">{$_('settings.theme_dark')}</span>
-                        </button>
-                        <button
-                            on:click={() => handleThemeChange('auto')}
-                            class="flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all {$settingsStore.theme === 'auto' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
-                        >
-                            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-white to-slate-800 border border-slate-300 flex items-center justify-center shadow-sm">
-                                <i class="ph ph-circle-half text-xl text-slate-600"></i>
-                            </div>
-                            <span class="text-xs font-bold text-slate-600 dark:text-slate-300">{$_('settings.theme_auto')}</span>
-                        </button>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {#each themeOptions as theme}
+                            <button
+                                on:click={() => handleThemeChange(theme.id)}
+                                class="flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all {$settingsStore.theme === theme.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
+                            >
+                                <div class={`w-10 h-10 rounded-lg flex items-center justify-center shadow-sm ${theme.preview}`}>
+                                    <i class={`ph ${theme.icon} text-xl ${theme.accent}`}></i>
+                                </div>
+                                <span class="text-xs font-bold text-slate-600 dark:text-slate-300">{theme.label}</span>
+                            </button>
+                        {/each}
                     </div>
                 </div>
             </div>
@@ -342,6 +370,296 @@
                         <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                     </label>
                 </div>
+                <div class="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">
+                                {$_('settings.local_files')}
+                            </div>
+                            <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 leading-6">
+                                {$_('settings.local_files_desc')}
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={$settingsStore.localFileConfig?.enabled}
+                                on:change={(e) => updateLocalFileField('enabled', e.target.checked)}
+                                class="sr-only peer"
+                            />
+                            <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                        </label>
+                    </div>
+
+                    {#if $settingsStore.localFileConfig?.enabled}
+                        <div class="rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 p-3 space-y-3">
+                            <div>
+                                <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                                    {$_('settings.workspace_root')}
+                                </div>
+                                <div class="mt-1 text-xs font-mono break-all text-slate-600 dark:text-slate-300">
+                                    {$settingsStore.workspaceRoot || $_('settings.workspace_unknown')}
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between gap-4">
+                                <div>
+                                    <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
+                                        {$_('settings.local_files_confirm')}
+                                    </div>
+                                    <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">
+                                        {$_('settings.local_files_confirm_desc')}
+                                    </div>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={$settingsStore.localFileConfig?.requireConfirmation}
+                                        on:change={(e) => updateLocalFileField('requireConfirmation', e.target.checked)}
+                                        class="sr-only peer"
+                                    />
+                                    <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                                </label>
+                            </div>
+                            <div class="space-y-2">
+                                <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+                                    {$_('settings.trusted_directories')}
+                                </div>
+                                <div class="flex gap-2">
+                                    <input
+                                        bind:value={trustedDirectoryInput}
+                                        type="text"
+                                        placeholder={$_('settings.trusted_directories_placeholder')}
+                                        on:keydown={(e) => e.key === 'Enter' && addTrustedDirectory()}
+                                        class="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-fuchsia-400 font-mono"
+                                    />
+                                    <button
+                                        on:click={addTrustedDirectory}
+                                        class="h-11 px-4 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm font-bold"
+                                    >
+                                        {$_('common.add')}
+                                    </button>
+                                </div>
+                                <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 leading-6">
+                                    {$_('settings.trusted_directories_desc')}
+                                </div>
+                                <div class="space-y-2">
+                                    {#each $settingsStore.localFileConfig?.trustedDirectories || [] as directory}
+                                        <div class="flex items-start gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5">
+                                            <div class="flex-1 min-w-0 text-xs font-mono break-all text-slate-600 dark:text-slate-300">
+                                                {directory}
+                                            </div>
+                                            <button
+                                                on:click={() => settingsStore.removeTrustedDirectory(directory)}
+                                                class="text-slate-400 hover:text-red-600 transition"
+                                                title={$_('common.delete')}
+                                            >
+                                                <i class="ph ph-x"></i>
+                                            </button>
+                                        </div>
+                                    {:else}
+                                        <div class="text-xs text-slate-400">
+                                            {$_('settings.trusted_directories_empty')}
+                                        </div>
+                                    {/each}
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                <i class="ph ph-database text-lg"></i> 数据库配置
+            </div>
+            <div class="p-4 md:p-6 space-y-5">
+                <div class="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
+                                {$_('settings.database_custom_title')}
+                            </div>
+                            <div class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-6">
+                                {$_('settings.database_custom_desc')}
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input
+                                type="checkbox"
+                                checked={useCustomDatabaseConfig}
+                                on:change={(e) => updateDatabaseField('useCustomConfig', e.target.checked)}
+                                class="sr-only peer"
+                            />
+                            <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
+                    <div
+                        class="overflow-hidden transition-[max-height,opacity,margin] duration-300 ease-out"
+                        class:max-h-[1000px]={useCustomDatabaseConfig}
+                        class:opacity-100={useCustomDatabaseConfig}
+                        class:mt-0={useCustomDatabaseConfig}
+                        class:max-h-0={!useCustomDatabaseConfig}
+                        class:opacity-0={!useCustomDatabaseConfig}
+                    >
+                        <div class="pt-1 space-y-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                        数据库服务
+                                    </label>
+                                    <select
+                                        value={$settingsStore.databaseConfig?.service || 'supabase'}
+                                        on:change={(e) => updateDatabaseField('service', e.target.value)}
+                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400"
+                                    >
+                                        {#each DATABASE_PROVIDER_CATALOG as provider}
+                                            <option value={provider.id}>{provider.name}</option>
+                                        {/each}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                        启用云同步
+                                    </label>
+                                    <label class="relative inline-flex items-center cursor-pointer mt-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={$settingsStore.databaseConfig?.enabled}
+                                            on:change={(e) => updateDatabaseField('enabled', e.target.checked)}
+                                            class="sr-only peer"
+                                        />
+                                        <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                        HTTP API / 项目地址
+                                    </label>
+                                    <input
+                                        value={$settingsStore.databaseConfig?.url || ''}
+                                        on:input={(e) => updateDatabaseField('url', e.target.value)}
+                                        type="url"
+                                        placeholder="https://your-project.supabase.co"
+                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400 font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                        API Key / Token
+                                    </label>
+                                    <input
+                                        value={$settingsStore.databaseConfig?.apiKey || ''}
+                                        on:input={(e) => updateDatabaseField('apiKey', e.target.value)}
+                                        type="password"
+                                        placeholder="service role / anon / gateway token"
+                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400 font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                        数据表 / 集合名
+                                    </label>
+                                    <input
+                                        value={$settingsStore.databaseConfig?.tableName || ''}
+                                        on:input={(e) => updateDatabaseField('tableName', e.target.value)}
+                                        type="text"
+                                        placeholder="planpro_data"
+                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400 font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                        数据库名 / 项目 ID
+                                    </label>
+                                    <input
+                                        value={$settingsStore.databaseConfig?.projectId || ''}
+                                        on:input={(e) => updateDatabaseField('projectId', e.target.value)}
+                                        type="text"
+                                        placeholder="可选"
+                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400"
+                                    />
+                                </div>
+                            </div>
+
+                            <div class="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">
+                                <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
+                                    {activeDatabaseMeta.name}
+                                </div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400">
+                                    类型：{activeDatabaseMeta.databaseType}
+                                </div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400">
+                                    免费层：{activeDatabaseMeta.freeTier}
+                                </div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400">
+                                    升级后：{activeDatabaseMeta.paidTier}
+                                </div>
+                                <div class="text-xs text-slate-600 dark:text-slate-300 leading-6">
+                                    {activeDatabaseMeta.notes}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {#if useCustomDatabaseConfig}
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between gap-2 flex-wrap">
+                            <div>
+                                <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
+                                    自托管 / PostgreSQL 建表 SQL
+                                </div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400">
+                                    适用于 Supabase、自托管 Postgres、通过 PostgREST 暴露的兼容接口
+                                </div>
+                            </div>
+                            <button
+                                on:click={copyDatabaseSql}
+                                class="h-8 px-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1.5"
+                            >
+                                <i class="ph ph-copy"></i> 复制 SQL
+                            </button>
+                        </div>
+                        <pre class="text-xs leading-6 rounded-xl bg-slate-950 text-slate-100 p-4 overflow-x-auto"><code>{DATABASE_SETUP_SQL}</code></pre>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full text-xs border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                            <thead class="bg-slate-50 dark:bg-slate-700/60">
+                                <tr>
+                                    <th class="px-3 py-2 text-left">服务/工具</th>
+                                    <th class="px-3 py-2 text-left">数据库类型</th>
+                                    <th class="px-3 py-2 text-left">免费层</th>
+                                    <th class="px-3 py-2 text-left">付费/升级</th>
+                                    <th class="px-3 py-2 text-left">说明</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {#each DATABASE_PROVIDER_CATALOG as provider}
+                                    <tr class="border-t border-slate-200 dark:border-slate-700 align-top">
+                                        <td class="px-3 py-2 font-bold text-slate-700 dark:text-slate-200">
+                                            {provider.name}
+                                        </td>
+                                        <td class="px-3 py-2 text-slate-500 dark:text-slate-400">
+                                            {provider.databaseType}
+                                        </td>
+                                        <td class="px-3 py-2 text-slate-500 dark:text-slate-400">
+                                            {provider.freeTier}
+                                        </td>
+                                        <td class="px-3 py-2 text-slate-500 dark:text-slate-400">
+                                            {provider.paidTier}
+                                        </td>
+                                        <td class="px-3 py-2 text-slate-500 dark:text-slate-400 leading-6">
+                                            {provider.notes}
+                                        </td>
+                                    </tr>
+                                {/each}
+                            </tbody>
+                        </table>
+                    </div>
+                {/if}
             </div>
         </div>
 

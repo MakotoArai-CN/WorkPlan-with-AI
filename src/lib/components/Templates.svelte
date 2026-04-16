@@ -1,13 +1,34 @@
 <script>
     import { taskStore, activeTask } from '../stores/tasks.js';
+    import { configureAiPanel, showAiPanel } from '../stores/ai.js';
     import { showConfirm } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
     export let openModal;
+    export let openDetailPanel = null;
+
+    function toggleAiAssistant() {
+        configureAiPanel({
+            scope: 'templates',
+            mode: 'task',
+            source: 'templates',
+            title: $_('templates_page.title'),
+            description: $_('templates_page.subtitle'),
+            entityLabel: '任务模板'
+        }, true);
+        activeTask.set(null);
+        if (openDetailPanel) {
+            openDetailPanel('ai');
+            return;
+        }
+        showAiPanel.set(true);
+    }
 
     function selectTemplate(template) {
+        showAiPanel.set(false);
         activeTask.set(template);
+        openDetailPanel?.('detail');
     }
 
     async function deleteTemplate(id) {
@@ -33,10 +54,18 @@
         <h2 class="text-lg font-bold text-purple-800">{$_('templates_page.title')}</h2>
         <div class="text-xs text-slate-500">{$_('templates_page.subtitle')}</div>
     </div>
-    <button on:click={() => openModal()}
-        class="h-9 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-bold shadow-md shadow-purple-200 flex items-center gap-2">
-        <i class="ph-bold ph-plus"></i>{$_('templates_page.new')}
-    </button>
+    <div class="flex items-center gap-2">
+        <button
+            on:click={toggleAiAssistant}
+            class="h-9 px-3 bg-white border border-purple-200 hover:bg-purple-50 text-purple-700 rounded-lg text-sm font-bold flex items-center gap-2"
+        >
+            <i class="ph ph-sparkle"></i> AI
+        </button>
+        <button on:click={() => openModal()}
+            class="h-9 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-bold shadow-md shadow-purple-200 flex items-center gap-2">
+            <i class="ph-bold ph-plus"></i>{$_('templates_page.new')}
+        </button>
+    </div>
 </header>
 
 <div class="flex-1 overflow-y-auto p-4 space-y-3 pb-20">

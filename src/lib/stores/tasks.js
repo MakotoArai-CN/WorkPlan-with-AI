@@ -1,22 +1,69 @@
 import { writable, derived } from 'svelte/store';
+import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
-const TABLE_NAME = import.meta.env.VITE_SUPABASE_TABLE || 'planpro_data';
+const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const DEFAULT_SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
+const DEFAULT_TABLE_NAME = import.meta.env.VITE_SUPABASE_TABLE || 'planpro_data';
 
 let supabase = null;
+let supabaseCacheKey = '';
+
+function readDatabaseConfig() {
+    const fallback = {
+        ...getDefaultDatabaseConfig(),
+        enabled: Boolean(DEFAULT_SUPABASE_URL && DEFAULT_SUPABASE_KEY),
+        useCustomConfig: false,
+        service: 'supabase',
+        url: DEFAULT_SUPABASE_URL,
+        apiKey: DEFAULT_SUPABASE_KEY,
+        tableName: DEFAULT_TABLE_NAME
+    };
+
+    if (typeof window === 'undefined') {
+        return fallback;
+    }
+
+    try {
+        const raw = localStorage.getItem('planpro_system_settings');
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        const savedConfig = {
+            ...fallback,
+            ...(parsed.databaseConfig || {})
+        };
+        const useCustomConfig = savedConfig.useCustomConfig ?? false;
+        const databaseConfig = {
+            ...savedConfig
+        };
+        if (!useCustomConfig) {
+            return fallback;
+        }
+        return {
+            ...databaseConfig,
+            useCustomConfig,
+            enabled: databaseConfig.enabled ?? Boolean(databaseConfig.url && databaseConfig.apiKey),
+            tableName: databaseConfig.tableName || DEFAULT_TABLE_NAME
+        };
+    } catch (error) {
+        console.warn('Failed to read database config:', error);
+        return fallback;
+    }
+}
 
 async function getSupabase() {
-    if (supabase) return supabase;
     if (typeof window === 'undefined') return null;
-    if (!SUPABASE_URL || !SUPABASE_KEY) {
+    const databaseConfig = readDatabaseConfig();
+    if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
         console.warn('Supabase configuration missing. Cloud sync disabled.');
         return null;
     }
+    const cacheKey = `${databaseConfig.url}|${databaseConfig.apiKey}`;
+    if (supabase && supabaseCacheKey === cacheKey) return supabase;
     const { createClient } = await import('@supabase/supabase-js');
-    supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+    supabase = createClient(databaseConfig.url, databaseConfig.apiKey, {
         auth: { persistSession: false, autoRefreshToken: false }
     });
+    supabaseCacheKey = cacheKey;
     return supabase;
 }
 
@@ -41,6 +88,10 @@ function createTaskStore() {
 
     let saveTimer = null;
 
+    function getTableName() {
+        return readDatabaseConfig().tableName || DEFAULT_TABLE_NAME;
+    }
+
     function getPureDataString(data) {
         const copy = JSON.parse(JSON.stringify(data));
         ['tasks', 'templates', 'scheduledTasks'].forEach(key => {
@@ -63,7 +114,7 @@ function createTaskStore() {
         update(s => ({ ...s, syncStatus: 'syncing' }));
         try {
             const { data, error } = await client
-                .from(TABLE_NAME)
+                .from(getTableName())
                 .select('content, updated_at')
                 .eq('user_key', accessKey)
                 .maybeSingle();
@@ -128,7 +179,7 @@ function createTaskStore() {
                 const nowTimestamp = Date.now();
                 const rawData = JSON.parse(currentPureStr);
                 const { error } = await client
-                    .from(TABLE_NAME)
+                    .from(getTableName())
                     .upsert({ user_key: state.accessKey, content: rawData, updated_at: nowTimestamp }, { onConflict: 'user_key' });
 
                 if (error) {
@@ -263,7 +314,7 @@ function createTaskStore() {
             const client = await getSupabase();
             if (client) {
                 try {
-                    await client.from(TABLE_NAME).delete().eq('user_key', accessKey);
+                    await client.from(getTableName()).delete().eq('user_key', accessKey);
                 } catch (e) {
                     console.error('Delete error:', e);
                 }

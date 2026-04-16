@@ -1,38 +1,25 @@
 import { writable, get } from 'svelte/store';
 import { isG4FProvider } from '../utils/g4f-client.js';
+import {
+    looksLikeFileIntent,
+    searchLocalFiles,
+    readLocalFile,
+    writeLocalFile,
+    deleteLocalFile
+} from '../utils/local-file-tools.js';
+import {
+    looksLikeWebSearchIntent,
+    searchWeb
+} from '../utils/web-search.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
+const AI_CHAT_HISTORY_KEY = 'planpro_ai_chat_history';
+const AI_CHAT_SESSIONS_KEY = 'planpro_ai_chat_sessions';
 const PROVIDER_CONFIG_FIELDS = ['apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
 
-export const aiConfig = writable({
-    provider: 'g4f-default',
-    apiKey: '',
-    secretKey: '',
-    model: 'auto',
-    customModel: '',
-    customEndpoint: '',
-    accountId: '',
-    temperature: 0.7,
-    maxTokens: 4096,
-    customHeaders: {},
-    dailyReportPrompt: '',
-    weeklyReportPrompt: '',
-    providerConfigs: {}
-});
-
-export const chatHistory = writable([]);
-export const aiChatHistory = writable([]);
-export const isAiLoading = writable(false);
-export const showAiPanel = writable(false);
-export const showAiSettings = writable(false);
-export const providerModels = writable({});
-export const modelsLoading = writable(false);
-export const lastFailedMessage = writable(null);
-export const streamingContent = writable('');
-export const pendingTaskOperation = writable(null);
-
-const WEEKDAY_MAP = ['日', '一', '二', '三', '四', '五', '六'];
-const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function createId(prefix = 'id') {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function getDefaultProviderConfig() {
     return {
@@ -45,10 +32,98 @@ function getDefaultProviderConfig() {
     };
 }
 
+function getDefaultConnectionProfile(name = '默认连接') {
+    return {
+        id: createId('profile'),
+        name,
+        provider: 'g4f-default',
+        apiKey: '',
+        secretKey: '',
+        model: 'auto',
+        customModel: '',
+        customEndpoint: '',
+        accountId: '',
+        providerConfigs: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function getDefaultAiConfigState() {
+    const defaultProfile = getDefaultConnectionProfile();
+    return {
+        provider: defaultProfile.provider,
+        apiKey: '',
+        secretKey: '',
+        model: 'auto',
+        customModel: '',
+        customEndpoint: '',
+        accountId: '',
+        temperature: 0.7,
+        maxTokens: 4096,
+        customHeaders: {},
+        dailyReportPrompt: '',
+        weeklyReportPrompt: '',
+        providerConfigs: {},
+        connectionProfiles: [defaultProfile],
+        activeProfileId: defaultProfile.id,
+        activeProfileName: defaultProfile.name
+    };
+}
+
+function getDefaultAiPanelContext() {
+    return {
+        scope: 'dashboard',
+        mode: 'task',
+        title: 'AI 助手',
+        description: '',
+        entityLabel: '任务',
+        source: 'tasks',
+        draft: '',
+        activeNoteId: null,
+        noteTitle: '',
+        noteCategory: '',
+        noteContent: ''
+    };
+}
+
+export const aiConfig = writable(getDefaultAiConfigState());
+
+export const chatHistory = writable([]);
+export const aiChatHistory = writable([]);
+export const aiChatSessions = writable([]);
+export const activeAiChatSessionId = writable(null);
+export const aiChatDraft = writable('');
+export const aiChatContext = writable(null);
+export const aiPanelContext = writable(getDefaultAiPanelContext());
+export const isAiLoading = writable(false);
+export const showAiPanel = writable(false);
+export const showAiSettings = writable(false);
+export const providerModels = writable({});
+export const modelsLoading = writable(false);
+export const lastFailedMessage = writable(null);
+export const streamingContent = writable('');
+export const pendingTaskOperation = writable(null);
+
+const WEEKDAY_MAP = ['日', '一', '二', '三', '四', '五', '六'];
+const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
 function extractProviderConfigFromAiConfig(config) {
     const result = {};
     for (const field of PROVIDER_CONFIG_FIELDS) {
         result[field] = config[field] || '';
+    }
+    return result;
+}
+
+function extractProviderConfigFromProfile(profile) {
+    const result = {};
+    for (const field of PROVIDER_CONFIG_FIELDS) {
+        if (field === 'model') {
+            result[field] = profile?.[field] || 'auto';
+        } else {
+            result[field] = profile?.[field] || '';
+        }
     }
     return result;
 }
@@ -58,6 +133,150 @@ function mergeProviderConfigs(providerConfigs, providerId, config) {
         ...(providerConfigs || {}),
         [providerId]: extractProviderConfigFromAiConfig(config)
     };
+}
+
+function normalizeConnectionProfile(profile, index = 0) {
+    const normalized = {
+        ...getDefaultConnectionProfile(`连接 ${index + 1}`),
+        ...(profile || {})
+    };
+
+    normalized.id = normalized.id || createId('profile');
+    normalized.name = normalized.name || `连接 ${index + 1}`;
+    normalized.provider = normalized.provider || 'g4f-default';
+    normalized.model = normalized.model || 'auto';
+    normalized.providerConfigs = normalized.providerConfigs || {};
+    normalized.createdAt = normalized.createdAt || new Date().toISOString();
+    normalized.updatedAt = normalized.updatedAt || normalized.createdAt;
+    return normalized;
+}
+
+function createConnectionProfileFromState(state, overrides = {}) {
+    const profile = normalizeConnectionProfile({
+        ...extractProviderConfigFromAiConfig(state),
+        provider: state.provider || 'g4f-default',
+        providerConfigs: state.providerConfigs || {},
+        ...overrides
+    });
+    return {
+        ...profile,
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function ensureConnectionProfiles(state) {
+    const profiles = Array.isArray(state.connectionProfiles) && state.connectionProfiles.length > 0
+        ? state.connectionProfiles.map((profile, index) => normalizeConnectionProfile(profile, index))
+        : [createConnectionProfileFromState(state)];
+    const activeProfileId = profiles.some(profile => profile.id === state.activeProfileId)
+        ? state.activeProfileId
+        : profiles[0].id;
+
+    return {
+        profiles,
+        activeProfileId
+    };
+}
+
+function applyProfileToState(state, profileId = null) {
+    const { profiles, activeProfileId } = ensureConnectionProfiles(state);
+    const resolvedProfileId = profileId && profiles.some(profile => profile.id === profileId)
+        ? profileId
+        : activeProfileId;
+    const profile = profiles.find(item => item.id === resolvedProfileId) || profiles[0];
+    const providerId = profile.provider || 'g4f-default';
+    const providerConfigs = profile.providerConfigs || {};
+    const cached = providerConfigs[providerId] || extractProviderConfigFromProfile(profile);
+    const merged = { ...getDefaultProviderConfig(), ...cached };
+
+    return {
+        ...state,
+        connectionProfiles: profiles,
+        activeProfileId: profile.id,
+        activeProfileName: profile.name,
+        provider: providerId,
+        apiKey: merged.apiKey || profile.apiKey || '',
+        secretKey: merged.secretKey || profile.secretKey || '',
+        model: merged.model || profile.model || 'auto',
+        customModel: merged.customModel || profile.customModel || '',
+        customEndpoint: merged.customEndpoint || profile.customEndpoint || '',
+        accountId: merged.accountId || profile.accountId || '',
+        providerConfigs
+    };
+}
+
+function syncActiveProfile(state, overrides = {}) {
+    const nextState = { ...state, ...overrides };
+    const { profiles, activeProfileId } = ensureConnectionProfiles(nextState);
+    const profileIndex = profiles.findIndex(profile => profile.id === activeProfileId);
+    const activeProfile = profileIndex >= 0 ? profiles[profileIndex] : profiles[0];
+    const providerId = nextState.provider || activeProfile.provider || 'g4f-default';
+    const providerConfigs = mergeProviderConfigs(
+        nextState.providerConfigs || activeProfile.providerConfigs || {},
+        providerId,
+        nextState
+    );
+
+    profiles[profileIndex >= 0 ? profileIndex : 0] = {
+        ...activeProfile,
+        name: nextState.activeProfileName || activeProfile.name || '默认连接',
+        provider: providerId,
+        apiKey: nextState.apiKey || '',
+        secretKey: nextState.secretKey || '',
+        model: nextState.model || 'auto',
+        customModel: nextState.customModel || '',
+        customEndpoint: nextState.customEndpoint || '',
+        accountId: nextState.accountId || '',
+        providerConfigs,
+        updatedAt: new Date().toISOString()
+    };
+
+    return {
+        connectionProfiles: profiles,
+        activeProfileId: activeProfileId || profiles[0].id,
+        activeProfileName: profiles[profileIndex >= 0 ? profileIndex : 0].name,
+        providerConfigs
+    };
+}
+
+function inferChatSessionTitle(history = []) {
+    const firstUserMessage = history.find(message => message.role === 'user' && message.type === 'text' && message.content);
+    if (!firstUserMessage) return '新对话';
+    const normalized = firstUserMessage.content.replace(/\s+/g, ' ').trim();
+    return normalized.length > 24 ? `${normalized.slice(0, 24)}...` : normalized;
+}
+
+function createChatSession(title = '新对话', history = []) {
+    const timestamp = new Date().toISOString();
+    return {
+        id: createId('chat'),
+        title,
+        history,
+        createdAt: timestamp,
+        updatedAt: timestamp
+    };
+}
+
+function normalizeChatSessions(rawSessions = [], legacyHistory = []) {
+    const normalized = Array.isArray(rawSessions)
+        ? rawSessions
+            .map((session, index) => ({
+                ...createChatSession(`对话 ${index + 1}`),
+                ...(session || {}),
+                history: Array.isArray(session?.history) ? session.history : [],
+                title: session?.title || inferChatSessionTitle(session?.history || []) || `对话 ${index + 1}`
+            }))
+        : [];
+
+    if (normalized.length > 0) {
+        return normalized;
+    }
+
+    if (Array.isArray(legacyHistory) && legacyHistory.length > 0) {
+        return [createChatSession(inferChatSessionTitle(legacyHistory), legacyHistory)];
+    }
+
+    return [createChatSession()];
 }
 
 async function getProviderInfoCached(providerId) {
@@ -81,15 +300,18 @@ export function hydrateCurrentProviderConfig() {
     const cached = providerConfigs[providerId] || null;
     const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
 
-    aiConfig.update(c => ({
-        ...c,
-        apiKey: merged.apiKey || '',
-        secretKey: merged.secretKey || '',
-        model: merged.model || (c.model || 'auto'),
-        customModel: merged.customModel || '',
-        customEndpoint: merged.customEndpoint || '',
-        accountId: merged.accountId || ''
-    }));
+    aiConfig.update(c => {
+        const nextState = {
+            ...c,
+            apiKey: merged.apiKey || '',
+            secretKey: merged.secretKey || '',
+            model: merged.model || (c.model || 'auto'),
+            customModel: merged.customModel || '',
+            customEndpoint: merged.customEndpoint || '',
+            accountId: merged.accountId || ''
+        };
+        return { ...nextState, ...syncActiveProfile(nextState) };
+    });
 }
 
 export async function hydrateCurrentProviderConfigWithDefaults() {
@@ -103,15 +325,18 @@ export async function hydrateCurrentProviderConfigWithDefaults() {
 
     const normalizedModel = await normalizeProviderModel(providerId, providerInfo, merged);
 
-    aiConfig.update(c => ({
-        ...c,
-        apiKey: merged.apiKey || '',
-        secretKey: merged.secretKey || '',
-        model: providerId === 'custom' ? (merged.model || 'auto') : normalizedModel,
-        customModel: merged.customModel || '',
-        customEndpoint: merged.customEndpoint || '',
-        accountId: merged.accountId || ''
-    }));
+    aiConfig.update(c => {
+        const nextState = {
+            ...c,
+            apiKey: merged.apiKey || '',
+            secretKey: merged.secretKey || '',
+            model: providerId === 'custom' ? (merged.model || 'auto') : normalizedModel,
+            customModel: merged.customModel || '',
+            customEndpoint: merged.customEndpoint || '',
+            accountId: merged.accountId || ''
+        };
+        return { ...nextState, ...syncActiveProfile(nextState) };
+    });
 }
 
 export async function switchProvider(newProviderId) {
@@ -126,17 +351,20 @@ export async function switchProvider(newProviderId) {
 
     const normalizedModel = await normalizeProviderModel(newProviderId, newProviderInfo, merged);
 
-    aiConfig.update(c => ({
-        ...c,
-        provider: newProviderId,
-        apiKey: merged.apiKey || '',
-        secretKey: merged.secretKey || '',
-        model: newProviderId === 'custom' ? (merged.model || 'auto') : normalizedModel,
-        customModel: merged.customModel || '',
-        customEndpoint: merged.customEndpoint || '',
-        accountId: merged.accountId || '',
-        providerConfigs: providerConfigsUpdated
-    }));
+    aiConfig.update(c => {
+        const nextState = {
+            ...c,
+            provider: newProviderId,
+            apiKey: merged.apiKey || '',
+            secretKey: merged.secretKey || '',
+            model: newProviderId === 'custom' ? (merged.model || 'auto') : normalizedModel,
+            customModel: merged.customModel || '',
+            customEndpoint: merged.customEndpoint || '',
+            accountId: merged.accountId || '',
+            providerConfigs: providerConfigsUpdated
+        };
+        return { ...nextState, ...syncActiveProfile(nextState) };
+    });
 }
 
 export function loadAiConfig() {
@@ -146,60 +374,144 @@ export function loadAiConfig() {
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
-            const providerConfigs = parsed.providerConfigs || {};
-            const providerId = parsed.provider || 'g4f-default';
-
-            const cached = providerConfigs[providerId] || null;
-            const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
-
-            aiConfig.set({
-                provider: providerId,
-                apiKey: merged.apiKey || '',
-                secretKey: merged.secretKey || '',
-                model: merged.model || 'auto',
-                customModel: merged.customModel || '',
-                customEndpoint: merged.customEndpoint || '',
-                accountId: merged.accountId || '',
+            const baseState = {
+                ...getDefaultAiConfigState(),
                 temperature: parsed.temperature ?? 0.7,
                 maxTokens: parsed.maxTokens ?? 4096,
                 customHeaders: parsed.customHeaders || {},
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
-                weeklyReportPrompt: parsed.weeklyReportPrompt || '',
-                providerConfigs: providerConfigs
-            });
+                weeklyReportPrompt: parsed.weeklyReportPrompt || ''
+            };
+
+            let nextState;
+            if (Array.isArray(parsed.connectionProfiles) && parsed.connectionProfiles.length > 0) {
+                nextState = applyProfileToState({
+                    ...baseState,
+                    connectionProfiles: parsed.connectionProfiles.map((profile, index) => normalizeConnectionProfile(profile, index)),
+                    activeProfileId: parsed.activeProfileId
+                });
+            } else {
+                const legacyProviderConfigs = parsed.providerConfigs || {};
+                const legacyProfile = normalizeConnectionProfile({
+                    name: parsed.activeProfileName || '默认连接',
+                    provider: parsed.provider || 'g4f-default',
+                    model: parsed.model || 'auto',
+                    providerConfigs: legacyProviderConfigs
+                });
+                nextState = applyProfileToState({
+                    ...baseState,
+                    connectionProfiles: [legacyProfile],
+                    activeProfileId: legacyProfile.id
+                });
+            }
+
+            aiConfig.set(nextState);
         } catch (e) {
             console.error('Failed to load AI config:', e);
         }
     }
 
-    const savedChatHistory = localStorage.getItem('planpro_ai_chat_history');
+    let legacyChatHistory = [];
+    const savedChatHistory = localStorage.getItem(AI_CHAT_HISTORY_KEY);
     if (savedChatHistory) {
         try {
-            aiChatHistory.set(JSON.parse(savedChatHistory));
+            legacyChatHistory = JSON.parse(savedChatHistory);
         } catch (e) {
             console.error('Failed to load AI chat history:', e);
         }
     }
+
+    const savedSessions = localStorage.getItem(AI_CHAT_SESSIONS_KEY);
+    let sessions = normalizeChatSessions([], legacyChatHistory);
+    let activeSessionId = sessions[0].id;
+
+    if (savedSessions) {
+        try {
+            const parsedSessions = JSON.parse(savedSessions);
+            sessions = normalizeChatSessions(parsedSessions.sessions || [], legacyChatHistory);
+            activeSessionId = sessions.some(session => session.id === parsedSessions.activeSessionId)
+                ? parsedSessions.activeSessionId
+                : sessions[0].id;
+        } catch (e) {
+            console.error('Failed to load AI chat sessions:', e);
+        }
+    }
+
+    aiChatSessions.set(sessions);
+    activeAiChatSessionId.set(activeSessionId);
+    aiChatHistory.set((sessions.find(session => session.id === activeSessionId) || sessions[0]).history || []);
 }
 
 export function saveAiConfig() {
     if (typeof window === 'undefined') return;
     const current = get(aiConfig);
-    const providerId = current.provider || 'g4f-default';
-    const providerConfigsUpdated = mergeProviderConfigs(current.providerConfigs, providerId, current);
+    const synced = syncActiveProfile(current);
+    const nextState = { ...current, ...synced };
 
     const toSave = {
-        provider: providerId,
-        temperature: current.temperature,
-        maxTokens: current.maxTokens,
-        customHeaders: current.customHeaders,
-        dailyReportPrompt: current.dailyReportPrompt,
-        weeklyReportPrompt: current.weeklyReportPrompt,
-        providerConfigs: providerConfigsUpdated
+        activeProfileId: nextState.activeProfileId,
+        activeProfileName: nextState.activeProfileName,
+        temperature: nextState.temperature,
+        maxTokens: nextState.maxTokens,
+        customHeaders: nextState.customHeaders,
+        dailyReportPrompt: nextState.dailyReportPrompt,
+        weeklyReportPrompt: nextState.weeklyReportPrompt,
+        connectionProfiles: nextState.connectionProfiles
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-    aiConfig.update(c => ({ ...c, providerConfigs: providerConfigsUpdated }));
-    saveApiKeyToPasswords(providerId, current);
+    aiConfig.set(nextState);
+    saveApiKeyToPasswords(nextState.provider, nextState);
+}
+
+export function addConnectionProfile(name = '') {
+    aiConfig.update(current => {
+        const newProfile = createConnectionProfileFromState(current, {
+            id: createId('profile'),
+            name: name || `连接 ${((current.connectionProfiles || []).length || 0) + 1}`
+        });
+        const nextState = applyProfileToState({
+            ...current,
+            connectionProfiles: [...(current.connectionProfiles || []), newProfile],
+            activeProfileId: newProfile.id
+        }, newProfile.id);
+        return nextState;
+    });
+}
+
+export function selectConnectionProfile(profileId) {
+    aiConfig.update(current => applyProfileToState(current, profileId));
+}
+
+export function updateConnectionProfileName(name) {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    aiConfig.update(current => {
+        const profiles = (current.connectionProfiles || []).map(profile =>
+            profile.id === current.activeProfileId
+                ? { ...profile, name: trimmedName, updatedAt: new Date().toISOString() }
+                : profile
+        );
+        return {
+            ...current,
+            connectionProfiles: profiles,
+            activeProfileName: trimmedName
+        };
+    });
+}
+
+export function deleteConnectionProfile(profileId) {
+    aiConfig.update(current => {
+        const profiles = (current.connectionProfiles || []).filter(profile => profile.id !== profileId);
+        if (profiles.length === 0) {
+            return current;
+        }
+        const nextActiveId = current.activeProfileId === profileId ? profiles[0].id : current.activeProfileId;
+        return applyProfileToState({
+            ...current,
+            connectionProfiles: profiles,
+            activeProfileId: nextActiveId
+        }, nextActiveId);
+    });
 }
 
 async function saveApiKeyToPasswords(providerId, config) {
@@ -257,14 +569,146 @@ async function saveApiKeyToPasswords(providerId, config) {
         console.warn('Failed to save API key to passwords:', e);
     }
 }
+
+function syncAiChatSessionHistory(history = null) {
+    const currentHistory = Array.isArray(history) ? history : get(aiChatHistory);
+    const trimmedHistory = currentHistory.slice(-100);
+    let sessions = get(aiChatSessions);
+    let activeSessionId = get(activeAiChatSessionId);
+
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+        const newSession = createChatSession(inferChatSessionTitle(trimmedHistory), trimmedHistory);
+        sessions = [newSession];
+        activeSessionId = newSession.id;
+    }
+
+    if (!activeSessionId || !sessions.some(session => session.id === activeSessionId)) {
+        activeSessionId = sessions[0].id;
+    }
+
+    const inferredTitle = inferChatSessionTitle(trimmedHistory);
+    const updatedSessions = sessions.map(session => {
+        if (session.id !== activeSessionId) {
+            return session;
+        }
+
+        const keepTitle = session.title && session.title !== '新对话';
+        return {
+            ...session,
+            title: keepTitle ? session.title : inferredTitle,
+            history: trimmedHistory,
+            updatedAt: new Date().toISOString()
+        };
+    }).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+    aiChatSessions.set(updatedSessions);
+    activeAiChatSessionId.set(activeSessionId);
+    return updatedSessions;
+}
+
 export function saveAiChatHistory() {
     if (typeof window === 'undefined') return;
     const history = get(aiChatHistory);
-    localStorage.setItem('planpro_ai_chat_history', JSON.stringify(history.slice(-100)));
+    const sessions = syncAiChatSessionHistory(history);
+    const activeSessionId = get(activeAiChatSessionId);
+    localStorage.setItem(AI_CHAT_HISTORY_KEY, JSON.stringify(history.slice(-100)));
+    localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify({
+        activeSessionId,
+        sessions
+    }));
+}
+
+export function clearAiChatDraft() {
+    aiChatDraft.set('');
+    aiChatContext.set(null);
+}
+
+export function resetAiPanelContext() {
+    aiPanelContext.set(getDefaultAiPanelContext());
+}
+
+export function configureAiPanel(context = {}, clearHistory = false) {
+    const nextContext = {
+        ...getDefaultAiPanelContext(),
+        ...(context || {})
+    };
+    aiPanelContext.set(nextContext);
+    if (clearHistory) {
+        chatHistory.set([]);
+    }
+}
+
+export function setAiChatDraft(draft = '', context = null) {
+    aiChatDraft.set(draft);
+    aiChatContext.set(context);
+}
+
+export function createAiChatSession(title = '新对话') {
+    const currentSessions = get(aiChatSessions);
+    const newSession = createChatSession(title);
+    aiChatSessions.set([newSession, ...(currentSessions || [])]);
+    activeAiChatSessionId.set(newSession.id);
+    aiChatHistory.set([]);
+    clearAiChatDraft();
+    saveAiChatHistory();
+}
+
+export function selectAiChatSession(sessionId) {
+    const sessions = get(aiChatSessions);
+    const targetSession = sessions.find(session => session.id === sessionId);
+    if (!targetSession) return;
+    activeAiChatSessionId.set(targetSession.id);
+    aiChatHistory.set(targetSession.history || []);
+    clearAiChatDraft();
+    saveAiChatHistory();
+}
+
+export function renameAiChatSession(sessionId, title) {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) return;
+    aiChatSessions.update(sessions =>
+        (sessions || []).map(session =>
+            session.id === sessionId
+                ? { ...session, title: trimmedTitle, updatedAt: new Date().toISOString() }
+                : session
+        )
+    );
+    saveAiChatHistory();
+}
+
+export function deleteAiChatSession(sessionId) {
+    const currentActiveSessionId = get(activeAiChatSessionId);
+    let sessions = (get(aiChatSessions) || []).filter(session => session.id !== sessionId);
+    if (sessions.length === 0) {
+        sessions = [createChatSession()];
+    }
+    aiChatSessions.set(sessions);
+    const nextActiveSessionId = currentActiveSessionId === sessionId
+        ? sessions[0].id
+        : (sessions.find(session => session.id === currentActiveSessionId)?.id || sessions[0].id);
+    activeAiChatSessionId.set(nextActiveSessionId);
+    aiChatHistory.set((sessions.find(session => session.id === nextActiveSessionId) || sessions[0]).history || []);
+    clearAiChatDraft();
+    saveAiChatHistory();
+}
+
+export function openAiChatWorkspace({
+    title = '新对话',
+    draft = '',
+    context = null,
+    createSession = true
+} = {}) {
+    if (createSession) {
+        createAiChatSession(title);
+    }
+    setAiChatDraft(draft, context);
 }
 
 export function updateAiConfig(updates) {
-    aiConfig.update(c => ({ ...c, ...updates }));
+    aiConfig.update(c => {
+        const nextState = { ...c, ...updates };
+        return { ...nextState, ...syncActiveProfile(nextState) };
+    });
 }
 
 export async function getAiProviders() {
@@ -277,11 +721,11 @@ export async function getAiProviderInfo(providerId) {
     return getProviderInfo(providerId);
 }
 
-export async function loadModelsForProvider(providerId, apiKey = '') {
+export async function loadModelsForProvider(providerId, apiKey = '', customEndpoint = '') {
     modelsLoading.set(true);
     try {
         const { fetchProviderModels } = await import('../utils/ai-providers.js');
-        const models = await fetchProviderModels(providerId, apiKey);
+        const models = await fetchProviderModels(providerId, apiKey, customEndpoint);
         providerModels.update(cache => ({
             ...cache,
             [providerId]: models
@@ -379,22 +823,34 @@ function formatDateForAI(date) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function normalizeRepeatDays(values = []) {
+    return [...new Set(
+        (Array.isArray(values) ? values : [])
+            .map(value => Number(value))
+            .map(value => value === 7 ? 0 : value)
+            .filter(value => Number.isInteger(value) && value >= 0 && value <= 6)
+    )];
+}
+
 function formatFullTaskForAI(task) {
     const dateInfo = getDateInfo();
-    const taskDate = new Date(task.date.split('T')[0]);
-    let relativeDay = '';
-    if (taskDate.getTime() === dateInfo.today.getTime()) {
-        relativeDay = '今天';
-    } else if (taskDate.getTime() === dateInfo.tomorrow.getTime()) {
-        relativeDay = '明天';
-    } else if (taskDate.getTime() === dateInfo.dayAfterTomorrow.getTime()) {
-        relativeDay = '后天';
-    } else if (taskDate.getTime() === dateInfo.yesterday.getTime()) {
-        relativeDay = '昨天';
-    } else if (taskDate.getTime() === dateInfo.dayBeforeYesterday.getTime()) {
-        relativeDay = '前天';
-    } else {
-        relativeDay = formatDateForAI(taskDate);
+    const rawDate = task.date ? task.date.split('T')[0] : '';
+    const taskDate = rawDate ? new Date(rawDate) : null;
+    let relativeDay = '无日期';
+    if (taskDate && !Number.isNaN(taskDate.getTime())) {
+        if (taskDate.getTime() === dateInfo.today.getTime()) {
+            relativeDay = '今天';
+        } else if (taskDate.getTime() === dateInfo.tomorrow.getTime()) {
+            relativeDay = '明天';
+        } else if (taskDate.getTime() === dateInfo.dayAfterTomorrow.getTime()) {
+            relativeDay = '后天';
+        } else if (taskDate.getTime() === dateInfo.yesterday.getTime()) {
+            relativeDay = '昨天';
+        } else if (taskDate.getTime() === dateInfo.dayBeforeYesterday.getTime()) {
+            relativeDay = '前天';
+        } else {
+            relativeDay = formatDateForAI(taskDate);
+        }
     }
     const priorityMap = { normal: '普通', urgent: '紧急', critical: '特急' };
     const statusMap = { todo: '未开始', doing: '进行中', done: '已完成' };
@@ -402,7 +858,40 @@ function formatFullTaskForAI(task) {
     if (task.subtasks && task.subtasks.length > 0) {
         subtasksStr = `\n    子任务: ${task.subtasks.map(s => `[${s.status === 'done' ? '✓' : '○'}]${s.title}`).join(', ')}`;
     }
-    return `[ID:${task.id}] "${task.title}" | ${relativeDay} ${task.date.split('T')[1] || '09:00'} | 状态:${statusMap[task.status] || '未开始'} | 优先级:${priorityMap[task.priority] || '普通'}${task.deadline ? ` | 截止:${task.deadline}` : ''}${task.note ? ` | 备注:${task.note}` : ''}${subtasksStr}`;
+    const repeatDays = Array.isArray(task.repeatDays) && task.repeatDays.length > 0
+        ? ` | 重复:${task.repeatDays.join(',')}`
+        : '';
+    const enabledState = typeof task.enabled === 'boolean'
+        ? ` | 启用:${task.enabled ? '是' : '否'}`
+        : '';
+    const timeText = task.date?.split('T')[1] || '';
+    return `[ID:${task.id}] "${task.title}" | ${relativeDay}${timeText ? ` ${timeText}` : ''} | 状态:${statusMap[task.status] || '未开始'} | 优先级:${priorityMap[task.priority] || '普通'}${repeatDays}${enabledState}${task.deadline ? ` | 截止:${task.deadline}` : ''}${task.note ? ` | 备注:${task.note}` : ''}${subtasksStr}`;
+}
+
+function formatTemplateForAI(template) {
+    const priorityMap = { normal: '普通', urgent: '紧急', critical: '特急' };
+    const statusMap = { todo: '未开始', doing: '进行中', done: '已完成' };
+    let subtasksStr = '';
+    if (template.subtasks && template.subtasks.length > 0) {
+        subtasksStr = `\n    子任务: ${template.subtasks.map(item => `[${item.status === 'done' ? '✓' : '○'}]${item.title}`).join(', ')}`;
+    }
+    return `[ID:${template.id}] "${template.title}" | 状态:${statusMap[template.status] || '未开始'} | 优先级:${priorityMap[template.priority] || '普通'}${template.note ? ` | 备注:${template.note}` : ''}${subtasksStr}`;
+}
+
+function normalizeTemplateEntity(template, index = 0) {
+    return {
+        id: template.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 6)}`,
+        title: template.title || '未命名模板',
+        status: template.status || 'todo',
+        priority: ['normal', 'urgent', 'critical'].includes(template.priority) ? template.priority : 'normal',
+        date: '',
+        deadline: '',
+        note: template.note || '',
+        subtasks: (template.subtasks || []).map(item => ({
+            title: typeof item === 'string' ? item : (item.title || ''),
+            status: item.status || 'todo'
+        }))
+    };
 }
 
 const DELETE_KEYWORDS = [
@@ -434,6 +923,18 @@ const SUBTASK_KEYWORDS = [
 const SUBTASK_ADD_KEYWORDS = ['添加子任务', '新增子任务', '加个子任务', '添加步骤', '新增步骤'];
 const SUBTASK_DELETE_KEYWORDS = ['删除子任务', '移除子任务', '去掉子任务', '删除步骤'];
 const SUBTASK_UPDATE_KEYWORDS = ['修改子任务', '更改子任务', '改子任务', '修改步骤'];
+const CHAT_ASSISTANT_CONTEXT_SCOPES = new Set(['dashboard', 'templates', 'scheduled', 'statistics', 'notes', 'project']);
+const PROJECT_CHAT_KEYWORDS = [
+    '任务', '看板', '模板', '定时', '统计', '子任务', '笔记',
+    'priority', 'deadline', 'subtask', 'task', 'tasks', 'template',
+    'templates', 'schedule', 'scheduled', 'kanban', 'note', 'notes'
+];
+const SOURCE_KEYWORD_MAP = {
+    scheduled: ['定时', '周期', '每周', '每天', '重复', 'scheduled', 'schedule', 'recurring'],
+    templates: ['模板', '模版', 'template', 'templates'],
+    notes: ['笔记', '便签', 'note', 'notes'],
+    tasks: ['任务', '看板', 'task', 'tasks', 'kanban']
+};
 
 function detectSubtaskOperation(text) {
     const lowerText = text.toLowerCase();
@@ -450,6 +951,60 @@ function detectSubtaskOperation(text) {
         if (lowerText.includes(kw)) return 'subtask_general';
     }
     return null;
+}
+
+function looksLikeProjectIntent(text = '') {
+    const lowerText = String(text).toLowerCase();
+    const hasProjectKeyword = PROJECT_CHAT_KEYWORDS.some(keyword => lowerText.includes(keyword));
+    const hasActionKeyword = DELETE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        UPDATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        QUERY_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        SUBTASK_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        ['新增', '添加', '创建', '新建', '整理', '汇总', '总结', '复盘', '统计', 'report'].some(keyword => lowerText.includes(keyword));
+    return hasProjectKeyword && hasActionKeyword;
+}
+
+function detectAssistantSourceFromText(text = '', fallbackSource = 'tasks') {
+    const lowerText = String(text).toLowerCase();
+    for (const [source, keywords] of Object.entries(SOURCE_KEYWORD_MAP)) {
+        if (keywords.some(keyword => lowerText.includes(keyword))) {
+            return source;
+        }
+    }
+    return fallbackSource || 'tasks';
+}
+
+function getAssistantMetaBySource(source = 'tasks') {
+    if (source === 'templates') {
+        return {
+            scope: 'templates',
+            title: '任务模板 AI',
+            description: '当前对话将优先处理任务模板相关操作与问答。',
+            entityLabel: '任务模板'
+        };
+    }
+    if (source === 'scheduled') {
+        return {
+            scope: 'scheduled',
+            title: '定时任务 AI',
+            description: '当前对话将优先处理定时任务、周期规则与提醒计划。',
+            entityLabel: '定时任务'
+        };
+    }
+    if (source === 'notes') {
+        return {
+            scope: 'notes',
+            title: '工作笔记 AI',
+            description: '当前对话将优先处理工作笔记内容。',
+            entityLabel: '笔记'
+        };
+    }
+    return {
+        scope: 'project',
+        title: '项目 AI',
+        description: '当前对话可操作任务看板并结合整个项目上下文回答。',
+        entityLabel: '任务'
+    };
 }
 
 function detectOperationType(text) {
@@ -584,19 +1139,524 @@ function filterTasksByTimeScope(tasks, timeScope, dateInfo) {
     });
 }
 
+function normalizeAssistantPayload(payload = []) {
+    if (Array.isArray(payload)) {
+        return {
+            ...getDefaultAiPanelContext(),
+            items: payload
+        };
+    }
+    return {
+        ...getDefaultAiPanelContext(),
+        ...(payload || {}),
+        items: Array.isArray(payload?.items) ? payload.items : []
+    };
+}
+
+async function buildAiChatAssistantPayload(text = '') {
+    const context = normalizeAssistantPayload(get(aiChatContext));
+    if (context.mode === 'note' || context.scope === 'notes') {
+        return context;
+    }
+
+    const { taskStore } = await import('./tasks.js');
+    const taskState = get(taskStore);
+    const fallbackSource = context.source && context.source !== 'notes'
+        ? context.source
+        : 'tasks';
+    const source = CHAT_ASSISTANT_CONTEXT_SCOPES.has(context.scope)
+        ? detectAssistantSourceFromText(text, fallbackSource)
+        : fallbackSource;
+    const sourceMeta = getAssistantMetaBySource(source);
+    const items = source === 'templates'
+        ? (taskState.templates || [])
+        : source === 'scheduled'
+            ? (taskState.scheduledTasks || [])
+            : (taskState.tasks || []);
+
+    return {
+        ...getDefaultAiPanelContext(),
+        ...sourceMeta,
+        ...context,
+        scope: context.scope && CHAT_ASSISTANT_CONTEXT_SCOPES.has(context.scope)
+            ? context.scope
+            : sourceMeta.scope,
+        title: context.title || sourceMeta.title,
+        description: context.description || sourceMeta.description,
+        source,
+        entityLabel: context.entityLabel || sourceMeta.entityLabel,
+        items
+    };
+}
+
+function shouldUseAssistantToolsInChat(text = '') {
+    const context = get(aiChatContext);
+    if (context?.scope && CHAT_ASSISTANT_CONTEXT_SCOPES.has(context.scope)) {
+        return true;
+    }
+    return looksLikeFileIntent(text) ||
+        looksLikeWebSearchIntent(text) ||
+        looksLikeProjectIntent(text);
+}
+
+function extractJsonPayload(value = '') {
+    const cleanValue = String(value || '')
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim();
+    const jsonMatch = cleanValue.match(/\{[\s\S]*\}/);
+    return JSON.parse(jsonMatch ? jsonMatch[0] : cleanValue);
+}
+
+function formatContextItemsForAI(items = [], context = {}) {
+    const label = context.entityLabel || '任务';
+    if (!Array.isArray(items) || items.length === 0) {
+        return `- [${label}] 暂无`;
+    }
+    return items
+        .slice(0, 24)
+        .map((item) => {
+            const parts = [`- [${label}] ${item.title || '未命名'}`];
+            if (item.status) parts.push(item.status);
+            if (item.date) parts.push(item.date);
+            if (Array.isArray(item.repeatDays) && item.repeatDays.length > 0) {
+                parts.push(`repeat=${item.repeatDays.join(',')}`);
+            }
+            if (typeof item.enabled === 'boolean') {
+                parts.push(`enabled=${item.enabled}`);
+            }
+            if (item.category) parts.push(`category=${item.category}`);
+            return parts.join(' | ');
+        })
+        .join('\n');
+}
+
+function formatNoteContextForAI(context = {}) {
+    if (!context?.activeNoteId) return '';
+    return [
+        '【当前工作笔记】',
+        `标题：${context.noteTitle || '未命名笔记'}`,
+        `分类：${context.noteCategory || '全部'}`,
+        '内容：',
+        context.noteContent || '（当前为空）'
+    ].join('\n');
+}
+
+async function buildContextualAssistantResponse(userText, assistantContext, config) {
+    const { callAIWithMessages } = await import('../utils/ai-providers.js');
+    const nowStr = getFormattedDateTime();
+    const projectContext = await getProjectContextSummary();
+    const scopedItems = formatContextItemsForAI(assistantContext.items, assistantContext);
+    const noteContext = formatNoteContextForAI(assistantContext);
+
+    const messages = [
+        {
+            role: 'system',
+            content: `你是 WorkPlan 的内置 AI 助手。当前时间：${nowStr}。
+你正在右侧助手面板中工作，必须优先基于当前页面上下文回答。
+如果用户没有明确要求执行结构化的新增/修改/删除操作，就直接给出专业回答、总结、规划建议或内容改写结果。
+回答必须准确、克制，不要捏造项目中不存在的数据。
+
+【当前页面】
+- scope: ${assistantContext.scope}
+- 标题: ${assistantContext.title || 'AI 助手'}
+- 描述: ${assistantContext.description || '无'}
+
+【当前页面数据】
+${scopedItems}
+
+${noteContext ? `${noteContext}\n` : ''}${projectContext}`
+        },
+        {
+            role: 'user',
+            content: userText
+        }
+    ];
+
+    const result = await callAIWithMessages(config, messages);
+    return {
+        role: 'assistant',
+        type: 'text',
+        content: result || '暂时没有可返回的内容。'
+    };
+}
+
+function formatLocalFileSearchResult(entries = []) {
+    if (!entries.length) {
+        return '未找到匹配的本地文件或目录。';
+    }
+    return [
+        '已找到以下本地文件/目录：',
+        ...entries.map((entry) => `- ${entry.kind === 'directory' ? '[目录]' : '[文件]'} ${entry.path}`)
+    ].join('\n');
+}
+
+async function analyzeLocalFileIntent(userText, config, callAI) {
+    const { settingsStore } = await import('./settings.js');
+    const settings = get(settingsStore);
+    const localFileConfig = settings.localFileConfig || {};
+    if (!localFileConfig.enabled || !looksLikeFileIntent(userText)) {
+        return null;
+    }
+
+    const workspaceRoot = settings.workspaceRoot || '未知工作目录';
+    const trustedDirectories = localFileConfig.trustedDirectories || [];
+    const systemPrompt = `你是 WorkPlan 的本地文件技能路由器。你需要把用户的自然语言请求解析为单个文件操作。
+
+【工作目录】${workspaceRoot}
+【额外受信任目录】
+${trustedDirectories.length > 0 ? trustedDirectories.map((item) => `- ${item}`).join('\n') : '- 无'}
+
+【允许的操作】
+- search: 扫描目录、搜索文件或列出目录内容
+- read: 读取单个文件
+- write: 新建文件、覆盖写入或修改文件
+- delete: 删除单个文件
+
+【安全规则】
+1. write / delete 仅用于明确要求写入、修改、删除文件的请求
+2. 用户未提供路径时，优先使用工作目录内的相对路径
+3. 如果只是普通问答，不要输出文件操作，返回 {"mode":"reply"}
+4. 只返回 JSON
+
+【输出格式】
+{
+  "mode": "reply|file",
+  "operation": "search|read|write|delete",
+  "path": "目标路径，可为相对工作目录的路径",
+  "root": "搜索根目录，可选",
+  "query": "搜索关键词，可选",
+  "content": "写入内容，仅 write 使用",
+  "response_goal": "执行完成后如何向用户说明结果",
+  "message": "给用户的简短说明"
+}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) return null;
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        if (parsed.mode !== 'file' || !parsed.operation) {
+            return null;
+        }
+        return parsed;
+    } catch (error) {
+        console.error('Failed to parse local file intent:', error, aiResponse);
+        return null;
+    }
+}
+
+function formatWebSearchResult(entries = []) {
+    if (!entries.length) {
+        return '未找到可用的网页搜索结果。';
+    }
+
+    return [
+        '已找到以下网页结果：',
+        ...entries.map((entry, index) => {
+            const lines = [
+                `${index + 1}. ${entry.title}`,
+                `   ${entry.url}`
+            ];
+            if (entry.snippet) {
+                lines.push(`   ${entry.snippet}`);
+            }
+            return lines.join('\n');
+        })
+    ].join('\n');
+}
+
+async function analyzeWebSearchIntent(userText, config, callAI) {
+    if (!looksLikeWebSearchIntent(userText)) {
+        return null;
+    }
+
+    const systemPrompt = `你是 WorkPlan 的网页搜索技能路由器。你需要判断用户是否真的需要联网搜索，并提取搜索词。
+
+【什么时候需要搜索】
+1. 用户明确要求搜索网页、联网查询、查看官网、查最新消息
+2. 用户的问题依赖实时信息，例如天气、股价、汇率、新闻、产品最新版本
+3. 用户要求给出网页结果、链接或在线资料
+
+【什么时候不需要搜索】
+1. 只是项目内任务、模板、定时任务或笔记操作
+2. 只是让 AI 做一般性解释、写作或总结
+
+【输出格式】
+只返回 JSON：
+{
+  "mode": "reply|web",
+  "query": "精简后的搜索关键词",
+  "response_goal": "基于搜索结果应如何回答用户",
+  "message": "给用户的简短提示"
+}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) return null;
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        if (parsed.mode !== 'web' || !parsed.query) {
+            return null;
+        }
+        return parsed;
+    } catch (error) {
+        console.error('Failed to parse web search intent:', error, aiResponse);
+        return null;
+    }
+}
+
+async function finalizeToolAnswer(userText, plan, toolResult, config) {
+    if (!plan?.response_goal) {
+        return null;
+    }
+
+    const { callAIWithMessages } = await import('../utils/ai-providers.js');
+    const messages = [
+        {
+            role: 'system',
+            content: '你正在根据工具执行结果回复用户。只能依据提供的结果作答，不能捏造不存在的事实、文件内容或网页信息。'
+        },
+        {
+            role: 'user',
+            content: `用户请求：${userText}
+
+操作：${plan.operation}
+目标：${plan.response_goal}
+结果：
+${toolResult}`
+        }
+    ];
+
+    const result = await callAIWithMessages(config, messages);
+    return result || null;
+}
+
+async function runLocalFilePlan(plan, userText, config, requireConfirmation = true) {
+    const { settingsStore } = await import('./settings.js');
+    const settings = get(settingsStore);
+    const trustedDirectories = settings.localFileConfig?.trustedDirectories || [];
+    const operation = String(plan.operation || '').toLowerCase();
+
+    if (operation === 'write' || operation === 'delete') {
+        if (requireConfirmation) {
+            return {
+                role: 'assistant',
+                type: 'file_confirm',
+                operation: {
+                    ...plan,
+                    trustedDirectories
+                },
+                message: plan.message || '请确认本地文件操作。'
+            };
+        }
+
+        if (operation === 'write') {
+            const result = await writeLocalFile({
+                path: plan.path,
+                content: plan.content || '',
+                trustedDirectories
+            });
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: `已写入本地文件：${result.path}`
+            };
+        }
+
+        const result = await deleteLocalFile({
+            path: plan.path,
+            trustedDirectories
+        });
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: `已删除本地文件：${result.path}`
+        };
+    }
+
+    if (operation === 'read') {
+        const result = await readLocalFile({ path: plan.path });
+        const fallback = [
+            `已读取文件：${result.path}`,
+            '',
+            '```',
+            result.content || '',
+            '```'
+        ].join('\n');
+        const summarized = await finalizeToolAnswer(
+            userText,
+            plan,
+            `文件路径：${result.path}\n文件大小：${result.size}\n是否截断：${result.truncated}\n文件内容：\n${result.content}`,
+            config
+        );
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: summarized || fallback
+        };
+    }
+
+    const results = await searchLocalFiles({
+        root: plan.root || '',
+        query: plan.query || plan.path || '',
+        maxResults: 40
+    });
+    const fallback = formatLocalFileSearchResult(results);
+    const summarized = await finalizeToolAnswer(
+        userText,
+        plan,
+        fallback,
+        config
+    );
+    return {
+        role: 'assistant',
+        type: 'text',
+        content: summarized || fallback
+    };
+}
+
+async function runWebSearchPlan(plan, userText, config) {
+    const results = await searchWeb({
+        query: plan.query || userText,
+        maxResults: plan.maxResults || 6
+    });
+    const fallback = formatWebSearchResult(results);
+    const summarized = await finalizeToolAnswer(
+        userText,
+        {
+            operation: 'web_search',
+            response_goal: plan.response_goal || '根据网页搜索结果直接回答用户，并保留关键链接。'
+        },
+        fallback,
+        config
+    );
+    return {
+        role: 'assistant',
+        type: 'web_search_result',
+        query: plan.query || userText,
+        summary: summarized || `已找到 ${results.length} 条网页结果。`,
+        entries: results,
+        message: plan.message || '已完成网页搜索。'
+    };
+}
+
+function normalizeAssistantResult(result, assistantContext) {
+    const baseMeta = {
+        assistantSource: assistantContext.source || 'tasks',
+        assistantScope: assistantContext.scope || 'dashboard',
+        entityLabel: assistantContext.entityLabel || '任务'
+    };
+
+    if (result && result.type) {
+        return {
+            ...baseMeta,
+            ...result
+        };
+    }
+
+    if (result && Array.isArray(result.tasks) && result.tasks.length > 0) {
+        return {
+            ...baseMeta,
+            role: 'assistant',
+            type: 'multi_task_card',
+            tasks: result.tasks,
+            confirmedIndexes: []
+        };
+    }
+
+    if (result) {
+        return {
+            ...baseMeta,
+            role: 'assistant',
+            type: 'task_card',
+            data: result,
+            confirmed: false
+        };
+    }
+
+    return {
+        ...baseMeta,
+        role: 'assistant',
+        type: 'text',
+        content: '无法理解您的输入，请描述得更具体一些。例如："明天下午3点开会"、"删除今天的会议任务"、"把明天的任务改到后天"。'
+    };
+}
+
+async function resolveAssistantMessage(text, existingTasks = [], currentConfig = getEffectiveConfig()) {
+    const assistantContext = normalizeAssistantPayload(existingTasks);
+    const scopedItems = assistantContext.items || [];
+    const subtaskOperation = detectSubtaskOperation(text);
+    const lowerText = text.toLowerCase();
+    const createKeywords = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
+    const isExplicitCreate = createKeywords.some(keyword => lowerText.includes(keyword));
+    const hasNoActionKeyword = !DELETE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) &&
+        !UPDATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) &&
+        !QUERY_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase()));
+    const operationType = detectOperationType(text);
+    const dateInfo = getDateInfo();
+    const timeScope = detectTimeScope(text, dateInfo);
+
+    const { callAI } = await import('../utils/ai-providers.js');
+    const requireFileConfirmation = get((await import('./settings.js')).settingsStore).localFileConfig?.requireConfirmation ?? true;
+    const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI);
+    const localFilePlan = await analyzeLocalFileIntent(text, currentConfig, callAI);
+    const relevantTasks = filterTasksByTimeScope(scopedItems, timeScope, dateInfo);
+    const allowImplicitCreate = assistantContext.scope === 'dashboard' ||
+        assistantContext.scope === 'project' ||
+        assistantContext.source === 'templates' ||
+        assistantContext.source === 'scheduled';
+
+    let result;
+    if (localFilePlan) {
+        result = await runLocalFilePlan(localFilePlan, text, currentConfig, requireFileConfirmation);
+    } else if (webSearchPlan) {
+        result = await runWebSearchPlan(webSearchPlan, text, currentConfig);
+    } else if (assistantContext.mode === 'note') {
+        result = await buildContextualAssistantResponse(text, assistantContext, currentConfig);
+    } else if (assistantContext.source === 'templates' && subtaskOperation) {
+        result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
+    } else if (assistantContext.source === 'templates' && (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword))) {
+        result = await analyzeTemplateCreateIntent(text, scopedItems, currentConfig, callAI);
+    } else if (assistantContext.source === 'templates' && operationType === 'mixed') {
+        result = await analyzeTemplateMixedIntent(text, scopedItems, currentConfig, callAI);
+    } else if (assistantContext.source === 'templates' && operationType === 'delete') {
+        result = await analyzeTemplateDeleteIntent(text, scopedItems, currentConfig, callAI);
+    } else if (assistantContext.source === 'templates' && operationType === 'update') {
+        result = await analyzeTemplateUpdateIntent(text, scopedItems, currentConfig, callAI);
+    } else if (assistantContext.source === 'templates' && operationType === 'query') {
+        result = await analyzeTemplateQueryIntent(text, scopedItems, currentConfig, callAI);
+    } else if (assistantContext.source === 'scheduled' && subtaskOperation) {
+        result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
+    } else if (assistantContext.source === 'scheduled' && (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword))) {
+        result = await analyzeScheduledCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
+    } else if (assistantContext.source === 'scheduled' && operationType === 'update') {
+        result = await analyzeScheduledUpdateIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+    } else if (subtaskOperation) {
+        result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
+    } else if (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword)) {
+        result = await analyzeCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
+    } else if (operationType === 'mixed') {
+        result = await analyzeMixedIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+    } else if (operationType === 'delete') {
+        result = await analyzeDeleteIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+    } else if (operationType === 'update') {
+        result = await analyzeUpdateIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+    } else if (operationType === 'query') {
+        result = await analyzeQueryIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+    } else if (hasNoActionKeyword) {
+        result = await buildContextualAssistantResponse(text, assistantContext, currentConfig);
+    } else {
+        result = await analyzeCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
+    }
+
+    return normalizeAssistantResult(result, assistantContext);
+}
+
 export async function sendAiMessage(text, existingTasks = [], retryIndex = null) {
     if (!text.trim()) return;
 
     const currentConfig = getEffectiveConfig();
-    const subtaskOperation = detectSubtaskOperation(text);
-    const lowerText = text.toLowerCase();
-    
-    const createKeywords = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
-    const isExplicitCreate = createKeywords.some(kw => lowerText.includes(kw));
-    
-    const hasNoActionKeyword = !DELETE_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase())) &&
-                               !UPDATE_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase())) &&
-                               !QUERY_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase()));
 
     const needsApiKey = !isG4FProvider(currentConfig.provider) &&
         currentConfig.provider !== 'ollama' &&
@@ -606,10 +1666,6 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
         showAiSettings.set(true);
         throw new Error('请先配置 AI API Key');
     }
-
-    const operationType = detectOperationType(text);
-    const dateInfo = getDateInfo();
-    const timeScope = detectTimeScope(text, dateInfo);
 
     if (retryIndex !== null) {
         chatHistory.update(h => {
@@ -628,54 +1684,13 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     lastFailedMessage.set({ text, index: retryIndex });
 
     try {
-        const { callAI } = await import('../utils/ai-providers.js');
-        let result;
-
-        const relevantTasks = filterTasksByTimeScope(existingTasks, timeScope, dateInfo);
-
-        if (subtaskOperation) {
-            result = await analyzeSubtaskIntent(text, existingTasks, dateInfo, currentConfig, callAI);
-        } else if (isExplicitCreate || hasNoActionKeyword) {
-            result = await analyzeCreateIntent(text, existingTasks, dateInfo, currentConfig, callAI);
-        } else if (operationType === 'mixed') {
-            result = await analyzeMixedIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
-        } else if (operationType === 'delete') {
-            result = await analyzeDeleteIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
-        } else if (operationType === 'update') {
-            result = await analyzeUpdateIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
-        } else if (operationType === 'query') {
-            result = await analyzeQueryIntent(text, existingTasks, relevantTasks, dateInfo, currentConfig, callAI);
-        } else {
-            result = await analyzeCreateIntent(text, existingTasks, dateInfo, currentConfig, callAI);
-        }
+        const result = await resolveAssistantMessage(text, existingTasks, currentConfig);
 
         chatHistory.update(h => {
             const newHistory = [...h];
             const loadingIndex = newHistory.findIndex(m => m.type === 'loading');
             if (loadingIndex !== -1) {
-                if (result && result.type) {
-                    newHistory[loadingIndex] = result;
-                } else if (result && Array.isArray(result.tasks) && result.tasks.length > 0) {
-                    newHistory[loadingIndex] = {
-                        role: 'assistant',
-                        type: 'multi_task_card',
-                        tasks: result.tasks,
-                        confirmedIndexes: []
-                    };
-                } else if (result) {
-                    newHistory[loadingIndex] = {
-                        role: 'assistant',
-                        type: 'task_card',
-                        data: result,
-                        confirmed: false
-                    };
-                } else {
-                    newHistory[loadingIndex] = {
-                        role: 'assistant',
-                        type: 'text',
-                        content: '无法理解您的输入，请描述得更具体一些。例如："明天下午3点开会"、"删除今天的会议任务"、"把明天的任务改到后天"。'
-                    };
-                }
+                newHistory[loadingIndex] = result;
             }
             return newHistory;
         });
@@ -707,6 +1722,631 @@ export async function retryLastMessage(index, existingTasks = []) {
         if (originalText) {
             await sendAiMessage(originalText, existingTasks, index);
         }
+    }
+}
+
+export async function confirmLocalFileOperation(index, operation) {
+    const currentConfig = getEffectiveConfig();
+
+    chatHistory.update(history => {
+        const nextHistory = [...history];
+        if (nextHistory[index]) {
+            nextHistory[index] = {
+                role: 'assistant',
+                type: 'loading'
+            };
+        }
+        return nextHistory;
+    });
+
+    try {
+        const result = await runLocalFilePlan(operation, operation.message || '', currentConfig, false);
+        chatHistory.update(history => {
+            const nextHistory = [...history];
+            nextHistory[index] = result;
+            return nextHistory;
+        });
+    } catch (error) {
+        chatHistory.update(history => {
+            const nextHistory = [...history];
+            nextHistory[index] = {
+                role: 'assistant',
+                type: 'error',
+                content: error.message || String(error),
+                originalText: operation?.message || ''
+            };
+            return nextHistory;
+        });
+    }
+}
+
+export async function confirmAiChatLocalFileOperation(index, operation) {
+    const currentConfig = getEffectiveConfig();
+
+    aiChatHistory.update(history => {
+        const nextHistory = [...history];
+        if (nextHistory[index]) {
+            nextHistory[index] = {
+                role: 'assistant',
+                type: 'loading'
+            };
+        }
+        return nextHistory;
+    });
+
+    try {
+        const result = await runLocalFilePlan(operation, operation.message || '', currentConfig, false);
+        aiChatHistory.update(history => {
+            const nextHistory = [...history];
+            nextHistory[index] = result;
+            return nextHistory;
+        });
+        saveAiChatHistory();
+    } catch (error) {
+        aiChatHistory.update(history => {
+            const nextHistory = [...history];
+            nextHistory[index] = {
+                role: 'assistant',
+                type: 'error',
+                content: error.message || String(error),
+                originalText: operation?.message || ''
+            };
+            return nextHistory;
+        });
+        saveAiChatHistory();
+    }
+}
+
+async function analyzeScheduledCreateIntent(userText, existingTasks, dateInfo, config, callAI) {
+    const nowStr = getFormattedDateTime();
+    const systemPrompt = `你是 WorkPlan 的定时任务助手。请根据用户要求创建定时任务。
+
+【当前时间】${nowStr}
+【星期映射】
+- 周一=1
+- 周二=2
+- 周三=3
+- 周四=4
+- 周五=5
+- 周六=6
+- 周日=0
+
+【规则】
+1. 这是新增定时任务，不要修改已有任务
+2. repeatDays 必须返回数字数组
+3. “工作日”=[1,2,3,4,5]，“每天”=[1,2,3,4,5,6,0]，“周末”=[6,0]
+4. 可以包含标题、优先级、备注、子任务、是否启用
+5. 严格只返回 JSON
+
+【输出格式】
+单任务：
+{"title":"任务标题","priority":"normal|urgent|critical","note":"备注","repeatDays":[1,2,3,4,5],"enabled":true,"subtasks":[{"title":"子任务","status":"todo"}]}
+多任务：
+{"tasks":[{...},{...}]}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) {
+        return { role: 'assistant', type: 'text', content: '无法理解要创建的定时任务，请更具体地说明周期。' };
+    }
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        const normalizeTask = (task) => ({
+            id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+            title: task.title || '未命名定时任务',
+            status: task.status || 'todo',
+            priority: ['normal', 'urgent', 'critical'].includes(task.priority) ? task.priority : 'normal',
+            date: task.date || '',
+            deadline: task.deadline || '',
+            note: task.note || '',
+            repeatDays: normalizeRepeatDays(task.repeatDays),
+            enabled: task.enabled !== false,
+            subtasks: (task.subtasks || []).map(item => ({
+                title: typeof item === 'string' ? item : item.title,
+                status: item.status || 'todo'
+            }))
+        });
+
+        if (Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
+            return {
+                tasks: parsed.tasks.map(normalizeTask)
+            };
+        }
+
+        if (parsed.title) {
+            return normalizeTask(parsed);
+        }
+
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '未能生成有效的定时任务，请明确说明重复规则，例如“每周一早上 9 点提醒我写周报”。'
+        };
+    } catch (error) {
+        console.error('Failed to parse scheduled create response:', error, aiResponse);
+        return { role: 'assistant', type: 'text', content: '解析定时任务失败，请重试。' };
+    }
+}
+
+async function analyzeScheduledUpdateIntent(userText, allTasks, relevantTasks, dateInfo, config, callAI) {
+    if (!allTasks || allTasks.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '当前没有任何定时任务可以修改。'
+        };
+    }
+
+    const taskList = allTasks.map(task => formatFullTaskForAI(task)).join('\n');
+    const systemPrompt = `你是 WorkPlan 的定时任务助手。用户想修改定时任务。
+
+【现有定时任务】
+${taskList}
+
+【星期映射】
+- 周一=1
+- 周二=2
+- 周三=3
+- 周四=4
+- 周五=5
+- 周六=6
+- 周日=0
+
+【允许修改字段】
+- title
+- priority（normal|urgent|critical）
+- note
+- repeatDays（数字数组）
+- enabled（true/false）
+- subtasks
+
+【规则】
+1. task_id 必须是完整任务 ID
+2. 如果用户说“工作日”返回 [1,2,3,4,5]
+3. 如果用户说“每天”返回 [1,2,3,4,5,6,0]
+4. 严格只返回 JSON
+
+【输出格式】
+{
+  "operations": [
+    {
+      "task_id": "完整任务ID",
+      "updates": {
+        "repeatDays": [1,3,5],
+        "enabled": true
+      }
+    }
+  ],
+  "message": "修改说明"
+}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) {
+        return { role: 'assistant', type: 'text', content: '无法理解要修改的定时任务。' };
+    }
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        if (!Array.isArray(parsed.operations) || parsed.operations.length === 0) {
+            return { role: 'assistant', type: 'text', content: parsed.message || '未找到匹配的定时任务。' };
+        }
+
+        const updateOperations = [];
+        for (const operation of parsed.operations) {
+            const task = allTasks.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
+            if (!task || !operation.updates) continue;
+
+            const updates = {};
+            if (operation.updates.title) updates.title = operation.updates.title;
+            if (operation.updates.note !== undefined) updates.note = operation.updates.note;
+            if (operation.updates.priority && ['normal', 'urgent', 'critical'].includes(operation.updates.priority)) {
+                updates.priority = operation.updates.priority;
+            }
+            if (operation.updates.repeatDays !== undefined) {
+                updates.repeatDays = normalizeRepeatDays(operation.updates.repeatDays);
+            }
+            if (typeof operation.updates.enabled === 'boolean') {
+                updates.enabled = operation.updates.enabled;
+            }
+            if (Array.isArray(operation.updates.subtasks)) {
+                updates.subtasks = operation.updates.subtasks.map(item => ({
+                    title: typeof item === 'string' ? item : item.title,
+                    status: item.status || 'todo'
+                }));
+            }
+
+            if (Object.keys(updates).length > 0) {
+                updateOperations.push({
+                    task: JSON.parse(JSON.stringify(task)),
+                    updates
+                });
+            }
+        }
+
+        if (updateOperations.length === 0) {
+            return { role: 'assistant', type: 'text', content: parsed.message || '未找到可修改的内容。' };
+        }
+
+        if (updateOperations.length === 1) {
+            return {
+                role: 'assistant',
+                type: 'update_confirm',
+                task: updateOperations[0].task,
+                updates: updateOperations[0].updates,
+                message: parsed.message || '确认修改该定时任务吗？'
+            };
+        }
+
+        return {
+            role: 'assistant',
+            type: 'multi_update_confirm',
+            operations: updateOperations,
+            message: parsed.message || `将修改 ${updateOperations.length} 个定时任务`
+        };
+    } catch (error) {
+        console.error('Failed to parse scheduled update response:', error, aiResponse);
+        return { role: 'assistant', type: 'text', content: '解析定时任务修改失败，请重试。' };
+    }
+}
+
+async function analyzeTemplateCreateIntent(userText, existingTemplates, config, callAI) {
+    const systemPrompt = `你是 WorkPlan 的任务模板助手。请根据用户要求创建任务模板。
+
+【规则】
+1. 这是新增模板，不要修改、删除已有模板
+2. 模板不包含计划时间和截止时间，不要输出 date / deadline
+3. 模板关注标题、优先级、备注、子任务结构
+4. 如果用户描述了多个不同模板，拆成多个对象
+5. 严格只返回 JSON
+
+【输出格式】
+单模板：
+{"title":"模板标题","priority":"normal|urgent|critical","note":"备注","subtasks":[{"title":"子任务","status":"todo"}]}
+多模板：
+{"tasks":[{...},{...}]}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) return null;
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        if (Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
+            return {
+                tasks: parsed.tasks.map((item, index) => normalizeTemplateEntity(item, index))
+            };
+        }
+
+        if (parsed.title) {
+            return normalizeTemplateEntity(parsed);
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Failed to parse template create response:', error, aiResponse);
+        return null;
+    }
+}
+
+async function analyzeTemplateDeleteIntent(userText, allTemplates, config, callAI) {
+    if (!allTemplates || allTemplates.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '当前没有任何任务模板可以删除。'
+        };
+    }
+
+    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想删除任务模板。
+
+【现有模板】
+${templateList}
+
+【规则】
+1. delete_task_ids 必须返回完整模板 ID
+2. 按模板标题、关键词、优先级、备注、子任务来匹配
+3. 严格只返回 JSON
+
+【输出格式】
+{
+  "delete_task_ids": ["完整模板ID1", "完整模板ID2"],
+  "message": "删除说明",
+  "reason": "匹配原因"
+}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) {
+        return { role: 'assistant', type: 'text', content: '无法理解您要删除哪个模板，请更具体地描述。' };
+    }
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        if (parsed.delete_task_ids && parsed.delete_task_ids.length > 0) {
+            const tasksToDelete = allTemplates.filter(item =>
+                parsed.delete_task_ids.includes(item.id) ||
+                parsed.delete_task_ids.some(id => item.id.endsWith(id))
+            );
+            if (tasksToDelete.length > 0) {
+                return {
+                    role: 'assistant',
+                    type: 'delete_confirm',
+                    tasks: tasksToDelete,
+                    message: parsed.message || `找到 ${tasksToDelete.length} 个模板待删除`,
+                    reason: parsed.reason || ''
+                };
+            }
+        }
+        return { role: 'assistant', type: 'text', content: parsed.message || '未找到匹配的模板。' };
+    } catch (error) {
+        console.error('Failed to parse template delete response:', error, aiResponse);
+        return { role: 'assistant', type: 'text', content: '解析模板删除请求失败，请重试。' };
+    }
+}
+
+async function analyzeTemplateUpdateIntent(userText, allTemplates, config, callAI) {
+    if (!allTemplates || allTemplates.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '当前没有任何任务模板可以修改。'
+        };
+    }
+
+    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想修改任务模板。
+
+【现有模板】
+${templateList}
+
+【允许修改字段】
+- title
+- priority（normal|urgent|critical）
+- note
+- subtasks
+- status（todo|doing|done）
+
+【规则】
+1. task_id 必须是完整模板 ID
+2. 不要输出 date / deadline
+3. 严格只返回 JSON
+
+【输出格式】
+{
+  "operations": [
+    {
+      "task_id": "完整模板ID",
+      "updates": {
+        "title": "新标题",
+        "priority": "urgent",
+        "note": "新备注"
+      }
+    }
+  ],
+  "message": "修改说明"
+}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) {
+        return { role: 'assistant', type: 'text', content: '无法理解您要修改哪个模板。' };
+    }
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        if (!Array.isArray(parsed.operations) || parsed.operations.length === 0) {
+            return { role: 'assistant', type: 'text', content: parsed.message || '未找到匹配的模板。' };
+        }
+
+        const updateOperations = [];
+        for (const operation of parsed.operations) {
+            if (!operation.updates || Object.keys(operation.updates).length === 0) continue;
+            const template = allTemplates.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
+            if (!template) continue;
+
+            const updates = {};
+            if (operation.updates.title) updates.title = operation.updates.title;
+            if (operation.updates.note !== undefined) updates.note = operation.updates.note;
+            if (operation.updates.priority && ['normal', 'urgent', 'critical'].includes(operation.updates.priority)) {
+                updates.priority = operation.updates.priority;
+            }
+            if (operation.updates.status && ['todo', 'doing', 'done'].includes(operation.updates.status)) {
+                updates.status = operation.updates.status;
+            }
+            if (Array.isArray(operation.updates.subtasks)) {
+                updates.subtasks = operation.updates.subtasks.map(item => ({
+                    title: typeof item === 'string' ? item : (item.title || ''),
+                    status: item.status || 'todo'
+                }));
+            }
+
+            if (Object.keys(updates).length > 0) {
+                updateOperations.push({
+                    task: JSON.parse(JSON.stringify(template)),
+                    updates
+                });
+            }
+        }
+
+        if (updateOperations.length === 0) {
+            return { role: 'assistant', type: 'text', content: parsed.message || '未找到可修改的模板内容。' };
+        }
+
+        if (updateOperations.length === 1) {
+            return {
+                role: 'assistant',
+                type: 'update_confirm',
+                task: updateOperations[0].task,
+                updates: updateOperations[0].updates,
+                message: parsed.message || '确认修改该模板吗？'
+            };
+        }
+
+        return {
+            role: 'assistant',
+            type: 'multi_update_confirm',
+            operations: updateOperations,
+            message: parsed.message || `将修改 ${updateOperations.length} 个任务模板`
+        };
+    } catch (error) {
+        console.error('Failed to parse template update response:', error, aiResponse);
+        return { role: 'assistant', type: 'text', content: '解析模板修改失败，请重试。' };
+    }
+}
+
+async function analyzeTemplateMixedIntent(userText, allTemplates, config, callAI) {
+    if (!allTemplates || allTemplates.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '当前没有任何任务模板可以操作。'
+        };
+    }
+
+    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想对模板执行混合操作（修改和删除）。
+
+【现有模板】
+${templateList}
+
+【规则】
+1. 只允许 delete 和 update 两种操作
+2. update 只允许 title、priority、note、subtasks、status
+3. 不要输出 date / deadline
+4. 严格只返回 JSON
+
+【输出格式】
+{
+  "update_operations": [
+    {
+      "task_id": "完整模板ID",
+      "updates": {
+        "title": "新标题",
+        "priority": "urgent"
+      }
+    }
+  ],
+  "delete_task_ids": ["完整模板ID"],
+  "message": "操作说明"
+}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) {
+        return { role: 'assistant', type: 'text', content: '无法理解模板混合操作，请重试。' };
+    }
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        const updateOps = [];
+        const deleteOps = allTemplates.filter(item =>
+            (parsed.delete_task_ids || []).includes(item.id) ||
+            (parsed.delete_task_ids || []).some(id => item.id.endsWith(id))
+        );
+
+        for (const operation of parsed.update_operations || []) {
+            const template = allTemplates.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
+            if (!template || !operation.updates) continue;
+
+            const updates = {};
+            if (operation.updates.title) updates.title = operation.updates.title;
+            if (operation.updates.note !== undefined) updates.note = operation.updates.note;
+            if (operation.updates.priority && ['normal', 'urgent', 'critical'].includes(operation.updates.priority)) {
+                updates.priority = operation.updates.priority;
+            }
+            if (operation.updates.status && ['todo', 'doing', 'done'].includes(operation.updates.status)) {
+                updates.status = operation.updates.status;
+            }
+            if (Array.isArray(operation.updates.subtasks)) {
+                updates.subtasks = operation.updates.subtasks.map(item => ({
+                    title: typeof item === 'string' ? item : (item.title || ''),
+                    status: item.status || 'todo'
+                }));
+            }
+
+            if (Object.keys(updates).length > 0) {
+                updateOps.push({
+                    task: JSON.parse(JSON.stringify(template)),
+                    updates
+                });
+            }
+        }
+
+        if (!updateOps.length && !deleteOps.length) {
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: parsed.message || '未找到匹配的模板操作。'
+            };
+        }
+
+        return {
+            role: 'assistant',
+            type: 'mixed_confirm',
+            updateOps,
+            deleteOps,
+            message: parsed.message || '确认执行模板批量操作吗？'
+        };
+    } catch (error) {
+        console.error('Failed to parse template mixed response:', error, aiResponse);
+        return { role: 'assistant', type: 'text', content: '解析模板混合操作失败，请重试。' };
+    }
+}
+
+async function analyzeTemplateQueryIntent(userText, allTemplates, config, callAI) {
+    if (!allTemplates || allTemplates.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '当前没有任何任务模板。'
+        };
+    }
+
+    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想查询任务模板。
+
+【现有模板】
+${templateList}
+
+【查询范围】
+1. 标题关键词
+2. 优先级
+3. 备注内容
+4. 子任务内容
+5. 状态
+
+【输出格式】
+严格只返回 JSON：
+{
+  "matched_task_ids": ["完整模板ID1", "完整模板ID2"],
+  "summary": "查询结果描述",
+  "filter_description": "筛选条件说明"
+}`;
+
+    const aiResponse = await callAI(config, userText, systemPrompt);
+    if (!aiResponse) {
+        return { role: 'assistant', type: 'text', content: '模板查询失败，请重试。' };
+    }
+
+    try {
+        const parsed = extractJsonPayload(aiResponse);
+        if (parsed.matched_task_ids && parsed.matched_task_ids.length > 0) {
+            const matchedTemplates = allTemplates.filter(item =>
+                parsed.matched_task_ids.includes(item.id) ||
+                parsed.matched_task_ids.some(id => item.id.endsWith(id))
+            );
+            if (matchedTemplates.length > 0) {
+                return {
+                    role: 'assistant',
+                    type: 'query_result',
+                    tasks: matchedTemplates,
+                    summary: parsed.summary || `找到 ${matchedTemplates.length} 个模板`,
+                    filterDescription: parsed.filter_description || ''
+                };
+            }
+        }
+
+        return { role: 'assistant', type: 'text', content: parsed.summary || '未找到匹配的模板。' };
+    } catch (error) {
+        console.error('Failed to parse template query response:', error, aiResponse);
+        return { role: 'assistant', type: 'text', content: '解析模板查询失败，请重试。' };
     }
 }
 
@@ -1328,15 +2968,49 @@ ${taskList}
     }
 }
 
-function buildContextMessages(history, chatStyle) {
+async function getProjectContextSummary() {
+    const { taskStore } = await import('./tasks.js');
+    const { notesStore } = await import('./notes.js');
+
+    const taskState = get(taskStore);
+    const noteState = get(notesStore);
+
+    const taskLines = (taskState.tasks || [])
+        .slice(-20)
+        .map(task => `- [任务] ${task.title} | ${task.status} | ${task.date}`)
+        .join('\n');
+    const templateLines = (taskState.templates || [])
+        .slice(-12)
+        .map(template => `- [模板] ${template.title}`)
+        .join('\n');
+    const scheduledLines = (taskState.scheduledTasks || [])
+        .slice(-12)
+        .map(task => `- [定时] ${task.title} | ${Array.isArray(task.repeatDays) ? task.repeatDays.join(',') : ''}`)
+        .join('\n');
+    const noteLines = (noteState.notes || [])
+        .slice(-12)
+        .map(note => `- [笔记] ${note.title} | ${note.category || '未分类'}`)
+        .join('\n');
+
+    return [
+        '【项目上下文】',
+        taskLines || '- [任务] 暂无',
+        templateLines || '- [模板] 暂无',
+        scheduledLines || '- [定时] 暂无',
+        noteLines || '- [笔记] 暂无'
+    ].join('\n');
+}
+
+async function buildContextMessages(history, chatStyle) {
     const nowStr = getFormattedDateTime();
+    const projectContext = await getProjectContextSummary();
     const stylePrompts = {
-        default: `你是一个智能助手。当前时间：${nowStr}。请用友好、专业的方式回答用户问题。`,
+        default: `你是一个智能助手。当前时间：${nowStr}。请用友好、专业的方式回答用户问题。\n${projectContext}`,
         fun: `你是 Grok，一个由 xAI 打造的 AI 助手。当前时间：${nowStr}。
-性格特点：极度风趣、毒舌、戏谑、爱自黑，回答充满冷笑话和宇宙级吐槽，但逻辑清晰、事实准确。`,
-        professional: `你是一个专业严谨的助手。当前时间：${nowStr}。请用正式、专业的语气回答，注重逻辑和准确性。`,
-        concise: `你是一个简洁高效的助手。当前时间：${nowStr}。请用最简短的方式回答问题，直击要点。`,
-        teacher: `你是一个耐心的老师。当前时间：${nowStr}。请用循循善诱的方式解释问题，适当举例说明。`
+性格特点：极度风趣、毒舌、戏谑、爱自黑，回答充满冷笑话和宇宙级吐槽，但逻辑清晰、事实准确。\n${projectContext}`,
+        professional: `你是一个专业严谨的助手。当前时间：${nowStr}。请用正式、专业的语气回答，注重逻辑和准确性。\n${projectContext}`,
+        concise: `你是一个简洁高效的助手。当前时间：${nowStr}。请用最简短的方式回答问题，直击要点。\n${projectContext}`,
+        teacher: `你是一个耐心的老师。当前时间：${nowStr}。请用循循善诱的方式解释问题，适当举例说明。\n${projectContext}`
     };
     const systemPrompt = stylePrompts[chatStyle] || stylePrompts.default;
     const messages = [{ role: 'system', content: systemPrompt }];
@@ -1394,10 +3068,24 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     streamingContent.set('');
 
     try {
+        if (shouldUseAssistantToolsInChat(text)) {
+            const assistantPayload = await buildAiChatAssistantPayload(text);
+            const assistantResult = await resolveAssistantMessage(text, assistantPayload, currentConfig);
+            aiChatHistory.update(h => {
+                const newHistory = [...h];
+                if (newHistory[streamingIndex]) {
+                    newHistory[streamingIndex] = assistantResult;
+                }
+                return newHistory;
+            });
+            saveAiChatHistory();
+            return;
+        }
+
         const { callAIWithMessagesStream } = await import('../utils/ai-providers.js');
         const currentHistory = get(aiChatHistory);
         const historyWithoutStreaming = currentHistory.filter(m => m.type !== 'streaming' && m.type !== 'loading');
-        const messages = buildContextMessages(historyWithoutStreaming, chatStyle);
+        const messages = await buildContextMessages(historyWithoutStreaming, chatStyle);
 
         aiChatHistory.update(h => {
             const newHistory = [...h];
@@ -1560,9 +3248,7 @@ export function clearChatHistory() {
 
 export function clearAiChatHistory() {
     aiChatHistory.set([]);
-    if (typeof window !== 'undefined') {
-        localStorage.removeItem('planpro_ai_chat_history');
-    }
+    saveAiChatHistory();
 }
 
 export async function testAiConnection() {

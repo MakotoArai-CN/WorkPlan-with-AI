@@ -1,17 +1,18 @@
 <script>
     import { taskStore, viewDate, today, activeTasks, completedTasks, futurePreviews, activeTask } from '../stores/tasks.js';
-    import { showAiPanel } from '../stores/ai.js';
+    import { configureAiPanel, showAiPanel } from '../stores/ai.js';
     import TaskCard from './TaskCard.svelte';
     import { _, locale } from 'svelte-i18n';
+    import { toIntlLocale } from '../i18n/index.js';
 
     export let openModal;
+    export let openDetailPanel = null;
 
     let isAllExpanded = false;
 
     $: dateInfo = (() => {
         const date = new Date($viewDate);
-        const lang = $locale || 'zh';
-        const localeCode = lang === 'zh' ? 'zh-CN' : lang === 'ja' ? 'ja-JP' : 'en-US';
+        const localeCode = toIntlLocale($locale || 'zh');
         return {
             date: date.toLocaleDateString(localeCode, { month: 'long', day: 'numeric' }),
             week: date.toLocaleDateString(localeCode, { weekday: 'long' })
@@ -39,15 +40,26 @@
     }
 
     function toggleAiPanel() {
-        showAiPanel.update(v => !v);
-        if ($showAiPanel) {
-            activeTask.set(null);
+        configureAiPanel({
+            scope: 'dashboard',
+            mode: 'task',
+            source: 'tasks',
+            title: $_('dashboard.title'),
+            description: $_('dashboard.subtitle'),
+            entityLabel: '任务'
+        }, true);
+        activeTask.set(null);
+        if (openDetailPanel) {
+            openDetailPanel('ai');
+            return;
         }
+        showAiPanel.set(true);
     }
 
     function selectTask(task) {
         showAiPanel.set(false);
         activeTask.set(task);
+        openDetailPanel?.('detail');
     }
 
     function handleDateInput(e) {

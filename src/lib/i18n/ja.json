@@ -1,10 +1,10 @@
 {
   "nav": {
-    "dashboard": "ダッシュボード",
+    "dashboard": "タスクボード",
     "templates": "テンプレート",
     "templates_full": "タスクテンプレート",
-    "scheduled": "スケジュール",
-    "notes": "ノート",
+    "scheduled": "定期タスク",
+    "notes": "業務ノート",
     "more": "その他",
     "statistics": "統計",
     "passwords": "パスワード",
@@ -85,7 +85,7 @@
     "delete_title": "タスク削除"
   },
   "notes": {
-    "title": "ノート",
+    "title": "業務ノート",
     "subtitle": "Markdown対応",
     "new_note": "新規ノート",
     "new_note_title": "新しいノート",
@@ -134,7 +134,14 @@
     "note_content_label": "ノート内容",
     "ai_summary_system_prompt": "あなたはプロのドキュメント要約アシスタントです。以下のノートの内容を要約し、重要な情報とポイントを抽出してください。\nノートタイトル：{title}\nノート内容：\n{content}\n要件：\n1. 簡潔にし、要点を強調\n2. Markdown形式を使用\n3. 含む：内容概要、主要ポイント（リスト形式）、ToDoがあればマーク\n4. 要約は原文の1/3以内",
     "ai_writing_system_prompt": "あなたはプロの執筆アシスタントです。現在のノートタイトル：{title}",
-    "ai_autocomplete_system_prompt": "あなたは執筆アシスタントです。ユーザーの現在の執筆内容に基づき、1-2文の短い続きを提案してください。続きのみ出力し、説明や先頭の改行は不要です。"
+    "ai_autocomplete_system_prompt": "あなたは執筆アシスタントです。ユーザーの現在の執筆内容に基づき、1-2文の短い続きを提案してください。続きのみ出力し、説明や先頭の改行は不要です。",
+    "ai_panel_placeholder": "現在のノートについて質問したり、要約・推敲・アクション整理を依頼できます...",
+    "ai_panel_summary_hint": "現在のノートを要約し、重要なフォローアップ項目を整理できます。",
+    "ai_panel_polish_hint": "表現の推敲、内容の拡張、構成の再整理もノート文脈に沿って行えます。",
+    "ai_panel_followup_hint": "追加の質問も、今開いているノート内容を前提に継続して回答します。",
+    "ai_panel_quick_summary": "現在のノートを要約して重要ポイントを整理して",
+    "ai_panel_quick_polish": "現在のノートをより自然で専門的な表現に整えて",
+    "ai_panel_quick_actions": "現在のノートから次のアクション項目を抽出して"
   },
   "passwords": {
     "title": "パスワードマネージャー",
@@ -258,6 +265,11 @@
     "theme_light": "ライト",
     "theme_dark": "ダーク",
     "theme_auto": "自動",
+    "theme_ocean": "オーシャン",
+    "theme_forest": "フォレスト",
+    "theme_sunset": "サンセット",
+    "theme_rose": "ローズ",
+    "theme_graphite": "グラファイト",
     "language": "言語",
     "editor": "エディタ設定",
     "markdown_editor": "Markdownエディタ",
@@ -316,7 +328,23 @@
     "charts_desc": "統計でグラフを表示",
     "autostart_desc": "ログイン時に自動起動",
     "close_to_quit_desc": "ウィンドウを閉じると終了",
-    "back_behavior_desc": "戻るでバックグラウンドに移行"
+    "back_behavior_desc": "戻るでバックグラウンドに移行",
+    "database_builtin_title": "標準では内蔵Syncを使用",
+    "database_builtin_desc": "カスタム接続を有効にしない場合、クライアントはアプリ内蔵のSyncエンドポイントと環境変数設定を優先して使います。自前のデータベースゲートウェイや PostgREST、外部サービスに接続したい場合だけ下のフォームを展開してください。",
+    "database_custom_title": "カスタムデータベース接続を有効化",
+    "database_custom_desc": "有効化すると、自前のURL、Token、テーブル名を保存できます。現在は Supabase / PostgREST 系 HTTP API を直接利用でき、他サービスは設定情報を先に保存して後からアダプタを追加できます。",
+    "database_mode_builtin": "内蔵",
+    "database_mode_custom": "カスタム",
+    "local_files": "ローカルファイル技能",
+    "local_files_desc": "AI がローカルファイルを読み取り、走査し、検索できます。書き込み・更新・削除は作業ディレクトリと信頼済みディレクトリに限定されます。",
+    "local_files_confirm": "危険なファイル操作は再確認",
+    "local_files_confirm_desc": "有効にすると、AI はローカルファイルの書き込み・編集・削除前に必ず再確認します。",
+    "workspace_root": "作業ディレクトリ",
+    "workspace_unknown": "作業ディレクトリをまだ取得できていません",
+    "trusted_directories": "信頼済みディレクトリ",
+    "trusted_directories_desc": "追加で許可するフォルダを登録します。AI が書き込み・編集・削除できるのは作業ディレクトリとここで許可した場所のみです。",
+    "trusted_directories_placeholder": "絶対パスを入力してください。例: D:\\AI\\trusted",
+    "trusted_directories_empty": "追加の信頼済みディレクトリはまだありません"
   },
   "ai": {
     "loading": "考え中...",

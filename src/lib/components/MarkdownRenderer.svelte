@@ -4,7 +4,7 @@
     import { showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
-    import 'highlight.js/styles/github.css';
+    import 'highlight.js/styles/github-dark.css';
     import 'katex/dist/katex.min.css';
 
     export let content = '';
@@ -93,8 +93,8 @@
         height: 32px;
         border: none;
         border-radius: 6px;
-        background: rgba(255, 255, 255, 0.9);
-        color: #64748b;
+        background: rgba(15, 23, 42, 0.78);
+        color: #e2e8f0;
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -108,8 +108,8 @@
         opacity: 1;
     }
     :global(.code-copy-btn:hover) {
-        background: #ffffff;
-        color: #3b82f6;
+        background: rgba(15, 23, 42, 0.92);
+        color: #93c5fd;
         transform: scale(1.05);
     }
     :global(.code-copy-btn.copied) {
@@ -182,8 +182,8 @@
         cursor: not-allowed;
     }
     :global(.markdown-content code) {
-        background: #f1f5f9;
-        color: #e11d48;
+        background: #e2e8f0;
+        color: #be123c;
         padding: 0.2em 0.4em;
         border-radius: 0.25em;
         font-size: 0.9em;
@@ -364,5 +364,49 @@
     :global(.hljs) {
         background: #1e293b !important;
         color: #e2e8f0 !important;
+    }
+    :global(.dark .markdown-content) {
+        color: #e2e8f0;
+    }
+    :global(.dark .markdown-content h1),
+    :global(.dark .markdown-content h2),
+    :global(.dark .markdown-content h3),
+    :global(.dark .markdown-content h4),
+    :global(.dark .markdown-content h5),
+    :global(.dark .markdown-content h6) {
+        color: #f8fafc;
+        border-color: #334155;
+    }
+    :global(.dark .markdown-content code) {
+        background: #1e293b;
+        color: #fda4af;
+    }
+    :global(.dark .markdown-content pre) {
+        background: #020617;
+        border-color: #334155;
+    }
+    :global(.dark .markdown-content pre code),
+    :global(.dark .markdown-content pre span) {
+        color: inherit !important;
+    }
+    :global(.dark .markdown-content blockquote) {
+        background: rgba(30, 64, 175, 0.16);
+        color: #bfdbfe;
+        border-left-color: #60a5fa;
+    }
+    :global(.dark .markdown-content th) {
+        background: #0f172a;
+        color: #e2e8f0;
+    }
+    :global(.dark .markdown-content tr:nth-child(even)) {
+        background: rgba(15, 23, 42, 0.5);
+    }
+    :global(.dark .markdown-content th),
+    :global(.dark .markdown-content td) {
+        border-color: #334155;
+    }
+    :global(.dark .markdown-content .mermaid-container) {
+        background: #0f172a;
+        border-color: #334155;
     }
 </style>

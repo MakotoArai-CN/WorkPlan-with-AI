@@ -1,10 +1,10 @@
 {
   "nav": {
-    "dashboard": "Dashboard",
+    "dashboard": "Task Board",
     "templates": "Templates",
     "templates_full": "Templates",
-    "scheduled": "Scheduled",
-    "notes": "Notes",
+    "scheduled": "Scheduled Tasks",
+    "notes": "Work Notes",
     "more": "More",
     "statistics": "Statistics",
     "passwords": "Passwords",
@@ -85,7 +85,7 @@
     "delete_title": "Delete Task"
   },
   "notes": {
-    "title": "Notes",
+    "title": "Work Notes",
     "subtitle": "Markdown supported",
     "new_note": "New Note",
     "new_note_title": "New Note",
@@ -134,7 +134,14 @@
     "note_content_label": "Note content",
     "ai_summary_system_prompt": "You are a professional document summarization assistant. Please summarize the following note, extracting key information and points.\nNote title: {title}\nNote content:\n{content}\nRequirements:\n1. Keep it concise, highlight key points\n2. Use Markdown format\n3. Include: content overview, key points (as a list), mark any to-do items\n4. Keep the summary within 1/3 of the original length",
     "ai_writing_system_prompt": "You are a professional writing assistant. Current note title: {title}",
-    "ai_autocomplete_system_prompt": "You are a writing assistant. Based on the user's current writing, suggest 1-2 short continuation sentences. Only output the continuation, no explanations, no leading newlines."
+    "ai_autocomplete_system_prompt": "You are a writing assistant. Based on the user's current writing, suggest 1-2 short continuation sentences. Only output the continuation, no explanations, no leading newlines.",
+    "ai_panel_placeholder": "Ask about the current note, or let AI summarize, polish, and extract actions...",
+    "ai_panel_summary_hint": "The assistant can summarize the active note and extract the most important follow-up actions.",
+    "ai_panel_polish_hint": "It can also polish wording, expand sections, and reorganize structure with the current note as context.",
+    "ai_panel_followup_hint": "Follow-up questions stay grounded in the note content already open on the page.",
+    "ai_panel_quick_summary": "Summarize the current note and extract the key points",
+    "ai_panel_quick_polish": "Polish the current note and make it more professional",
+    "ai_panel_quick_actions": "Turn the current note into a clear action list"
   },
   "passwords": {
     "title": "Password Manager",
@@ -258,6 +265,11 @@
     "theme_light": "Light",
     "theme_dark": "Dark",
     "theme_auto": "Auto",
+    "theme_ocean": "Ocean",
+    "theme_forest": "Forest",
+    "theme_sunset": "Sunset",
+    "theme_rose": "Rose",
+    "theme_graphite": "Graphite",
     "editor": "Editor",
     "markdown_editor": "Markdown Editor",
     "editor_desc": "Choose the editor for notes",
@@ -316,7 +328,23 @@
     "charts_desc": "Show charts in statistics",
     "autostart_desc": "Launch at system login",
     "close_to_quit_desc": "Exit app when window is closed, not minimize to tray",
-    "back_behavior_desc": "Back button suspends app to background"
+    "back_behavior_desc": "Back button suspends app to background",
+    "database_builtin_title": "Use the built-in sync interface by default",
+    "database_builtin_desc": "When custom access is disabled, the client uses the bundled sync endpoint and environment configuration first. Only expand the custom form when you need to connect your own database gateway, PostgREST endpoint, or third-party service.",
+    "database_custom_title": "Enable a custom database interface",
+    "database_custom_desc": "Turn this on to provide your own database URL, token, and table name. Supabase / PostgREST-style HTTP APIs are supported directly today; other services can be saved now and adapted later.",
+    "database_mode_builtin": "Built-in",
+    "database_mode_custom": "Custom",
+    "local_files": "Local File Skill",
+    "local_files_desc": "Allow AI to read, scan, and search local files. Write, update, and delete operations are limited to the workspace and user-trusted directories.",
+    "local_files_confirm": "Confirm sensitive file actions",
+    "local_files_confirm_desc": "When enabled, AI must ask again before writing, editing, or deleting local files.",
+    "workspace_root": "Workspace root",
+    "workspace_unknown": "Workspace root is not available yet",
+    "trusted_directories": "Trusted directories",
+    "trusted_directories_desc": "Add extra authorized folders here. AI can only write, edit, or delete inside the workspace and these trusted directories.",
+    "trusted_directories_placeholder": "Enter an absolute path, for example D:\\AI\\trusted",
+    "trusted_directories_empty": "No extra trusted directories yet"
   },
   "ai": {
     "loading": "Thinking...",

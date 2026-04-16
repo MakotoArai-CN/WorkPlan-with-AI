@@ -4,6 +4,10 @@
         showAiSettings,
         saveAiConfig,
         updateAiConfig,
+        addConnectionProfile,
+        selectConnectionProfile,
+        updateConnectionProfileName,
+        deleteConnectionProfile,
         testAiConnection,
         getAiProviders,
         loadModelsForProvider,
@@ -14,7 +18,7 @@
         hydrateCurrentProviderConfigWithDefaults,
     } from "../stores/ai.js";
     import { settingsStore } from "../stores/settings.js";
-    import { showAlert } from "../stores/modal.js";
+    import { showAlert, showConfirm } from "../stores/modal.js";
     import { onMount } from "svelte";
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
@@ -29,6 +33,8 @@
     let activeTab = "basic";
     let dailyPrompt = "";
     let weeklyPrompt = "";
+    let profileNameDraft = "";
+    let lastProfileId = "";
 
     const defaultDailyPrompt = t('ai_settings_page.default_daily_prompt');
 
@@ -45,15 +51,20 @@
             return;
         }
         const apiKey = $aiConfig.apiKey || "";
-        const models = await loadModelsForProvider(providerId, apiKey);
+        const models = await loadModelsForProvider(
+            providerId,
+            apiKey,
+            $aiConfig.customEndpoint || "",
+        );
         currentModels = models || [];
 
         if (currentModels.length > 0) {
             const savedModel = $aiConfig.model;
+            const canKeepAuto = isG4FProvider(providerId);
             if (
                 !savedModel ||
-                savedModel === "auto" ||
-                !currentModels.includes(savedModel)
+                (!canKeepAuto && savedModel === "auto") ||
+                (savedModel !== "auto" && !currentModels.includes(savedModel))
             ) {
                 updateAiConfig({ model: currentModels[0] });
             }
@@ -67,6 +78,7 @@
         await loadCurrentProviderModels();
         dailyPrompt = $settingsStore.dailyReportPrompt || "";
         weeklyPrompt = $settingsStore.weeklyReportPrompt || "";
+        profileNameDraft = $aiConfig.activeProfileName || "";
     });
 
     $: if ($showAiSettings) {
@@ -149,6 +161,51 @@
         await loadCurrentProviderModels();
     }
 
+    async function handleConnectionProfileChange(profileId) {
+        saveAiConfig();
+        selectConnectionProfile(profileId);
+        profileNameDraft = $aiConfig.activeProfileName || "";
+        await hydrateCurrentProviderConfigWithDefaults();
+        await loadCurrentProviderInfo();
+        await loadCurrentProviderModels();
+    }
+
+    async function handleAddConnectionProfile() {
+        saveAiConfig();
+        addConnectionProfile();
+        profileNameDraft = $aiConfig.activeProfileName || "";
+        await hydrateCurrentProviderConfigWithDefaults();
+        await loadCurrentProviderInfo();
+        await loadCurrentProviderModels();
+    }
+
+    async function handleDeleteConnectionProfile() {
+        if (($aiConfig.connectionProfiles || []).length <= 1) return;
+        const confirmed = await showConfirm({
+            title: "删除连接",
+            message: `确定删除连接“${$aiConfig.activeProfileName || "当前连接"}”吗？`,
+            confirmText: "删除",
+            cancelText: t('common.cancel'),
+            variant: "danger",
+        });
+        if (!confirmed) return;
+        saveAiConfig();
+        deleteConnectionProfile($aiConfig.activeProfileId);
+        profileNameDraft = $aiConfig.activeProfileName || "";
+        await hydrateCurrentProviderConfigWithDefaults();
+        await loadCurrentProviderInfo();
+        await loadCurrentProviderModels();
+    }
+
+    function handleProfileNameBlur() {
+        const trimmed = profileNameDraft.trim();
+        if (!trimmed) {
+            profileNameDraft = $aiConfig.activeProfileName || "";
+            return;
+        }
+        updateConnectionProfileName(trimmed);
+    }
+
     function openApiUrl(url) {
         if (!url) return;
         window.open(url, "_blank");
@@ -163,6 +220,10 @@
     }
 
     $: isCustomProvider = $aiConfig.provider === "custom";
+    $: if (($aiConfig.activeProfileId || "") !== lastProfileId) {
+        lastProfileId = $aiConfig.activeProfileId || "";
+        profileNameDraft = $aiConfig.activeProfileName || "";
+    }
     $: needsApiKey = (() => {
         if (isG4FProvider($aiConfig.provider)) return false;
         if (
@@ -173,12 +234,18 @@
         if (isCustomProvider) return false; // custom provider doesn't require key
         return currentProvider && currentProvider.authType !== "none";
     })();
-    $: displayModels = isCustomProvider
-        ? []
-        : $providerModels[$aiConfig.provider] ||
-          currentModels ||
-          currentProvider?.defaultModels ||
-          [];
+    $: displayModels = (() => {
+        if (isCustomProvider) return [];
+        const models =
+            $providerModels[$aiConfig.provider] ||
+            currentModels ||
+            currentProvider?.defaultModels ||
+            [];
+        const merged = isG4FProvider($aiConfig.provider)
+            ? ["auto", ...models]
+            : models;
+        return [...new Set(merged.filter(Boolean))];
+    })();
 </script>
 
 {#if $showAiSettings}
@@ -248,10 +315,69 @@
                 class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6"
             >
                 {#if activeTab === "basic"}
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                        <div class="flex items-center justify-between gap-3 flex-wrap">
+                            <div>
+                                <div class="text-xs font-bold text-slate-500 uppercase mb-1">
+                                    已保存连接
+                                </div>
+                                <div class="text-[11px] text-slate-400">
+                                    每个连接会分别保存厂商、模型、Base URL、API Key 等配置
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button
+                                    on:click={handleAddConnectionProfile}
+                                    class="h-8 px-3 bg-white border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5"
+                                >
+                                    <i class="ph ph-plus"></i> 新增连接
+                                </button>
+                                <button
+                                    on:click={handleDeleteConnectionProfile}
+                                    disabled={($aiConfig.connectionProfiles || []).length <= 1}
+                                    class="h-8 px-3 bg-white border border-slate-200 hover:border-red-300 hover:bg-red-50 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                                >
+                                    <i class="ph ph-trash"></i> 删除
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap gap-2">
+                            {#each $aiConfig.connectionProfiles || [] as profile}
+                                <button
+                                    on:click={() => handleConnectionProfileChange(profile.id)}
+                                    class="px-3 py-2 rounded-xl text-sm font-bold border transition"
+                                    class:bg-rose-600={profile.id === $aiConfig.activeProfileId}
+                                    class:text-white={profile.id === $aiConfig.activeProfileId}
+                                    class:border-rose-600={profile.id === $aiConfig.activeProfileId}
+                                    class:bg-white={profile.id !== $aiConfig.activeProfileId}
+                                    class:text-slate-600={profile.id !== $aiConfig.activeProfileId}
+                                    class:border-slate-200={profile.id !== $aiConfig.activeProfileId}
+                                >
+                                    {profile.name}
+                                </button>
+                            {/each}
+                        </div>
+
+                        <div>
+                            <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                连接名称
+                            </label>
+                            <input
+                                bind:value={profileNameDraft}
+                                on:blur={handleProfileNameBlur}
+                                on:keydown={(e) => e.key === "Enter" && (e.preventDefault(), handleProfileNameBlur())}
+                                type="text"
+                                placeholder="例如：公司 OpenAI / 本地模型 / 自建接口"
+                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
+                            />
+                        </div>
+                    </div>
+
                     <div>
                         <label
                             class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                            >{$_('ai_settings_page.provider')}</label
+                            >{isG4FProvider($aiConfig.provider) ? "模型提供商" : $_('ai_settings_page.provider')}</label
                         >
                         <select
                             value={$aiConfig.provider}
@@ -307,6 +433,11 @@
                                 </button>
                             {/if}
                         </div>
+                        {#if isG4FProvider($aiConfig.provider)}
+                            <div class="text-[10px] text-slate-400 mt-2">
+                                G4F 需要先选模型提供商，再选模型；不同连接会分别记住各自的 G4F 设置。
+                            </div>
+                        {/if}
                     </div>
 
                     {#if isCustomProvider}

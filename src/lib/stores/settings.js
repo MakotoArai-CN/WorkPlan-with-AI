@@ -1,5 +1,9 @@
 import { writable, get } from 'svelte/store';
 import { _ as i18n } from 'svelte-i18n';
+import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
+import { getDefaultLocalFileConfig, getWorkspaceRoot } from '../utils/local-file-tools.js';
+
+const DARK_THEMES = new Set(['dark', 'graphite']);
 
 function getInitialSettings() {
     if (typeof window === 'undefined') {
@@ -14,11 +18,14 @@ function getInitialSettings() {
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.2.7',
+            appVersion: '0.3.0',
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
             theme: 'auto',
-            markdownEditor: 'vditor'
+            markdownEditor: 'vditor',
+            databaseConfig: getDefaultDatabaseConfig(),
+            localFileConfig: getDefaultLocalFileConfig(),
+            workspaceRoot: ''
         };
     }
     const saved = localStorage.getItem('planpro_system_settings');
@@ -36,11 +43,20 @@ function getInitialSettings() {
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.2.7',
+                appVersion: '0.3.0',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
                 theme: parsed.theme || 'auto',
-                markdownEditor: parsed.markdownEditor || 'vditor'
+                markdownEditor: parsed.markdownEditor || 'vditor',
+                databaseConfig: {
+                    ...getDefaultDatabaseConfig(),
+                    ...(parsed.databaseConfig || {})
+                },
+                localFileConfig: {
+                    ...getDefaultLocalFileConfig(),
+                    ...(parsed.localFileConfig || {})
+                },
+                workspaceRoot: ''
             };
         } catch {
             return getDefaultSettings();
@@ -61,11 +77,14 @@ function getDefaultSettings() {
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.2.7',
+        appVersion: '0.3.0',
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         theme: 'auto',
-        markdownEditor: 'vditor'
+        markdownEditor: 'vditor',
+        databaseConfig: getDefaultDatabaseConfig(),
+        localFileConfig: getDefaultLocalFileConfig(),
+        workspaceRoot: ''
     };
 }
 
@@ -84,18 +103,36 @@ function createSettingsStore() {
             dailyReportPrompt: state.dailyReportPrompt,
             weeklyReportPrompt: state.weeklyReportPrompt,
             theme: state.theme,
-            markdownEditor: state.markdownEditor
+            markdownEditor: state.markdownEditor,
+            databaseConfig: state.databaseConfig,
+            localFileConfig: state.localFileConfig
         }));
     }
 
     function applyTheme(theme) {
         if (typeof window === 'undefined') return;
-        const isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        const resolvedTheme = theme === 'auto'
+            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : theme;
+        const isDark = DARK_THEMES.has(resolvedTheme);
         document.documentElement.classList.toggle('dark', isDark);
         document.body.classList.toggle('dark', isDark);
+        document.documentElement.dataset.theme = resolvedTheme;
+        document.body.dataset.theme = resolvedTheme;
         document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
         const metaTheme = document.querySelector('meta[name="theme-color"]');
-        if (metaTheme) metaTheme.setAttribute('content', isDark ? '#0f172a' : '#ffffff');
+        if (metaTheme) {
+            const themeColorMap = {
+                light: '#ffffff',
+                dark: '#0f172a',
+                ocean: '#e0f2fe',
+                forest: '#ecfdf5',
+                sunset: '#fff7ed',
+                rose: '#fff1f2',
+                graphite: '#111827'
+            };
+            metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
+        }
     }
 
     async function syncCloseToQuit(value) {
@@ -125,7 +162,12 @@ function createSettingsStore() {
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.2.7' }));
+            update(s => ({ ...s, appVersion: '0.3.0' }));
+        }
+
+        const workspaceRoot = await getWorkspaceRoot();
+        if (workspaceRoot) {
+            update(s => ({ ...s, workspaceRoot }));
         }
 
         try {
@@ -207,6 +249,61 @@ function createSettingsStore() {
         }),
         setMarkdownEditor: (editor) => update(s => {
             const newState = { ...s, markdownEditor: editor };
+            save(newState);
+            return newState;
+        }),
+        updateDatabaseConfig: (updates) => update(s => {
+            const newState = {
+                ...s,
+                databaseConfig: {
+                    ...getDefaultDatabaseConfig(),
+                    ...(s.databaseConfig || {}),
+                    ...updates
+                }
+            };
+            save(newState);
+            return newState;
+        }),
+        updateLocalFileConfig: (updates) => update(s => {
+            const newState = {
+                ...s,
+                localFileConfig: {
+                    ...getDefaultLocalFileConfig(),
+                    ...(s.localFileConfig || {}),
+                    ...updates
+                }
+            };
+            save(newState);
+            return newState;
+        }),
+        addTrustedDirectory: (directory) => update(s => {
+            const value = String(directory || '').trim();
+            if (!value) return s;
+            const trustedDirectories = Array.from(
+                new Set([...(s.localFileConfig?.trustedDirectories || []), value])
+            );
+            const newState = {
+                ...s,
+                localFileConfig: {
+                    ...getDefaultLocalFileConfig(),
+                    ...(s.localFileConfig || {}),
+                    trustedDirectories
+                }
+            };
+            save(newState);
+            return newState;
+        }),
+        removeTrustedDirectory: (directory) => update(s => {
+            const trustedDirectories = (s.localFileConfig?.trustedDirectories || [])
+                .filter((item) => item !== directory);
+            const newState = {
+                ...s,
+                localFileConfig: {
+                    ...getDefaultLocalFileConfig(),
+                    ...(s.localFileConfig || {}),
+                    trustedDirectories
+                }
+            };
             save(newState);
             return newState;
         }),
