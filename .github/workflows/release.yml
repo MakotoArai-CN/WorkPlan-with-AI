@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+env:
+  G4F_DEV_REPOSITORY: MakotoArai-CN/g4f.dev
+  G4F_DEV_REF: 194fceb5d75de62feae5acb919f8abd57bb3fa30
+
 jobs:
   get-version:
     runs-on: ubuntu-latest
@@ -21,6 +25,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
 
       - name: Validate bundled G4F assets
         run: |
@@ -62,6 +76,16 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
@@ -105,6 +129,16 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
@@ -162,6 +196,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
@@ -216,6 +260,16 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
@@ -278,6 +332,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
@@ -320,6 +384,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
