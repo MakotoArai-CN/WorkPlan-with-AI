@@ -22,6 +22,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate bundled G4F assets
+        run: |
+          test -f g4f.dev/dist/js/providers.json || { echo "Missing g4f.dev/dist/js/providers.json"; exit 1; }
+          test -f g4f.dev/dist/js/client.js || { echo "Missing g4f.dev/dist/js/client.js"; exit 1; }
+
       - name: Get version from tauri.conf.json
         id: get_version
         run: |
@@ -76,25 +81,6 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      - name: Override @gpt4free with custom complete version
-        shell: powershell
-        run: |
-          if (Test-Path "node_modules\@gpt4free") {
-            Remove-Item -Recurse -Force "node_modules\@gpt4free"
-          }
-          if (Test-Path "static\@gpt4free") {
-            Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
-            if (-Not (Test-Path "node_modules\@gpt4free\g4f.dev")) {
-              $nested = Get-ChildItem -Path "node_modules\@gpt4free\" -Directory | Where-Object { Test-Path "$_\g4f.dev" }
-              if ($nested) {
-                Move-Item "$($nested.FullName)\g4f.dev" "node_modules\@gpt4free\g4f.dev"
-              }
-            }
-          } else {
-            Write-Error "static\@gpt4free directory not found!"
-            exit 1
-          }
-
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -135,16 +121,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
-
-      - name: Override @gpt4free
-        shell: powershell
-        run: |
-          if (Test-Path "node_modules\@gpt4free") {
-            Remove-Item -Recurse -Force "node_modules\@gpt4free"
-          }
-          if (Test-Path "static\@gpt4free") {
-            Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
-          }
 
       - name: Modify tauri.conf.json for WebView2 bootstrapper
         shell: powershell
@@ -201,16 +177,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
-
-      - name: Override @gpt4free
-        shell: powershell
-        run: |
-          if (Test-Path "node_modules\@gpt4free") {
-            Remove-Item -Recurse -Force "node_modules\@gpt4free"
-          }
-          if (Test-Path "static\@gpt4free") {
-            Copy-Item -Recurse -Force "static\@gpt4free" "node_modules\"
-          }
 
       - name: Modify tauri.conf.json for WebView2 offlineInstaller
         shell: powershell
@@ -272,13 +238,6 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      - name: Override @gpt4free
-        run: |
-          rm -rf node_modules/@gpt4free
-          if [ -d "static/@gpt4free" ]; then
-            cp -r static/@gpt4free node_modules/
-          fi
-
       - name: Configure Linux bundle targets
         run: |
           jq '.bundle.targets = ["deb", "rpm", "appimage"]' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
@@ -336,13 +295,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
-
-      - name: Override @gpt4free
-        run: |
-          rm -rf node_modules/@gpt4free
-          if [ -d "static/@gpt4free" ]; then
-            cp -r static/@gpt4free node_modules/
-          fi
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -407,13 +359,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
-
-      - name: Override @gpt4free
-        run: |
-          rm -rf node_modules/@gpt4free
-          if [ -d "static/@gpt4free" ]; then
-            cp -r static/@gpt4free node_modules/
-          fi
 
       - name: Initialize Android project
         run: bun run tauri android init
@@ -579,8 +524,8 @@ jobs:
           path: android-apks/*.apk
 
   release:
-    needs: [get-version, build-windows, build-windows-webview2, build-linux, build-macos, build-android]
-    if: always() && needs.get-version.outputs.tag_exists == 'false'
+    needs: [get-version, build-windows, build-windows-webview2, build-windows-webview2-offlineInstaller, build-linux, build-macos, build-android]
+    if: needs.get-version.outputs.tag_exists == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -591,7 +536,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-        continue-on-error: true
 
       - name: List artifacts
         run: find artifacts -type f 2>/dev/null || echo "No artifacts found"
@@ -629,7 +573,7 @@ jobs:
             echo "| [![Windows x86](https://img.shields.io/badge/Windows-x86-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x86-setup.exe) | Windows x86 安装包 |"
             echo "| [![Windows ARM64](https://img.shields.io/badge/Windows-ARM64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_arm64-setup.exe) | Windows ARM64 安装包 |"
             echo "| [![Windows WebView2](https://img.shields.io/badge/Windows-WebView2-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64-setup-webview2.exe) | Windows WebView2 版（旧系统） |"
-            echo "| [![Windows WebView2 offlineInstaller](https://img.shields.io/badge/Windows-offlineInstaller-0078D6?style=for-the-badge&logo=offlineInstaller&logoColor=white&labelColor=lightgreen)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64-setup-webview2.exe) | Windows WebView2 offlineInstaller（旧系统离线包） |"
+            echo "| [![Windows WebView2 offlineInstaller](https://img.shields.io/badge/Windows-offlineInstaller-0078D6?style=for-the-badge&logo=offlineInstaller&logoColor=white&labelColor=lightgreen)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64-setup-webview2-offlineInstaller.exe) | Windows WebView2 offlineInstaller（旧系统离线包） |"
             echo "| [![Windows msi](https://img.shields.io/badge/Windows-msi-0078D6?style=for-the-badge&logo=windows&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64_en-US.msi) | Windows msi 安装包 |"
             echo "| [![macOS Intel](https://img.shields.io/badge/macOS-Intel-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_x64.dmg) | macOS Intel 安装包 |"
             echo "| [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](${BASE_URL}/WorkPlan_${VERSION_NUM}_aarch64.dmg) | macOS Apple Silicon 安装包 |"

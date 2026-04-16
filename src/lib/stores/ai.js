@@ -1,10 +1,11 @@
 import { writable, get } from 'svelte/store';
+import { isG4FProvider } from '../utils/g4f-client.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
 const PROVIDER_CONFIG_FIELDS = ['apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
 
 export const aiConfig = writable({
-    provider: '',
+    provider: 'g4f-default',
     apiKey: '',
     secretKey: '',
     model: 'auto',
@@ -75,7 +76,7 @@ async function normalizeProviderModel(providerId, providerInfo, providerConfig) 
 
 export function hydrateCurrentProviderConfig() {
     const current = get(aiConfig);
-    const providerId = current.provider || '';
+    const providerId = current.provider || 'g4f-default';
     const providerConfigs = current.providerConfigs || {};
     const cached = providerConfigs[providerId] || null;
     const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
@@ -93,7 +94,7 @@ export function hydrateCurrentProviderConfig() {
 
 export async function hydrateCurrentProviderConfigWithDefaults() {
     const current = get(aiConfig);
-    const providerId = current.provider || '';
+    const providerId = current.provider || 'g4f-default';
     const providerInfo = await getProviderInfoCached(providerId);
 
     const providerConfigs = current.providerConfigs || {};
@@ -115,7 +116,7 @@ export async function hydrateCurrentProviderConfigWithDefaults() {
 
 export async function switchProvider(newProviderId) {
     const current = get(aiConfig);
-    const prevProviderId = current.provider || '';
+    const prevProviderId = current.provider || 'g4f-default';
 
     const providerConfigsUpdated = mergeProviderConfigs(current.providerConfigs, prevProviderId, current);
 
@@ -146,7 +147,7 @@ export function loadAiConfig() {
         try {
             const parsed = JSON.parse(saved);
             const providerConfigs = parsed.providerConfigs || {};
-            const providerId = parsed.provider || '';
+            const providerId = parsed.provider || 'g4f-default';
 
             const cached = providerConfigs[providerId] || null;
             const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
@@ -184,7 +185,7 @@ export function loadAiConfig() {
 export function saveAiConfig() {
     if (typeof window === 'undefined') return;
     const current = get(aiConfig);
-    const providerId = current.provider || '';
+    const providerId = current.provider || 'g4f-default';
     const providerConfigsUpdated = mergeProviderConfigs(current.providerConfigs, providerId, current);
 
     const toSave = {
@@ -597,7 +598,8 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
                                !UPDATE_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase())) &&
                                !QUERY_KEYWORDS.some(kw => lowerText.includes(kw.toLowerCase()));
 
-    const needsApiKey = currentConfig.provider !== 'ollama' &&
+    const needsApiKey = !isG4FProvider(currentConfig.provider) &&
+        currentConfig.provider !== 'ollama' &&
         currentConfig.provider !== 'lmstudio';
 
     if (needsApiKey && !currentConfig.apiKey) {
@@ -1354,7 +1356,8 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     if (!text.trim()) return;
 
     const currentConfig = getEffectiveConfig();
-    const needsApiKey = currentConfig.provider !== 'ollama' &&
+    const needsApiKey = !isG4FProvider(currentConfig.provider) &&
+        currentConfig.provider !== 'ollama' &&
         currentConfig.provider !== 'lmstudio';
 
     if (needsApiKey && !currentConfig.apiKey) {

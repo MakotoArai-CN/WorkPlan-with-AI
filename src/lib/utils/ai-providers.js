@@ -1,3 +1,12 @@
+import {
+    G4F_PROVIDER_CATALOG,
+    chatWithG4F,
+    fetchG4FModels,
+    getG4FDefaultModels,
+    isG4FProvider,
+    streamChatWithG4F
+} from './g4f-client.js';
+
 const PROVIDER_CONFIGS = {
     openai: {
         name: 'OpenAI',
@@ -438,6 +447,18 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
     if (modelCache[cacheKey] && modelCache[cacheKey].expireTime > Date.now()) {
         return modelCache[cacheKey].models;
     }
+
+    if (isG4FProvider(providerId)) {
+        try {
+            const models = await fetchG4FModels(providerId, { apiKey });
+            modelCache[cacheKey] = { models, expireTime: Date.now() + 300000 };
+            return models;
+        } catch (e) {
+            console.error(`Failed to fetch G4F models for ${providerId}:`, e);
+            return getG4FDefaultModels(providerId);
+        }
+    }
+
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider || !provider.supportsModelList) {
         return provider ? provider.defaultModels : [];
@@ -638,7 +659,20 @@ function getEffectiveEndpoint(provider, providerId, config) {
 }
 
 export async function callAI(config, userMessage, systemPrompt) {
-    const providerId = config.provider || '';
+    const providerId = config.provider || 'g4f-default';
+
+    if (isG4FProvider(providerId)) {
+        const messages = [];
+        if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+        messages.push({ role: 'user', content: userMessage });
+
+        return await chatWithG4F(providerId, config.model, messages, {
+            apiKey: config.apiKey,
+            temperature: config.temperature,
+            maxTokens: config.maxTokens
+        });
+    }
+
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
     const isCustomProvider = providerId === 'custom';
@@ -708,7 +742,16 @@ export async function callAI(config, userMessage, systemPrompt) {
 }
 
 export async function callAIWithMessages(config, messages) {
-    const providerId = config.provider || '';
+    const providerId = config.provider || 'g4f-default';
+
+    if (isG4FProvider(providerId)) {
+        return await chatWithG4F(providerId, config.model, messages, {
+            apiKey: config.apiKey,
+            temperature: config.temperature,
+            maxTokens: config.maxTokens
+        });
+    }
+
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
     const isCustomProvider = providerId === 'custom';
@@ -775,7 +818,22 @@ export async function callAIWithMessages(config, messages) {
 }
 
 export async function callAIWithMessagesStream(config, messages, onChunk) {
-    const providerId = config.provider || '';
+    const providerId = config.provider || 'g4f-default';
+
+    if (isG4FProvider(providerId)) {
+        return await streamChatWithG4F(
+            providerId,
+            config.model,
+            messages,
+            {
+                apiKey: config.apiKey,
+                temperature: config.temperature,
+                maxTokens: config.maxTokens
+            },
+            onChunk
+        );
+    }
+
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
     const isCustomProvider = providerId === 'custom';
@@ -888,6 +946,20 @@ export async function testConnection(config) {
 
 export async function getProviderList() {
     const result = [];
+
+    for (const provider of G4F_PROVIDER_CATALOG) {
+        result.push({
+            id: provider.id,
+            name: provider.name,
+            models: getG4FDefaultModels(provider.id),
+            defaultModel: getG4FDefaultModels(provider.id)[0] || 'auto',
+            docUrl: 'https://g4f.dev/',
+            apiUrl: '',
+            authType: provider.requiresApiKey ? 'bearer' : 'none',
+            supportsModelList: true
+        });
+    }
+
     for (const [id, provider] of Object.entries(PROVIDER_CONFIGS)) {
         result.push({
             id,
@@ -906,6 +978,20 @@ export async function getProviderList() {
 }
 
 export function getProviderInfo(providerId) {
+    if (isG4FProvider(providerId)) {
+        const provider = G4F_PROVIDER_CATALOG.find((item) => item.id === providerId);
+        const models = getG4FDefaultModels(providerId);
+        return {
+            name: provider?.name || providerId,
+            defaultModels: models,
+            defaultModel: models[0] || 'auto',
+            authType: 'none',
+            supportsModelList: true,
+            docUrl: 'https://g4f.dev/',
+            apiUrl: ''
+        };
+    }
+
     return PROVIDER_CONFIGS[providerId] || null;
 }
 
