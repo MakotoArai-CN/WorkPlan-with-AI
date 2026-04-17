@@ -467,12 +467,12 @@ async function handleChangeMasterPassword() {
                     创建时间: p.createdAt,
                     更新时间: p.updatedAt,
                 }));
-                const result = exportToCSV(data, `passwords_${timestamp}.csv`, {
+                const result = await exportToCSV(data, `passwords_${timestamp}.csv`, {
                     showToast,
                 });
                 if (!result.success) throw new Error(result.error);
             } else if (format === "json") {
-                const result = exportToEncryptedJSON(
+                const result = await exportToEncryptedJSON(
                     decrypted,
                     `passwords_${timestamp}.json`,
                     masterPass,

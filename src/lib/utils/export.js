@@ -1,6 +1,34 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import CryptoJS from 'crypto-js';
+import { invoke } from "@tauri-apps/api/core";
+
+/**
+ * Platform-aware file download helper.
+ * Prefers Tauri backend (save_file_to_downloads) for desktop + Android.
+ * Falls back to browser <a download>.click() for pure web environments.
+ * @returns {{ success: boolean, path?: string }}
+ */
+async function downloadFile(content, filename) {
+    try {
+        if (window.__TAURI__) {
+            const savedPath = await invoke('save_file_to_downloads', { filename, content });
+            return { success: true, path: savedPath };
+        }
+    } catch (e) {
+        console.warn('Tauri save failed, falling back to browser download:', e);
+    }
+
+    // Fallback: browser-based download
+    const blob = new Blob([content], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    return { success: true };
+}
 
 function cleanOklchColors(element) {
     const clone = element.cloneNode(true);
@@ -23,12 +51,12 @@ function cleanOklchColors(element) {
 
 export async function exportToPDF(element, filename = 'export.pdf', options = {}) {
     const { width = 'a4', showToast } = options;
-    
+
     try {
         if (showToast) showToast({ message: '正在生成PDF...', type: 'info', duration: 2000 });
-        
+
         const cleanedElement = cleanOklchColors(element);
-        
+
         const wrapper = document.createElement('div');
         wrapper.style.cssText = `
             position: absolute;
@@ -41,7 +69,7 @@ export async function exportToPDF(element, filename = 'export.pdf', options = {}
         `;
         wrapper.appendChild(cleanedElement);
         document.body.appendChild(wrapper);
-        
+
         const canvas = await html2canvas(wrapper, {
             scale: 2,
             useCORS: true,
@@ -50,40 +78,40 @@ export async function exportToPDF(element, filename = 'export.pdf', options = {}
             width: width === 'a4' ? 794 : undefined,
             windowWidth: width === 'a4' ? 794 : undefined
         });
-        
+
         document.body.removeChild(wrapper);
-        
+
         const imgData = canvas.toDataURL('image/png');
-        
+
         const pdf = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
             format: 'a4'
         });
-        
+
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
         const margin = 10;
         const contentWidth = pageWidth - 2 * margin;
         const contentHeight = (canvas.height / canvas.width) * contentWidth;
-        
+
         if (contentHeight <= pageHeight - 2 * margin) {
             pdf.addImage(imgData, 'PNG', margin, margin, contentWidth, contentHeight);
         } else {
             const pageContentHeight = pageHeight - 2 * margin;
             const totalPages = Math.ceil(contentHeight / pageContentHeight);
-            
+
             for (let i = 0; i < totalPages; i++) {
                 if (i > 0) {
                     pdf.addPage();
                 }
-                
+
                 const sourceY = (i * pageContentHeight / contentHeight) * canvas.height;
                 const sourceHeight = Math.min(
                     (pageContentHeight / contentHeight) * canvas.height,
                     canvas.height - sourceY
                 );
-                
+
                 const pageCanvas = document.createElement('canvas');
                 pageCanvas.width = canvas.width;
                 pageCanvas.height = sourceHeight;
@@ -93,15 +121,17 @@ export async function exportToPDF(element, filename = 'export.pdf', options = {}
                     0, sourceY, canvas.width, sourceHeight,
                     0, 0, canvas.width, sourceHeight
                 );
-                
+
                 const pageImgData = pageCanvas.toDataURL('image/png');
                 const drawHeight = (sourceHeight / canvas.width) * contentWidth;
                 pdf.addImage(pageImgData, 'PNG', margin, margin, contentWidth, drawHeight);
             }
         }
-        
+
+        // PDF uses binary output — jsPDF.save() works on desktop but may not on Android WebView
+        // For now, use jsPDF.save() which handles blob download internally
         pdf.save(filename);
-        
+
         if (showToast) showToast({ message: 'PDF导出成功', type: 'success' });
         return { success: true };
     } catch (e) {
@@ -111,22 +141,16 @@ export async function exportToPDF(element, filename = 'export.pdf', options = {}
     }
 }
 
-export function exportToMarkdown(content, filename = 'export.md', options = {}) {
+export async function exportToMarkdown(content, filename = 'export.md', options = {}) {
     const { showToast } = options;
-    
+
     try {
         if (showToast) showToast({ message: '正在导出Markdown...', type: 'info', duration: 1500 });
-        
-        const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-        
+
+        const result = await downloadFile(content, filename);
+
         if (showToast) showToast({ message: 'Markdown导出成功', type: 'success' });
-        return { success: true };
+        return result;
     } catch (e) {
         console.error('Markdown export failed:', e);
         if (showToast) showToast({ message: 'Markdown导出失败: ' + e.message, type: 'error' });
@@ -134,12 +158,12 @@ export function exportToMarkdown(content, filename = 'export.md', options = {}) 
     }
 }
 
-export function exportToHTML(content, filename = 'export.html', title = 'Export', options = {}) {
+export async function exportToHTML(content, filename = 'export.html', title = 'Export', options = {}) {
     const { showToast } = options;
-    
+
     try {
         if (showToast) showToast({ message: '正在导出HTML...', type: 'info', duration: 1500 });
-        
+
         const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -158,16 +182,10 @@ export function exportToHTML(content, filename = 'export.html', title = 'Export'
 </head>
 <body>${content}</body>
 </html>`;
-        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-        
+        const result = await downloadFile(html, filename);
+
         if (showToast) showToast({ message: 'HTML导出成功', type: 'success' });
-        return { success: true };
+        return result;
     } catch (e) {
         console.error('HTML export failed:', e);
         if (showToast) showToast({ message: 'HTML导出失败: ' + e.message, type: 'error' });
@@ -175,20 +193,20 @@ export function exportToHTML(content, filename = 'export.html', title = 'Export'
     }
 }
 
-export function exportToCSV(data, filename = 'export.csv', options = {}) {
+export async function exportToCSV(data, filename = 'export.csv', options = {}) {
     const { showToast } = options;
-    
+
     try {
         if (!Array.isArray(data) || data.length === 0) {
             throw new Error('没有数据可导出');
         }
-        
+
         if (showToast) showToast({ message: '正在导出CSV...', type: 'info', duration: 1500 });
-        
+
         const headers = Object.keys(data[0]);
         const csvContent = [
             headers.join(','),
-            ...data.map(row => 
+            ...data.map(row =>
                 headers.map(header => {
                     const value = row[header] ?? '';
                     const escaped = String(value).replace(/"/g, '""');
@@ -196,18 +214,12 @@ export function exportToCSV(data, filename = 'export.csv', options = {}) {
                 }).join(',')
             )
         ].join('\n');
-        
+
         const BOM = '\uFEFF';
-        const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-        
+        const result = await downloadFile(BOM + csvContent, filename);
+
         if (showToast) showToast({ message: 'CSV导出成功', type: 'success' });
-        return { success: true };
+        return result;
     } catch (e) {
         console.error('CSV export failed:', e);
         if (showToast) showToast({ message: 'CSV导出失败: ' + e.message, type: 'error' });
@@ -215,12 +227,12 @@ export function exportToCSV(data, filename = 'export.csv', options = {}) {
     }
 }
 
-export function exportToEncryptedJSON(data, filename = 'export.json', password = '', options = {}) {
+export async function exportToEncryptedJSON(data, filename = 'export.json', password = '', options = {}) {
     const { showToast } = options;
-    
+
     try {
         if (showToast) showToast({ message: '正在导出加密数据...', type: 'info', duration: 1500 });
-        
+
         let content;
         if (password) {
             const jsonStr = JSON.stringify(data);
@@ -234,17 +246,11 @@ export function exportToEncryptedJSON(data, filename = 'export.json', password =
         } else {
             content = JSON.stringify(data, null, 2);
         }
-        
-        const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-        
+
+        const result = await downloadFile(content, filename);
+
         if (showToast) showToast({ message: '数据导出成功' + (password ? '（已加密）' : ''), type: 'success' });
-        return { success: true };
+        return result;
     } catch (e) {
         console.error('JSON export failed:', e);
         if (showToast) showToast({ message: '导出失败: ' + e.message, type: 'error' });
@@ -252,23 +258,17 @@ export function exportToEncryptedJSON(data, filename = 'export.json', password =
     }
 }
 
-export function exportToJSON(data, filename = 'export.json', options = {}) {
+export async function exportToJSON(data, filename = 'export.json', options = {}) {
     const { showToast } = options;
-    
+
     try {
         if (showToast) showToast({ message: '正在导出数据...', type: 'info', duration: 1500 });
-        
+
         const content = JSON.stringify(data, null, 2);
-        const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-        
+        const result = await downloadFile(content, filename);
+
         if (showToast) showToast({ message: '数据导出成功', type: 'success' });
-        return { success: true };
+        return result;
     } catch (e) {
         console.error('JSON export failed:', e);
         if (showToast) showToast({ message: '导出失败: ' + e.message, type: 'error' });

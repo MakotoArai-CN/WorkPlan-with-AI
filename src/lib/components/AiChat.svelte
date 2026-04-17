@@ -245,14 +245,17 @@
         }
     }
 
-    function handleExportChat() {
+    async function handleExportChat() {
         const md = exportChatToMarkdown();
         if (md) {
             const session = $aiChatSessions.find(s => s.id === $activeAiChatSessionId);
             const filename = `chat-${session?.title || 'export'}-${new Date().toISOString().slice(0, 10)}.md`;
-            const result = exportToMarkdown(md, filename);
+            const result = await exportToMarkdown(md, filename);
             if (result?.success) {
-                showToast({ message: $_("ai_chat.export_success"), type: 'success' });
+                const msg = result.path
+                    ? `${$_("ai_chat.export_success")}: ${result.path}`
+                    : $_("ai_chat.export_success");
+                showToast({ message: msg, type: 'success' });
             }
         } else {
             showToast({ message: $_("ai_chat.export_empty"), type: 'warning' });
