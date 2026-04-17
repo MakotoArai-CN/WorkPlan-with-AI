@@ -6,10 +6,15 @@
         activeAiChatSessionId,
         aiChatDraft,
         aiChatContext,
+        aiChatCapabilities,
         isAiLoading,
         showAiSettings,
         sendChatMessage,
         retryChatMessage,
+        retryFromAssistantMessage,
+        editAndResend,
+        rollbackMessage,
+        exportChatToMarkdown,
         confirmAiChatLocalFileOperation,
         clearAiChatHistory,
         createAiChatSession,
@@ -17,8 +22,9 @@
         deleteAiChatSession,
         clearAiChatDraft,
         saveAiChatHistory,
+        probeAiCapabilities,
     } from "../stores/ai.js";
-    import { showConfirm } from "../stores/modal.js";
+    import { showConfirm, showToast } from "../stores/modal.js";
     import { taskStore } from "../stores/tasks.js";
     import {
         popNavigation,
@@ -26,6 +32,7 @@
     } from "../stores/navigation.js";
     import { openExternalUrl } from "../utils/open-external.js";
     import { resizeTextarea } from "../utils/textarea-autosize.js";
+    import { exportToMarkdown } from "../utils/export.js";
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
     import { _ } from "svelte-i18n";
     import { get } from "svelte/store";
@@ -80,6 +87,43 @@
             color: "orange",
         },
     ];
+
+    $: capabilityBadges = [
+        {
+            id: "project",
+            label: $_("ai_chat.capability_project_tools"),
+            active: $aiChatCapabilities.projectToolsAvailable,
+            icon: $aiChatCapabilities.projectToolsAvailable ? "ph-check-circle" : "ph-chat-circle",
+            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.toolCallRuntimeAvailable : null,
+        },
+        {
+            id: "files",
+            label: $_("ai_chat.capability_local_files"),
+            active: $aiChatCapabilities.localFilesAvailable,
+            icon: $aiChatCapabilities.localFilesAvailable ? "ph-folder-open" : "ph-folder-simple",
+            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.localFilesAvailable : null,
+        },
+        {
+            id: "search",
+            label: $_("ai_chat.capability_web_search"),
+            active: $aiChatCapabilities.webSearchAvailable,
+            icon: $aiChatCapabilities.webSearchAvailable ? "ph-globe" : "ph-globe-hemisphere-west",
+            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.webSearchAvailable : null,
+        },
+    ];
+
+    let isProbing = false;
+    async function handleProbeCapabilities() {
+        if (isProbing) return;
+        isProbing = true;
+        try {
+            await probeAiCapabilities();
+        } catch (e) {
+            console.error('Probe failed:', e);
+        } finally {
+            isProbing = false;
+        }
+    }
 
     async function scrollToBottom() {
         await tick();
@@ -147,11 +191,12 @@
     async function handleDeleteSession(sessionId) {
         const session = $aiChatSessions.find((item) => item.id === sessionId);
         if (!session) return;
+        const t = get(_);
         const confirmed = await showConfirm({
-            title: "删除会话",
-            message: `确定删除“${session.title || "未命名会话"}”吗？`,
-            confirmText: "删除",
-            cancelText: get(_)("common.cancel"),
+            title: t("ai_chat.delete_session"),
+            message: t("ai_chat.delete_session_confirm", { values: { title: session.title || t("ai_chat.unnamed_session") } }),
+            confirmText: t("common.delete"),
+            cancelText: t("common.cancel"),
             variant: "danger",
         });
         if (confirmed) {
@@ -172,6 +217,54 @@
     function copyMessage(content) {
         if (navigator.clipboard && content) {
             navigator.clipboard.writeText(content);
+            showToast({ message: $_("common.copied"), type: 'success', duration: 1500 });
+        }
+    }
+
+    function handleEditResend(index, content) {
+        const restoredText = editAndResend(index);
+        if (restoredText) {
+            inputText = restoredText;
+            tick().then(() => {
+                composerTextarea?.focus();
+                syncComposerHeight();
+            });
+        }
+    }
+
+    function handleRollback(index) {
+        rollbackMessage(index);
+    }
+
+    async function handleRetryAssistant(index) {
+        try {
+            await retryFromAssistantMessage(index);
+            scrollToBottom();
+        } catch (error) {
+            console.error("Retry failed:", error);
+        }
+    }
+
+    function handleExportChat() {
+        const md = exportChatToMarkdown();
+        if (md) {
+            const session = $aiChatSessions.find(s => s.id === $activeAiChatSessionId);
+            const filename = `chat-${session?.title || 'export'}-${new Date().toISOString().slice(0, 10)}.md`;
+            const result = exportToMarkdown(md, filename);
+            if (result?.success) {
+                showToast({ message: $_("ai_chat.export_success"), type: 'success' });
+            }
+        } else {
+            showToast({ message: $_("ai_chat.export_empty"), type: 'warning' });
+        }
+    }
+
+    async function handleConfirmFileOperation(index, operation) {
+        const res = await confirmAiChatLocalFileOperation(index, operation);
+        if (res?.success) {
+            showToast({ message: $_("ai_chat.file_operation_success"), type: 'success' });
+        } else if (res && !res.success) {
+            showToast({ message: $_("ai_chat.file_operation_failed"), type: 'error' });
         }
     }
 
@@ -182,15 +275,16 @@
     }
 
     function getSessionPreview(session) {
+        const t = get(_);
         const lastMessage = [...(session?.history || [])].reverse().find((item) => item);
-        if (!lastMessage) return "暂无消息";
+        if (!lastMessage) return t("ai_chat.no_messages");
         if (lastMessage.type === "web_search_result") {
-            return `搜索：${lastMessage.query || "网页搜索"}`;
+            return t("ai_chat.search_prefix", { values: { query: lastMessage.query || t("ai_chat.capability_web_search") } });
         }
         if (typeof lastMessage.content === "string" && lastMessage.content.trim()) {
             return lastMessage.content.replace(/\s+/g, " ").trim().slice(0, 40);
         }
-        return lastMessage.type || "暂无消息";
+        return lastMessage.type || t("ai_chat.no_messages");
     }
 
     function getMessageSource(msg) {
@@ -348,7 +442,7 @@
         if (updates.priority) descriptions.push(`${get(_)("ai_panel.priority_label")} → ${formatPriority(updates.priority)}`);
         if (updates.note !== undefined) descriptions.push(`${get(_)("ai_panel.note_label")} → "${updates.note}"`);
         if (updates.repeatDays) descriptions.push(`${get(_)("scheduled_page.repeat")} → ${formatRepeatDays(updates.repeatDays).join("、")}`);
-        if (typeof updates.enabled === "boolean") descriptions.push(`启用状态 → ${updates.enabled ? "启用" : "停用"}`);
+        if (typeof updates.enabled === "boolean") descriptions.push(`${get(_)("ai_chat.enabled_status")} → ${updates.enabled ? get(_)("ai_chat.enabled") : get(_)("ai_chat.disabled")}`);
         if (updates.subtasks) descriptions.push(`${get(_)("ai_panel.subtasks")} updated`);
         return descriptions;
     }
@@ -550,10 +644,10 @@
     }
 </script>
 
-<div class="flex h-screen md:h-full overflow-hidden bg-slate-50" data-ai-shell>
+<div class="flex h-screen md:h-full overflow-hidden bg-slate-50 dark:bg-slate-900" data-ai-shell>
     {#if showSessionDrawer}
         <div
-            class="md:hidden fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-sm"
+            class="md:hidden fixed inset-0 z-40 bg-slate-950/30 dark:bg-slate-950/60 backdrop-blur-sm"
             on:click={() => (showSessionDrawer = false)}
             on:keydown={() => (showSessionDrawer = false)}
             tabindex="0"
@@ -562,57 +656,55 @@
     {/if}
 
     <aside
-        class="w-[280px] bg-white border-r border-slate-200 flex flex-col shrink-0 h-full z-50 transition-transform duration-200 md:flex"
+        class="w-[280px] bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shrink-0 h-full z-50 transition-transform duration-200 md:flex"
         class:fixed={showSessionDrawer}
         class:inset-y-0={showSessionDrawer}
         class:left-0={showSessionDrawer}
         class:translate-x-0={!showSessionDrawer}
         class:-translate-x-full={!showSessionDrawer}
     >
-        <div class="h-16 px-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+        <div class="h-16 px-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0">
             <div>
-                <div class="text-sm font-black text-slate-800">会话历史</div>
-                <div class="text-[11px] text-slate-400">
-                    {$aiChatSessions.length} 个会话
+                <div class="text-sm font-black text-slate-800 dark:text-slate-100">{$_("ai_chat.session_history")}</div>
+                <div class="text-[11px] text-slate-400 dark:text-slate-500">
+                    {$_("ai_chat.session_count", { values: { count: $aiChatSessions.length } })}
                 </div>
             </div>
             <button
                 on:click={handleCreateSession}
                 class="h-9 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5"
             >
-                <i class="ph ph-plus"></i> 新对话
+                <i class="ph ph-plus"></i> {$_("ai_chat.new_session")}
             </button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-3 space-y-2">
+        <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-800">
             {#each $aiChatSessions as session}
                 <div
                     on:click={() => handleSelectSession(session.id)}
                     on:keydown={(e) => (e.key === "Enter" || e.key === " ") && handleSelectSession(session.id)}
                     tabindex="0"
                     role="button"
-                    class="w-full text-left rounded-2xl border p-3 transition group cursor-pointer"
-                    class:bg-indigo-50={session.id === $activeAiChatSessionId}
-                    class:border-indigo-200={session.id === $activeAiChatSessionId}
-                    class:bg-white={session.id !== $activeAiChatSessionId}
-                    class:border-slate-200={session.id !== $activeAiChatSessionId}
+                    class="w-full text-left rounded-2xl border p-3 transition-all duration-150 group cursor-pointer border-l-4 {session.id === $activeAiChatSessionId
+                        ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 border-l-indigo-500 shadow-sm'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 border-l-transparent hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-l-slate-300'}"
                 >
                     <div class="flex items-start justify-between gap-2">
                         <div class="min-w-0 flex-1">
-                            <div class="font-bold text-sm text-slate-700 truncate">
-                                {session.title || "新对话"}
+                            <div class="font-bold text-sm text-slate-700 dark:text-slate-200 truncate">
+                                {session.title || $_("ai_chat.new_session")}
                             </div>
-                            <div class="text-xs text-slate-400 truncate mt-1">
+                            <div class="text-xs text-slate-400 dark:text-slate-500 truncate mt-1">
                                 {getSessionPreview(session)}
                             </div>
-                            <div class="text-[10px] text-slate-300 mt-2">
+                            <div class="text-[10px] text-slate-300 dark:text-slate-600 mt-2">
                                 {formatSessionTime(session.updatedAt)}
                             </div>
                         </div>
                         <button
                             on:click|stopPropagation={() => handleDeleteSession(session.id)}
-                            class="p-1.5 rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition"
-                            title="删除会话"
+                            class="p-1.5 rounded-lg text-slate-300 dark:text-slate-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 opacity-0 group-hover:opacity-100 transition"
+                            title={$_("ai_chat.delete_session")}
                         >
                             <i class="ph ph-trash"></i>
                         </button>
@@ -622,20 +714,22 @@
         </div>
     </aside>
 
-    <div class="flex-1 min-w-0 flex flex-col bg-gradient-to-b from-slate-50 to-white overflow-hidden">
+    <div class="flex-1 min-w-0 flex flex-col bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-850 overflow-hidden">
         <header
-            class="h-14 md:h-16 bg-white/90 backdrop-blur px-3 md:px-6 flex justify-between items-center z-10 border-b border-slate-200 shrink-0"
+            class="h-14 md:h-16 bg-white/90 dark:bg-slate-800/90 backdrop-blur px-3 md:px-6 flex justify-between items-center z-10 border-b border-slate-200 dark:border-slate-700 shrink-0"
         >
             <div class="flex items-center gap-2 md:gap-3 min-w-0">
                 <button
                     on:click={handleBack}
-                    class="md:hidden text-slate-500 flex items-center gap-1 font-bold mr-1"
+                    class="md:hidden text-slate-500 dark:text-slate-400 flex items-center gap-1 font-bold mr-1"
+                    aria-label={$_("common.back")}
                 >
                     <i class="ph-bold ph-caret-left text-lg"></i>
                 </button>
                 <button
                     on:click={() => (showSessionDrawer = !showSessionDrawer)}
-                    class="md:hidden h-9 w-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center"
+                    class="md:hidden h-9 w-9 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center"
+                    aria-label={$_("ai_chat.sessions")}
                 >
                     <i class="ph ph-list text-lg"></i>
                 </button>
@@ -645,11 +739,11 @@
                     <i class="ph-fill ph-robot text-lg md:text-xl"></i>
                 </div>
                 <div class="min-w-0">
-                    <h2 class="text-base md:text-lg font-bold text-slate-800 truncate">
+                    <h2 class="text-base md:text-lg font-bold text-slate-800 dark:text-slate-100 truncate">
                         {currentSession?.title || $_("ai_chat.title")}
                     </h2>
                     <div
-                        class="text-[10px] md:text-xs text-slate-500 hidden md:block truncate"
+                        class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 hidden md:block truncate"
                     >
                         {$_("ai_chat.subtitle")}
                     </div>
@@ -658,14 +752,21 @@
             <div class="flex items-center gap-1 md:gap-2">
                 <button
                     on:click={() => showAiSettings.set(true)}
-                    class="h-8 md:h-9 px-4 md:px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium flex items-center gap-1 md:gap-2 transition"
+                    class="h-8 md:h-9 px-4 md:px-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg text-sm font-medium flex items-center gap-1 md:gap-2 transition"
                 >
                     <i class="ph ph-gear"></i>
                     <span class="hidden md:inline">{$_("ai_chat.settings")}</span>
                 </button>
                 <button
+                    on:click={handleExportChat}
+                    class="h-8 md:h-9 px-4 md:px-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg text-sm font-medium flex items-center gap-1 md:gap-2 transition"
+                >
+                    <i class="ph ph-export"></i>
+                    <span class="hidden md:inline">{$_("ai_chat.export")}</span>
+                </button>
+                <button
                     on:click={handleClear}
-                    class="h-8 md:h-9 px-4 md:px-4 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium flex items-center gap-1 md:gap-2 transition"
+                    class="h-8 md:h-9 px-4 md:px-4 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 rounded-lg text-sm font-medium flex items-center gap-1 md:gap-2 transition"
                 >
                     <i class="ph ph-trash"></i>
                     <span class="hidden md:inline">{$_("ai_chat.clear_btn")}</span>
@@ -674,24 +775,24 @@
         </header>
 
         {#if $aiChatContext}
-            <div class="px-3 md:px-6 py-3 border-b border-indigo-100 bg-gradient-to-r from-indigo-50/90 to-sky-50/90">
+            <div class="px-3 md:px-6 py-3 border-b border-indigo-100 dark:border-indigo-900/50 bg-gradient-to-r from-indigo-50/90 to-sky-50/90 dark:from-indigo-950/40 dark:to-sky-950/40">
                 <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                        <div class="text-xs font-black uppercase tracking-[0.18em] text-indigo-500">
+                        <div class="text-xs font-black uppercase tracking-[0.18em] text-indigo-500 dark:text-indigo-400">
                             {$aiChatContext.scope || "Context"}
                         </div>
-                        <div class="mt-1 font-bold text-slate-700 truncate">
+                        <div class="mt-1 font-bold text-slate-700 dark:text-slate-200 truncate">
                             {$aiChatContext.title || $_("ai_chat.title")}
                         </div>
                         {#if $aiChatContext.description}
-                            <div class="mt-1 text-xs text-slate-500 leading-5 line-clamp-2">
+                            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-5 line-clamp-2">
                                 {$aiChatContext.description}
                             </div>
                         {/if}
                     </div>
                     <button
                         on:click={clearAiChatDraft}
-                        class="w-8 h-8 rounded-xl bg-white/80 text-slate-400 hover:text-slate-700 hover:bg-white flex items-center justify-center shrink-0 transition"
+                        class="w-8 h-8 rounded-xl bg-white/80 dark:bg-slate-700/80 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white dark:hover:bg-slate-700 flex items-center justify-center shrink-0 transition"
                         title={$_("common.close")}
                     >
                         <i class="ph ph-x"></i>
@@ -701,24 +802,85 @@
         {/if}
 
         <div
-            class="px-3 md:px-4 py-2 md:py-3 bg-white border-b border-slate-100 overflow-x-auto shrink-0"
+            class="px-3 md:px-4 py-2 md:py-3 bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 overflow-x-auto shrink-0"
         >
             <div class="flex gap-1.5 md:gap-2 min-w-max">
                 {#each chatStyles as style}
                     <button
                         on:click={() => (chatStyle = style.id)}
-                        class="px-2 md:px-3 py-1 md:py-1.5 rounded-full text-[16px] md:text-xs font-bold flex items-center gap-1 md:gap-1.5 transition-all whitespace-nowrap"
-                        class:bg-indigo-100={chatStyle === style.id}
-                        class:text-indigo-700={chatStyle === style.id}
-                        class:border-indigo-200={chatStyle === style.id}
-                        class:bg-slate-50={chatStyle !== style.id}
-                        class:text-slate-600={chatStyle !== style.id}
-                        class:hover:bg-slate-100={chatStyle !== style.id}
+                        class="px-2 md:px-3 py-1 md:py-1.5 rounded-full text-[16px] md:text-xs font-bold flex items-center gap-1 md:gap-1.5 transition-all whitespace-nowrap {chatStyle === style.id
+                            ? 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-700'
+                            : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600'}"
                     >
                         <i class="ph {style.icon}"></i>
                         {style.name}
                     </button>
                 {/each}
+            </div>
+        </div>
+
+        <div class="px-3 md:px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 shrink-0">
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                    {$_("ai_chat.capability_title")}
+                </div>
+                <div
+                    class={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border ${
+                        $aiChatCapabilities.toolRouterEnabled
+                            ? "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800"
+                            : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                    }`}
+                >
+                    <i class={`ph ${$aiChatCapabilities.toolRouterEnabled ? "ph-plugs-connected" : "ph-chat-circle-dots"}`}></i>
+                    {$aiChatCapabilities.toolRouterEnabled
+                        ? $_("ai_chat.capability_mode_internal")
+                        : $_("ai_chat.capability_mode_chat_only")}
+                </div>
+                {#each capabilityBadges as badge}
+                    <div
+                        class={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border ${
+                            badge.active
+                                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                                : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600"
+                        }`}
+                    >
+                        <i class={`ph ${badge.icon}`}></i>
+                        {badge.label}
+                        {#if badge.runtime === true}
+                            <i class="ph-fill ph-check-circle text-emerald-500 text-[10px]"></i>
+                        {:else if badge.runtime === false}
+                            <i class="ph-fill ph-x-circle text-red-400 text-[10px]"></i>
+                        {/if}
+                    </div>
+                {/each}
+                {#if $aiChatCapabilities.localFilesAvailable && $aiChatCapabilities.localFilesRequireConfirmation}
+                    <div class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800">
+                        <i class="ph ph-shield-check"></i>
+                        {$_("ai_chat.capability_confirm_required")}
+                    </div>
+                {/if}
+                <button
+                    on:click={handleProbeCapabilities}
+                    disabled={isProbing}
+                    class={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border transition-all ${
+                        isProbing
+                            ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-400 dark:text-indigo-500 border-indigo-200 dark:border-indigo-800 cursor-wait"
+                            : $aiChatCapabilities.probed
+                                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-950/60"
+                                : "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-950/60"
+                    }`}
+                >
+                    {#if isProbing}
+                        <i class="ph ph-circle-notch animate-spin"></i>
+                        {$_("ai_chat.detecting") || "..."}
+                    {:else if $aiChatCapabilities.probed}
+                        <i class="ph ph-arrow-clockwise"></i>
+                        {$_("ai_chat.redetect") || "Re-detect"}
+                    {:else}
+                        <i class="ph ph-magnifying-glass"></i>
+                        {$_("ai_chat.detect_capabilities") || "Detect"}
+                    {/if}
+                </button>
             </div>
         </div>
 
@@ -731,16 +893,16 @@
                     class="flex flex-col items-center justify-center h-full text-center py-8 md:py-12"
                 >
                     <div
-                        class="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center mb-3 md:mb-4"
+                        class="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/50 dark:to-purple-900/50 rounded-2xl flex items-center justify-center mb-3 md:mb-4"
                     >
                         <i
-                            class="ph-fill ph-sparkle text-3xl md:text-4xl text-indigo-500"
+                            class="ph-fill ph-sparkle text-3xl md:text-4xl text-indigo-500 dark:text-indigo-400"
                         ></i>
                     </div>
-                    <h3 class="text-base md:text-lg font-bold text-slate-700 mb-2">
+                    <h3 class="text-base md:text-lg font-bold text-slate-700 dark:text-slate-200 mb-2">
                         {$_("ai_chat.start")}
                     </h3>
-                    <p class="text-xs md:text-sm text-slate-500 max-w-xs px-4">
+                    <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 max-w-xs px-4">
                         {$_("ai_chat.empty_hint")}
                     </p>
                     <div class="mt-4 md:mt-6 grid grid-cols-2 gap-2 max-w-xs px-4">
@@ -749,7 +911,7 @@
                                 inputText = "Hello, introduce yourself";
                                 handleSend();
                             }}
-                            class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
+                            class="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs text-slate-600 dark:text-slate-300 transition"
                         >
                             👋 {$_("ai_chat.quick_intro")}
                         </button>
@@ -758,7 +920,7 @@
                                 inputText = "How's the weather today?";
                                 handleSend();
                             }}
-                            class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
+                            class="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs text-slate-600 dark:text-slate-300 transition"
                         >
                             🌤️ {$_("ai_chat.quick_weather")}
                         </button>
@@ -767,7 +929,7 @@
                                 inputText = "Tell me a joke";
                                 handleSend();
                             }}
-                            class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
+                            class="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs text-slate-600 dark:text-slate-300 transition"
                         >
                             😄 {$_("ai_chat.quick_joke")}
                         </button>
@@ -776,7 +938,7 @@
                                 inputText = "Write me a poem";
                                 handleSend();
                             }}
-                            class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 transition"
+                            class="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs text-slate-600 dark:text-slate-300 transition"
                         >
                             ✨ {$_("ai_chat.quick_poem")}
                         </button>
@@ -810,9 +972,34 @@
                                         {msg.content}
                                     </div>
                                 </div>
+                                <div
+                                    class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end"
+                                >
+                                    <button
+                                        on:click={() => copyMessage(msg.content)}
+                                        class="p-1.5 text-blue-300 hover:text-white hover:bg-blue-500/30 rounded transition"
+                                        title={$_("common.copy")}
+                                    >
+                                        <i class="ph ph-copy text-sm"></i>
+                                    </button>
+                                    <button
+                                        on:click={() => handleEditResend(index, msg.content)}
+                                        class="p-1.5 text-blue-300 hover:text-white hover:bg-blue-500/30 rounded transition"
+                                        title={$_("ai_chat.edit_resend")}
+                                    >
+                                        <i class="ph ph-pencil-simple text-sm"></i>
+                                    </button>
+                                    <button
+                                        on:click={() => handleRollback(index)}
+                                        class="p-1.5 text-blue-300 hover:text-white hover:bg-blue-500/30 rounded transition"
+                                        title={$_("ai_chat.rollback")}
+                                    >
+                                        <i class="ph ph-arrow-u-up-left text-sm"></i>
+                                    </button>
+                                </div>
                             {:else if msg.type === "text"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white border border-slate-200 text-slate-700 rounded-tl-none markdown-message"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none markdown-message"
                                 >
                                     <MarkdownRenderer content={msg.content} />
                                 </div>
@@ -821,15 +1008,22 @@
                                 >
                                     <button
                                         on:click={() => copyMessage(msg.content)}
-                                        class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition"
+                                        class="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition"
                                         title={$_("ai.copy")}
                                     >
                                         <i class="ph ph-copy text-sm"></i>
                                     </button>
+                                    <button
+                                        on:click={() => handleRetryAssistant(index)}
+                                        class="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition"
+                                        title={$_("ai_chat.retry_text")}
+                                    >
+                                        <i class="ph ph-arrow-clockwise text-sm"></i>
+                                    </button>
                                 </div>
                             {:else if msg.type === "streaming"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white border border-slate-200 text-slate-700 rounded-tl-none relative overflow-hidden markdown-message"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none relative overflow-hidden markdown-message"
                                 >
                                     <MarkdownRenderer content={msg.content || ""} />
                                     {#if msg.isStreaming}
@@ -851,7 +1045,7 @@
                                 </div>
                             {:else if msg.type === "loading"}
                                 <div
-                                    class="p-3 md:p-4 rounded-2xl text-sm shadow-sm bg-white border border-slate-200 text-slate-700 rounded-tl-none"
+                                    class="p-3 md:p-4 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
                                     <div class="flex items-center gap-3">
                                         <div class="flex gap-1.5">
@@ -868,28 +1062,49 @@
                                                 style="animation-delay: 300ms"
                                             ></div>
                                         </div>
-                                        <span class="text-xs text-slate-400">
+                                        <span class="text-xs text-slate-400 dark:text-slate-500">
                                             {$_("ai.loading")}
                                         </span>
                                     </div>
                                 </div>
+                            {:else if msg.type === "tool_progress"}
+                                <div
+                                    class="p-3 md:p-4 rounded-2xl text-sm shadow-sm bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
+                                >
+                                    {#if msg.steps?.length}
+                                        <div class="space-y-1.5 mb-2">
+                                            {#each msg.steps as step}
+                                                <div class="text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+                                                    <i class="ph-fill ph-check-circle text-emerald-500 dark:text-emerald-400 text-xs"></i>
+                                                    <span>{$_(`ai_chat.tool_step_${step}`)}</span>
+                                                </div>
+                                            {/each}
+                                        </div>
+                                    {/if}
+                                    {#if msg.currentStep}
+                                        <div class="flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                                            <i class="ph ph-circle-notch animate-spin text-sm"></i>
+                                            <span>{$_(`ai_chat.tool_step_${msg.currentStep}`)}</span>
+                                        </div>
+                                    {/if}
+                                </div>
                             {:else if msg.type === "file_confirm"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-fuchsia-50 border border-fuchsia-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-fuchsia-50 dark:bg-fuchsia-950/30 border border-fuchsia-200 dark:border-fuchsia-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-fuchsia-600 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-fuchsia-600 dark:text-fuchsia-400 flex items-center gap-2">
                                         <i class="ph ph-folder-open"></i>
                                         {msg.message}
                                     </div>
-                                    <div class="mt-3 text-xs font-mono break-all text-slate-600">
+                                    <div class="mt-3 text-xs font-mono break-all text-slate-600 dark:text-slate-300">
                                         {msg.operation.path}
                                     </div>
                                     {#if msg.operation.content}
-                                        <pre class="mt-3 rounded-xl bg-white border border-fuchsia-100 p-3 overflow-x-auto text-[11px] leading-6 text-slate-600"><code>{msg.operation.content.slice(0, 400)}{msg.operation.content.length > 400 ? '\n...' : ''}</code></pre>
+                                        <pre class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-fuchsia-100 dark:border-fuchsia-900/50 p-3 overflow-x-auto text-[11px] leading-6 text-slate-600 dark:text-slate-300"><code>{msg.operation.content.slice(0, 400)}{msg.operation.content.length > 400 ? '\n...' : ''}</code></pre>
                                     {/if}
                                     <div class="mt-3 flex gap-2">
                                         <button
-                                            on:click={() => confirmAiChatLocalFileOperation(index, msg.operation)}
+                                            on:click={() => handleConfirmFileOperation(index, msg.operation)}
                                             class="px-3 py-1.5 bg-fuchsia-600 text-white rounded-lg text-xs font-bold hover:bg-fuchsia-700 flex items-center gap-1 transition"
                                         >
                                             <i class="ph ph-check"></i>
@@ -899,20 +1114,20 @@
                                 </div>
                             {:else if msg.type === "task_card"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-emerald-50 border border-emerald-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-emerald-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
                                         <i class="ph ph-check-square-offset"></i>
-                                        {msg.entityLabel || "任务"}待确认
+                                        {msg.entityLabel || $_("ai_chat.task_entity")}{$_("ai_chat.pending_confirm")}
                                     </div>
-                                    <div class="mt-3 rounded-xl bg-white border border-emerald-100 p-3">
-                                        <div class="font-bold text-slate-800">{msg.data.title}</div>
+                                    <div class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-emerald-100 dark:border-emerald-900/50 p-3">
+                                        <div class="font-bold text-slate-800 dark:text-slate-100">{msg.data.title}</div>
                                         {#if msg.data.repeatDays && msg.data.repeatDays.length > 0}
-                                            <div class="mt-2 text-xs text-slate-500">
+                                            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                                 {formatRepeatDays(msg.data.repeatDays).join("、")}
                                             </div>
                                         {:else if msg.data.date}
-                                            <div class="mt-2 text-xs text-slate-500">
+                                            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                                 {getRelativeDate(msg.data.date)} {formatTimeOnly(msg.data.date)}
                                             </div>
                                         {/if}
@@ -936,7 +1151,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -944,22 +1159,22 @@
                                 </div>
                             {:else if msg.type === "multi_task_card"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-emerald-50 border border-emerald-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-emerald-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
                                         <i class="ph ph-list-checks"></i>
-                                        {msg.tasks.length} 个{msg.entityLabel || "任务"}待添加
+                                        {msg.tasks.length} {msg.entityLabel || $_("ai_chat.task_entity")}{$_("ai_chat.pending_add")}
                                     </div>
                                     <div class="mt-3 space-y-2 max-h-72 overflow-y-auto">
                                         {#each msg.tasks as task}
-                                            <div class="rounded-xl bg-white border border-emerald-100 p-3">
-                                                <div class="font-bold text-slate-800">{task.title}</div>
+                                            <div class="rounded-xl bg-white dark:bg-slate-800 border border-emerald-100 dark:border-emerald-900/50 p-3">
+                                                <div class="font-bold text-slate-800 dark:text-slate-100">{task.title}</div>
                                                 {#if task.repeatDays && task.repeatDays.length > 0}
-                                                    <div class="mt-1 text-xs text-slate-500">
+                                                    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                                         {formatRepeatDays(task.repeatDays).join("、")}
                                                     </div>
                                                 {:else if task.date}
-                                                    <div class="mt-1 text-xs text-slate-500">
+                                                    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                                         {getRelativeDate(task.date)} {formatTimeOnly(task.date)}
                                                     </div>
                                                 {/if}
@@ -975,7 +1190,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -983,17 +1198,17 @@
                                 </div>
                             {:else if msg.type === "delete_confirm"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-red-50 border border-red-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-red-600 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
                                         <i class="ph ph-trash"></i>
                                         {msg.message}
                                     </div>
                                     <div class="mt-3 space-y-2 max-h-72 overflow-y-auto">
                                         {#each msg.tasks as task}
-                                            <div class="rounded-xl bg-white border border-red-100 p-3">
-                                                <div class="font-bold text-slate-800">{task.title}</div>
-                                                <div class="mt-1 text-xs text-slate-500">
+                                            <div class="rounded-xl bg-white dark:bg-slate-800 border border-red-100 dark:border-red-900/50 p-3">
+                                                <div class="font-bold text-slate-800 dark:text-slate-100">{task.title}</div>
+                                                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                                     {getRelativeDate(task.date)} {formatTimeOnly(task.date)}
                                                 </div>
                                             </div>
@@ -1008,7 +1223,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -1016,15 +1231,15 @@
                                 </div>
                             {:else if msg.type === "update_confirm"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-amber-50 border border-amber-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-amber-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-amber-700 dark:text-amber-400 flex items-center gap-2">
                                         <i class="ph ph-pencil-simple"></i>
                                         {msg.message || $_("ai_panel.confirm_modify")}
                                     </div>
-                                    <div class="mt-3 rounded-xl bg-white border border-amber-100 p-3">
-                                        <div class="font-bold text-slate-800">{msg.task.title}</div>
-                                        <div class="mt-2 text-xs text-slate-500 space-y-1">
+                                    <div class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-amber-100 dark:border-amber-900/50 p-3">
+                                        <div class="font-bold text-slate-800 dark:text-slate-100">{msg.task.title}</div>
+                                        <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 space-y-1">
                                             {#each buildUpdateDescriptions(msg.updates) as line}
                                                 <div>{line}</div>
                                             {/each}
@@ -1039,7 +1254,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -1047,17 +1262,17 @@
                                 </div>
                             {:else if msg.type === "multi_update_confirm"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-amber-50 border border-amber-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-amber-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-amber-700 dark:text-amber-400 flex items-center gap-2">
                                         <i class="ph ph-checks"></i>
                                         {msg.message}
                                     </div>
                                     <div class="mt-3 space-y-2 max-h-72 overflow-y-auto">
                                         {#each msg.operations as operation}
-                                            <div class="rounded-xl bg-white border border-amber-100 p-3">
-                                                <div class="font-bold text-slate-800">{operation.task.title}</div>
-                                                <div class="mt-2 text-xs text-slate-500 space-y-1">
+                                            <div class="rounded-xl bg-white dark:bg-slate-800 border border-amber-100 dark:border-amber-900/50 p-3">
+                                                <div class="font-bold text-slate-800 dark:text-slate-100">{operation.task.title}</div>
+                                                <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 space-y-1">
                                                     {#each buildUpdateDescriptions(operation.updates) as line}
                                                         <div>{line}</div>
                                                     {/each}
@@ -1074,7 +1289,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -1082,17 +1297,17 @@
                                 </div>
                             {:else if msg.type === "batch_complete_confirm"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-green-50 border border-green-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-green-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-green-700 dark:text-green-400 flex items-center gap-2">
                                         <i class="ph ph-check-circle"></i>
                                         {msg.message}
                                     </div>
                                     <div class="mt-3 space-y-2 max-h-72 overflow-y-auto">
                                         {#each msg.operations as operation}
-                                            <div class="rounded-xl bg-white border border-green-100 p-3">
-                                                <div class="font-bold text-slate-800">{operation.task.title}</div>
-                                                <div class="mt-1 text-xs text-slate-500">
+                                            <div class="rounded-xl bg-white dark:bg-slate-800 border border-green-100 dark:border-green-900/50 p-3">
+                                                <div class="font-bold text-slate-800 dark:text-slate-100">{operation.task.title}</div>
+                                                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                                     {getRelativeDate(operation.task.date)} {formatTimeOnly(operation.task.date)}
                                                 </div>
                                             </div>
@@ -1107,7 +1322,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -1115,21 +1330,21 @@
                                 </div>
                             {:else if msg.type === "mixed_confirm"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-purple-50 border border-purple-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-purple-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-purple-700 dark:text-purple-400 flex items-center gap-2">
                                         <i class="ph ph-lightning"></i>
                                         {msg.message}
                                     </div>
                                     <div class="mt-3 space-y-3">
                                         {#if msg.updateOps?.length}
                                             <div>
-                                                <div class="text-xs font-bold text-amber-600 mb-2">{$_("ai_panel.modify_section")} ({msg.updateOps.length})</div>
+                                                <div class="text-xs font-bold text-amber-600 dark:text-amber-400 mb-2">{$_("ai_panel.modify_section")} ({msg.updateOps.length})</div>
                                                 <div class="space-y-2">
                                                     {#each msg.updateOps as operation}
-                                                        <div class="rounded-xl bg-white border border-amber-100 p-3">
-                                                            <div class="font-bold text-slate-800">{operation.task.title}</div>
-                                                            <div class="mt-2 text-xs text-slate-500 space-y-1">
+                                                        <div class="rounded-xl bg-white dark:bg-slate-800 border border-amber-100 dark:border-amber-900/50 p-3">
+                                                            <div class="font-bold text-slate-800 dark:text-slate-100">{operation.task.title}</div>
+                                                            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 space-y-1">
                                                                 {#each buildUpdateDescriptions(operation.updates) as line}
                                                                     <div>{line}</div>
                                                                 {/each}
@@ -1141,11 +1356,11 @@
                                         {/if}
                                         {#if msg.deleteOps?.length}
                                             <div>
-                                                <div class="text-xs font-bold text-red-600 mb-2">{$_("ai_panel.delete_section")} ({msg.deleteOps.length})</div>
+                                                <div class="text-xs font-bold text-red-600 dark:text-red-400 mb-2">{$_("ai_panel.delete_section")} ({msg.deleteOps.length})</div>
                                                 <div class="space-y-2">
                                                     {#each msg.deleteOps as task}
-                                                        <div class="rounded-xl bg-white border border-red-100 p-3">
-                                                            <div class="font-bold text-slate-800">{task.title}</div>
+                                                        <div class="rounded-xl bg-white dark:bg-slate-800 border border-red-100 dark:border-red-900/50 p-3">
+                                                            <div class="font-bold text-slate-800 dark:text-slate-100">{task.title}</div>
                                                         </div>
                                                     {/each}
                                                 </div>
@@ -1161,7 +1376,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -1169,22 +1384,22 @@
                                 </div>
                             {:else if msg.type === "query_result"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-sky-50 border border-sky-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-sky-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-sky-700 dark:text-sky-400 flex items-center gap-2">
                                         <i class="ph ph-magnifying-glass"></i>
                                         {msg.summary}
                                     </div>
                                     {#if msg.filterDescription}
-                                        <div class="mt-2 text-xs text-slate-500">{msg.filterDescription}</div>
+                                        <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">{msg.filterDescription}</div>
                                     {/if}
                                     <div class="mt-3 space-y-2 max-h-72 overflow-y-auto">
                                         {#each msg.tasks as task}
-                                            <div class="rounded-xl bg-white border border-sky-100 p-3">
+                                            <div class="rounded-xl bg-white dark:bg-slate-800 border border-sky-100 dark:border-sky-900/50 p-3">
                                                 <div class="flex items-start justify-between gap-2">
                                                     <div class="min-w-0 flex-1">
-                                                        <div class="font-bold text-slate-800 truncate">{task.title}</div>
-                                                        <div class="mt-1 text-xs text-slate-500 flex flex-wrap items-center gap-2">
+                                                        <div class="font-bold text-slate-800 dark:text-slate-100 truncate">{task.title}</div>
+                                                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-2">
                                                             {#if task.repeatDays && task.repeatDays.length > 0}
                                                                 <span>{formatRepeatDays(task.repeatDays).join("、")}</span>
                                                             {:else if task.date}
@@ -1205,39 +1420,39 @@
                                 </div>
                             {:else if msg.type === "web_search_result"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-cyan-50 border border-cyan-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-cyan-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-cyan-700 dark:text-cyan-400 flex items-center gap-2">
                                         <i class="ph ph-globe-hemisphere-west"></i>
-                                        {msg.message || "网页搜索结果"}
+                                        {msg.message || $_("ai_chat.web_search_result")}
                                     </div>
                                     {#if msg.query}
-                                        <div class="mt-2 text-xs text-cyan-700/80">
-                                            搜索词：{msg.query}
+                                        <div class="mt-2 text-xs text-cyan-700/80 dark:text-cyan-400/80">
+                                            {$_("ai_chat.search_query_label", { values: { query: msg.query } })}
                                         </div>
                                     {/if}
                                     {#if msg.summary}
-                                        <div class="mt-3 rounded-xl bg-white border border-cyan-100 p-3">
+                                        <div class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-cyan-100 dark:border-cyan-900/50 p-3">
                                             <MarkdownRenderer content={msg.summary} />
                                         </div>
                                     {/if}
                                     <div class="mt-3 space-y-2 max-h-80 overflow-y-auto">
                                         {#if msg.entries?.length}
                                             {#each msg.entries as entry, entryIndex}
-                                                <div class="rounded-xl bg-white border border-cyan-100 p-3">
+                                                <div class="rounded-xl bg-white dark:bg-slate-800 border border-cyan-100 dark:border-cyan-900/50 p-3">
                                                     <div class="flex items-start justify-between gap-3">
                                                         <div class="min-w-0 flex-1">
                                                             <div class="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-500">
                                                                 {entry.source || "Web"} #{entryIndex + 1}
                                                             </div>
-                                                            <div class="mt-1 font-bold text-slate-800 break-words">
+                                                            <div class="mt-1 font-bold text-slate-800 dark:text-slate-100 break-words">
                                                                 {entry.title}
                                                             </div>
-                                                            <div class="mt-1 text-xs text-slate-500 break-all">
+                                                            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400 break-all">
                                                                 {entry.url}
                                                             </div>
                                                             {#if entry.snippet}
-                                                                <div class="mt-2 text-xs text-slate-600 leading-5">
+                                                                <div class="mt-2 text-xs text-slate-600 dark:text-slate-300 leading-5">
                                                                     {entry.snippet}
                                                                 </div>
                                                             {/if}
@@ -1246,31 +1461,31 @@
                                                             on:click={() => openExternalUrl(entry.url)}
                                                             class="shrink-0 px-3 py-1.5 rounded-lg bg-cyan-600 text-white text-xs font-bold hover:bg-cyan-700 transition"
                                                         >
-                                                            打开
+                                                            {$_("ai_chat.open_link")}
                                                         </button>
                                                     </div>
                                                 </div>
                                             {/each}
                                         {:else}
-                                            <div class="rounded-xl bg-white border border-cyan-100 p-3 text-xs text-slate-500">
-                                                未找到可用结果。
+                                            <div class="rounded-xl bg-white dark:bg-slate-800 border border-cyan-100 dark:border-cyan-900/50 p-3 text-xs text-slate-500 dark:text-slate-400">
+                                                {$_("ai_chat.no_results")}
                                             </div>
                                         {/if}
                                     </div>
                                 </div>
                             {:else if msg.type === "subtask_confirm"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-purple-50 border border-purple-200 text-slate-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 text-slate-700 dark:text-slate-200 rounded-tl-none"
                                 >
-                                    <div class="text-xs font-bold text-purple-700 flex items-center gap-2">
+                                    <div class="text-xs font-bold text-purple-700 dark:text-purple-400 flex items-center gap-2">
                                         <i class="ph ph-list-checks"></i>
                                         {msg.message}
                                     </div>
-                                    <div class="mt-3 rounded-xl bg-white border border-purple-100 p-3">
-                                        <div class="font-bold text-slate-800">{msg.task.title}</div>
-                                        <div class="mt-2 space-y-2 text-xs text-slate-600">
+                                    <div class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900/50 p-3">
+                                        <div class="font-bold text-slate-800 dark:text-slate-100">{msg.task.title}</div>
+                                        <div class="mt-2 space-y-2 text-xs text-slate-600 dark:text-slate-300">
                                             {#each msg.subtaskChanges as change}
-                                                <div class="rounded-lg border border-purple-100 px-3 py-2">
+                                                <div class="rounded-lg border border-purple-100 dark:border-purple-900/50 dark:bg-slate-800/50 px-3 py-2">
                                                     {#if change.action === "add"}
                                                         <span class="text-green-600 font-bold">{$_("ai_panel.add_action")}:</span> {change.new_title}
                                                     {:else if change.action === "delete"}
@@ -1293,7 +1508,7 @@
                                         </button>
                                         <button
                                             on:click={() => removeChatMessage(index)}
-                                            class="px-3 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                                            class="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
                                         >
                                             {$_("common.cancel")}
                                         </button>
@@ -1301,7 +1516,7 @@
                                 </div>
                             {:else if msg.type === "error"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-red-50 border border-red-200 text-red-700 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-tl-none"
                                 >
                                     <div class="flex flex-col gap-2">
                                         <div class="flex items-center gap-2">
@@ -1325,10 +1540,10 @@
         </div>
 
         <div
-            class="p-3 md:p-4 pb-5 md:pb-4 bg-white border-t border-slate-200 shrink-0 safe-bottom"
+            class="p-3 md:p-4 pb-5 md:pb-4 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shrink-0 safe-bottom"
         >
             <div
-                class="flex gap-2 items-end bg-slate-50 p-2 rounded-2xl border border-slate-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-50 transition-all"
+                class="flex gap-2 items-end bg-slate-50 dark:bg-slate-700 p-2 rounded-2xl border border-slate-200 dark:border-slate-600 focus-within:border-indigo-400 dark:focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-50 dark:focus-within:ring-indigo-900/30 transition-all"
             >
                 <textarea
                     bind:this={composerTextarea}
@@ -1341,17 +1556,22 @@
                     rows="1"
                     placeholder={$_("ai_chat.ph")}
                     disabled={$isAiLoading}
-                    class="flex-1 min-h-[44px] bg-transparent border-none focus:ring-0 text-sm resize-none py-2 text-slate-700 outline-none disabled:opacity-50"
+                    class="flex-1 min-h-[44px] bg-transparent border-none focus:ring-0 text-sm resize-none py-2 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none disabled:opacity-50"
                 ></textarea>
                 <button
                     on:click={handleSend}
                     class="p-2 md:p-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200"
                     disabled={!inputText.trim() || $isAiLoading}
+                    aria-label={$_("common.send")}
                 >
-                    <i class="ph-bold ph-paper-plane-right text-base md:text-lg"></i>
+                    {#if $isAiLoading}
+                        <i class="ph ph-circle-notch animate-spin text-base md:text-lg"></i>
+                    {:else}
+                        <i class="ph-bold ph-paper-plane-right text-base md:text-lg"></i>
+                    {/if}
                 </button>
             </div>
-            <div class="mt-2 text-center text-[10px] text-slate-400">
+            <div class="mt-2 text-center text-[10px] text-slate-400 dark:text-slate-500">
                 {$_("ai_chat.style_hint", {
                     values: {
                         style:
@@ -1383,5 +1603,26 @@
         aside:not(.fixed) {
             display: none;
         }
+    }
+
+    /* Message entry animation */
+    @keyframes msg-slide-in {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    :global([data-ai-shell] .flex.gap-2),
+    :global([data-ai-shell] .flex.gap-3) {
+        animation: msg-slide-in 0.25s ease-out;
+    }
+
+    /* Session item hover */
+    :global([data-ai-shell] aside .group) {
+        transition: all 0.15s ease;
+    }
+    :global([data-ai-shell] aside .group:hover) {
+        transform: translateX(2px);
+    }
+    :global([data-ai-shell] aside .group:active) {
+        transform: scale(0.98);
     }
 </style>

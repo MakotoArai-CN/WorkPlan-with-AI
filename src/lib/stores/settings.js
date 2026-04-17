@@ -4,6 +4,9 @@ import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
 import { getDefaultLocalFileConfig, getWorkspaceRoot } from '../utils/local-file-tools.js';
 
 const DARK_THEMES = new Set(['dark', 'graphite']);
+const NOTIFICATION_CHANNEL_ID = 'workplan-important';
+let themeTransitionTimer = null;
+let notificationChannelPromise = null;
 
 function getInitialSettings() {
     if (typeof window === 'undefined') {
@@ -14,11 +17,12 @@ function getInitialSettings() {
             notificationAvailable: false,
             enableAiSummary: true,
             enableCharts: true,
+            enableAiChatTools: true,
             closeToQuit: false,
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.3.0',
+            appVersion: '0.3.1',
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
             theme: 'auto',
@@ -39,11 +43,12 @@ function getInitialSettings() {
                 notificationAvailable: false,
                 enableAiSummary: parsed.enableAiSummary ?? true,
                 enableCharts: parsed.enableCharts ?? true,
+                enableAiChatTools: parsed.enableAiChatTools ?? true,
                 closeToQuit: parsed.closeToQuit ?? false,
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.3.0',
+                appVersion: '0.3.1',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
                 theme: parsed.theme || 'auto',
@@ -73,11 +78,12 @@ function getDefaultSettings() {
         notificationAvailable: false,
         enableAiSummary: true,
         enableCharts: true,
+        enableAiChatTools: true,
         closeToQuit: false,
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.3.0',
+        appVersion: '0.3.1',
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         theme: 'auto',
@@ -97,6 +103,7 @@ function createSettingsStore() {
             enableNotification: state.enableNotification,
             enableAiSummary: state.enableAiSummary,
             enableCharts: state.enableCharts,
+            enableAiChatTools: state.enableAiChatTools,
             closeToQuit: state.closeToQuit,
             agreementAccepted: state.agreementAccepted,
             autoSaveApiKey: state.autoSaveApiKey,
@@ -109,12 +116,26 @@ function createSettingsStore() {
         }));
     }
 
-    function applyTheme(theme) {
+    function applyTheme(theme, options = {}) {
         if (typeof window === 'undefined') return;
+        const shouldAnimate = options.animate ?? false;
         const resolvedTheme = theme === 'auto'
             ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
             : theme;
         const isDark = DARK_THEMES.has(resolvedTheme);
+
+        if (shouldAnimate) {
+            document.documentElement.classList.add('theme-switching');
+            document.body.classList.add('theme-switching');
+            if (themeTransitionTimer) {
+                clearTimeout(themeTransitionTimer);
+            }
+            themeTransitionTimer = setTimeout(() => {
+                document.documentElement.classList.remove('theme-switching');
+                document.body.classList.remove('theme-switching');
+            }, 320);
+        }
+
         document.documentElement.classList.toggle('dark', isDark);
         document.body.classList.toggle('dark', isDark);
         document.documentElement.dataset.theme = resolvedTheme;
@@ -135,6 +156,48 @@ function createSettingsStore() {
         }
     }
 
+    async function ensureNotificationChannel() {
+        if (typeof window === 'undefined') return null;
+
+        const isAndroid = /Android/i.test(window.navigator?.userAgent || '');
+        if (!isAndroid) {
+            return null;
+        }
+
+        if (notificationChannelPromise) {
+            return notificationChannelPromise;
+        }
+
+        notificationChannelPromise = (async () => {
+            try {
+                const {
+                    channels,
+                    createChannel,
+                    Importance,
+                    Visibility
+                } = await import('@tauri-apps/plugin-notification');
+                const existingChannels = await channels();
+                if (!existingChannels.some((channel) => channel.id === NOTIFICATION_CHANNEL_ID)) {
+                    await createChannel({
+                        id: NOTIFICATION_CHANNEL_ID,
+                        name: 'WorkPlan 重要通知',
+                        description: '任务提醒与重要系统通知',
+                        importance: Importance.High,
+                        visibility: Visibility.Public,
+                        lights: true,
+                        vibration: true
+                    });
+                }
+                return NOTIFICATION_CHANNEL_ID;
+            } catch (error) {
+                console.warn('Failed to ensure Android notification channel:', error);
+                return null;
+            }
+        })();
+
+        return notificationChannelPromise;
+    }
+
     async function syncCloseToQuit(value) {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -148,12 +211,12 @@ function createSettingsStore() {
         if (typeof window === 'undefined') return;
 
         const current = get({ subscribe });
-        applyTheme(current.theme);
+        applyTheme(current.theme, { animate: false });
 
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
             const state = get({ subscribe });
             if (state.theme === 'auto') {
-                applyTheme('auto');
+                applyTheme('auto', { animate: true });
             }
         });
 
@@ -162,7 +225,7 @@ function createSettingsStore() {
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.3.0' }));
+            update(s => ({ ...s, appVersion: '0.3.1' }));
         }
 
         const workspaceRoot = await getWorkspaceRoot();
@@ -178,6 +241,9 @@ function createSettingsStore() {
                 granted = permission === 'granted';
             }
             update(s => ({ ...s, notificationAvailable: granted }));
+            if (granted) {
+                await ensureNotificationChannel();
+            }
         } catch {
             update(s => ({ ...s, notificationAvailable: false }));
         }
@@ -213,6 +279,11 @@ function createSettingsStore() {
             save(newState);
             return newState;
         }),
+        toggleAiChatTools: () => update(s => {
+            const newState = { ...s, enableAiChatTools: !s.enableAiChatTools };
+            save(newState);
+            return newState;
+        }),
         toggleAutoSaveApiKey: () => update(s => {
             const newState = { ...s, autoSaveApiKey: !s.autoSaveApiKey };
             save(newState);
@@ -242,7 +313,7 @@ function createSettingsStore() {
             }
         },
         setTheme: (theme) => update(s => {
-            applyTheme(theme);
+            applyTheme(theme, { animate: true });
             const newState = { ...s, theme };
             save(newState);
             return newState;
@@ -315,9 +386,11 @@ function createSettingsStore() {
             }
             try {
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
+                const channelId = await ensureNotificationChannel();
                 await sendNotification({
                     title: t('settings.notification_test_title') || 'WorkPlan',
-                    body: t('settings.notification_test_body') || 'OK'
+                    body: t('settings.notification_test_body') || 'OK',
+                    channelId: channelId || undefined
                 });
             } catch (e) {
                 throw new Error((t('settings.notification_failed') || 'Error: ').replace('{error}', e.message));
@@ -329,11 +402,13 @@ function createSettingsStore() {
             try {
                 const t = get(i18n);
                 const { sendNotification } = await import('@tauri-apps/plugin-notification');
+                const channelId = await ensureNotificationChannel();
                 const titles = tasks.slice(0, 5).map(t2 => t2.title).join('、');
                 const extra = tasks.length > 5 ? ` +${tasks.length}` : '';
                 await sendNotification({
                     title: `${t('settings.today_tasks') || 'Today'} (${tasks.length})`,
-                    body: titles + extra
+                    body: titles + extra,
+                    channelId: channelId || undefined
                 });
             } catch (e) {
                 console.error('Failed to show notification:', e);

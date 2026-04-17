@@ -56,16 +56,25 @@ export function canGoBack() {
 }
 
 export function handleBackPress(closeToQuit, callbacks = {}) {
-    const { onSecondaryBack, onPrimaryBack, onExit, onMinimize } = callbacks;
+    const { onSecondaryBack, onPrimaryBack, onExit, onMinimize, forceDoubleBackExit = false } = callbacks;
     const depth = getNavigationDepth();
+
+    if (onPrimaryBack && onPrimaryBack()) {
+        return 'primary';
+    }
 
     if (depth > 1) {
         const popped = popNavigation();
-        if (onSecondaryBack) onSecondaryBack(popped);
+        if (onSecondaryBack) {
+            onSecondaryBack({
+                popped,
+                next: peekNavigation()
+            });
+        }
         return 'secondary';
     }
 
-    if (closeToQuit) {
+    if (closeToQuit || forceDoubleBackExit) {
         const now = Date.now();
         const last = get(lastBackPress);
 
@@ -97,14 +106,27 @@ export async function setupAndroidBackHandler(closeToQuit, callbacks) {
     }
 
     const handler = () => {
-        handleBackPress(closeToQuit, callbacks);
+        handleBackPress(closeToQuit, {
+            ...callbacks,
+            forceDoubleBackExit: true
+        });
     };
 
-    window.addEventListener('androidbackbutton', handler);
-
-    backListenerCleanup = () => {
-        window.removeEventListener('androidbackbutton', handler);
-    };
+    try {
+        const { registerBackEvent } = await import(
+            '@kingsword/tauri-plugin-mobile-onbackpressed-listener'
+        );
+        const pluginListener = await registerBackEvent(handler);
+        backListenerCleanup = () => {
+            pluginListener.unregister();
+        };
+    } catch (e) {
+        console.warn('Tauri back-press plugin not available, falling back to DOM event:', e);
+        window.addEventListener('androidbackbutton', handler);
+        backListenerCleanup = () => {
+            window.removeEventListener('androidbackbutton', handler);
+        };
+    }
 
     return backListenerCleanup;
 }

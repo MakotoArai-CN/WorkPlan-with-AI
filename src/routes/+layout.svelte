@@ -6,11 +6,11 @@
     import '@phosphor-icons/web/fill';
     import { taskStore, activeTasks, currentView, activeTask } from '$lib/stores/tasks.js';
     import { settingsStore } from '$lib/stores/settings.js';
-    import { loadAiConfig, showAiPanel } from '$lib/stores/ai.js';
+    import { loadAiConfig, showAiPanel, showAiSettings } from '$lib/stores/ai.js';
     import { notesStore } from '$lib/stores/notes.js';
     import { passwordsStore } from '$lib/stores/passwords.js';
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
-    import { setupAndroidBackHandler, handleBackPress, showExitToast, popNavigation, getNavigationDepth, canGoBack } from '$lib/stores/navigation.js';
+    import { setupAndroidBackHandler, showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
     import { get } from 'svelte/store';
     import { setupI18n } from '$lib/i18n/index.js';
@@ -89,22 +89,43 @@
 
         const closeToQuit = get(settingsStore).closeToQuit;
         unlistenBack = await setupAndroidBackHandler(closeToQuit, {
-            onSecondaryBack: (view) => {
+            onPrimaryBack: () => {
                 const currentViewValue = get(currentView);
                 const aiPanelOpen = get(showAiPanel);
+                const aiSettingsOpen = get(showAiSettings);
                 const activeTaskValue = get(activeTask);
 
-                if (aiPanelOpen && currentViewValue !== 'aichat' && currentViewValue !== 'notes') {
+                if (aiSettingsOpen) {
+                    showAiSettings.set(false);
+                    return true;
+                }
+
+                if (currentViewValue === 'aichat') {
+                    currentView.set('dashboard');
+                    return true;
+                }
+
+                if (aiPanelOpen && currentViewValue !== 'passwords' && currentViewValue !== 'settings') {
                     showAiPanel.set(false);
-                    return;
+                    return true;
                 }
 
                 if (activeTaskValue) {
                     activeTask.set(null);
+                    return true;
+                }
+
+                return false;
+            },
+            onSecondaryBack: ({ next }) => {
+                const nextView = typeof next === 'string' ? next : '';
+                if (nextView) {
+                    currentView.set(nextView);
                     return;
                 }
 
                 const mainViews = ['dashboard', 'templates', 'scheduled', 'notes', 'more'];
+                const currentViewValue = get(currentView);
                 if (!mainViews.includes(currentViewValue)) {
                     currentView.set('more');
                 } else if (currentViewValue !== 'dashboard') {

@@ -88,6 +88,16 @@
     --app-shadow: 0 16px 36px rgba(190, 24, 93, 0.14);
 }
 
+html.theme-switching,
+html.theme-switching body,
+html.theme-switching body *,
+body.theme-switching,
+body.theme-switching * {
+    transition-property: background-color, color, border-color, box-shadow, fill, stroke, background-image;
+    transition-duration: 240ms;
+    transition-timing-function: ease;
+}
+
 body {
     background-color: var(--app-bg);
     font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;

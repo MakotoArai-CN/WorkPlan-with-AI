@@ -845,6 +845,7 @@ async function handleChangeMasterPassword() {
                 <button
                     on:click={() => (showSidebar = !showSidebar)}
                     class="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
+                    aria-label="筛选条件"
                 >
                     <i class="ph ph-funnel text-xl"></i>
                 </button>
@@ -893,6 +894,7 @@ async function handleChangeMasterPassword() {
                     <button
                         on:click={toggleExportMenu}
                         class="export-menu-button h-9 px-3 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600"
+                        aria-label="更多操作"
                     >
                         <i class="ph ph-dots-three-vertical"></i>
                     </button>
@@ -1077,6 +1079,7 @@ async function handleChangeMasterPassword() {
                                                         password.id,
                                                     )}
                                                 class="shrink-0"
+                                                aria-label="选择密码"
                                             >
                                                 <i
                                                     class="ph {selectedPasswordIds.has(
@@ -1105,6 +1108,7 @@ async function handleChangeMasterPassword() {
                                                 on:click={() =>
                                                     openEditModal(password)}
                                                 class="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                                aria-label="编辑密码"
                                             >
                                                 <i class="ph ph-pencil-simple"
                                                 ></i>
@@ -1113,6 +1117,7 @@ async function handleChangeMasterPassword() {
                                                 on:click={() =>
                                                     deletePassword(password.id)}
                                                 class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                                aria-label="删除密码"
                                             >
                                                 <i class="ph ph-trash"></i>
                                             </button>
@@ -1139,6 +1144,7 @@ async function handleChangeMasterPassword() {
                                                         password.username,
                                                     )}
                                                 class="text-slate-400 hover:text-blue-600 shrink-0 p-1"
+                                                aria-label="复制账号"
                                             >
                                                 <i class="ph ph-copy"></i>
                                             </button>
@@ -1169,6 +1175,7 @@ async function handleChangeMasterPassword() {
                                                     password.password,
                                                 )}
                                             class="text-slate-400 hover:text-blue-600 shrink-0 p-1"
+                                            aria-label={showPasswordValue[password.id] ? "隐藏密码" : "显示密码"}
                                         >
                                             <i
                                                 class="ph ph-eye{showPasswordValue[
@@ -1185,6 +1192,7 @@ async function handleChangeMasterPassword() {
                                                     password.password,
                                                 )}
                                             class="text-slate-400 hover:text-blue-600 shrink-0 p-1"
+                                            aria-label="复制密码"
                                         >
                                             <i class="ph ph-copy"></i>
                                         </button>
@@ -1359,10 +1367,12 @@ async function handleChangeMasterPassword() {
             <div class="space-y-3">
                 <div>
                     <label
+                        for="password-master-password"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.master_label')}</label
                     >
                     <input
+                        id="password-master-password"
                         type="password"
                         bind:value={masterPassword}
                         placeholder={$_('passwords.master_placeholder')}
@@ -1371,10 +1381,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-master-password-confirm"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.confirm_label')}</label
                     >
                     <input
+                        id="password-master-password-confirm"
                         type="password"
                         bind:value={confirmPassword}
                         placeholder={$_('passwords.confirm_placeholder')}
@@ -1407,10 +1419,12 @@ async function handleChangeMasterPassword() {
             <div class="space-y-3">
                 <div>
                     <label
+                        for="password-unlock-input"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_password')}</label
                     >
                     <input
+                        id="password-unlock-input"
                         type="password"
                         bind:value={unlockPassword}
                         on:keydown={(e) => e.key === "Enter" && unlockVault()}
@@ -1446,10 +1460,12 @@ async function handleChangeMasterPassword() {
             <div class="space-y-3">
                 <div>
                     <label
+                        for="password-new-title"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_title')} {$_('passwords.required_mark')}</label
                     >
                     <input
+                        id="password-new-title"
                         type="text"
                         bind:value={newPassword.title}
                         placeholder={$_('passwords.title_placeholder')}
@@ -1458,10 +1474,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-new-username"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_username')}</label
                     >
                     <input
+                        id="password-new-username"
                         type="text"
                         bind:value={newPassword.username}
                         placeholder="username@example.com"
@@ -1489,10 +1507,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-new-url"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_url')}</label
                     >
                     <input
+                        id="password-new-url"
                         type="url"
                         bind:value={newPassword.url}
                         placeholder="https://example.com"
@@ -1501,10 +1521,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-new-category"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_category')}</label
                     >
                     <select
+                        id="password-new-category"
                         bind:value={newPassword.category}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
                     >
@@ -1515,10 +1537,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-new-notes"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_notes')}</label
                     >
                     <textarea
+                        id="password-new-notes"
                         bind:value={newPassword.notes}
                         rows="3"
                         placeholder={$_('passwords.notes_placeholder')}
@@ -1555,10 +1579,12 @@ async function handleChangeMasterPassword() {
             <div class="space-y-3">
                 <div>
                     <label
+                        for="password-edit-title"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_title')} {$_('passwords.required_mark')}</label
                     >
                     <input
+                        id="password-edit-title"
                         type="text"
                         bind:value={editingPassword.title}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
@@ -1566,10 +1592,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-edit-username"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_username')}</label
                     >
                     <input
+                        id="password-edit-username"
                         type="text"
                         bind:value={editingPassword.username}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
@@ -1595,10 +1623,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-edit-url"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_url')}</label
                     >
                     <input
+                        id="password-edit-url"
                         type="url"
                         bind:value={editingPassword.url}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
@@ -1606,10 +1636,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-edit-category"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_category')}</label
                     >
                     <select
+                        id="password-edit-category"
                         bind:value={editingPassword.category}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
                     >
@@ -1620,10 +1652,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-edit-notes"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_notes')}</label
                     >
                     <textarea
+                        id="password-edit-notes"
                         bind:value={editingPassword.notes}
                         rows="3"
                         class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400 resize-none"
@@ -1664,10 +1698,12 @@ async function handleChangeMasterPassword() {
             <div class="space-y-3">
                 <div>
                     <label
+                        for="password-old-master"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.old_password_label')}</label
                     >
                     <input
+                        id="password-old-master"
                         type="password"
                         bind:value={oldMasterPassword}
                         placeholder={$_('passwords.old_password_placeholder')}
@@ -1676,10 +1712,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-new-master"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.new_password_label')}</label
                     >
                     <input
+                        id="password-new-master"
                         type="password"
                         bind:value={newMasterPassword}
                         placeholder={$_('passwords.new_password_placeholder')}
@@ -1688,10 +1726,12 @@ async function handleChangeMasterPassword() {
                 </div>
                 <div>
                     <label
+                        for="password-confirm-master"
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.confirm_new_label')}</label
                     >
                     <input
+                        id="password-confirm-master"
                         type="password"
                         bind:value={confirmNewMasterPassword}
                         on:keydown={(e) =>
@@ -1740,6 +1780,7 @@ async function handleChangeMasterPassword() {
     }
 
     .line-clamp-2 {
+        line-clamp: 2;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;

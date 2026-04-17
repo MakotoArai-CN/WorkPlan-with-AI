@@ -4,6 +4,7 @@
     import { showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { openExternalUrl } from '../utils/open-external.js';
     const dispatch = createEventDispatcher();
     let visible = false;
     let x = 0;
@@ -143,7 +144,7 @@
                 showToast({ message: t('context_menu.syncing'), type: 'info', duration: 1500 });
                 break;
             case 'about':
-                window.open('https://github.com/MakotoArai-CN/WorkPlan-with-AI', '_blank');
+                await openExternalUrl('https://github.com/MakotoArai-CN/WorkPlan-with-AI');
                 break;
         }
     }

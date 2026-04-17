@@ -69,9 +69,9 @@ export function looksLikeFileIntent(text = '') {
         '文件夹',
         '路径',
         '读取',
-        '打开',
+        '打开文件',
         '扫描',
-        '查找',
+        '查找文件',
         '搜索文件',
         '列出',
         '写入',
@@ -80,6 +80,24 @@ export function looksLikeFileIntent(text = '') {
         '创建文件',
         '修改文件',
         '删除文件',
+        '检查目录',
+        '检查文件',
+        '查看文件',
+        '查看目录',
+        '有什么文件',
+        '有哪些文件',
+        '文件内容',
+        '文件列表',
+        '当前目录',
+        '工作目录',
+        '写个文件',
+        '写一个文件',
+        '文本文件',
+        '.txt',
+        '.json',
+        '.md',
+        '.csv',
+        '.log',
         'read file',
         'scan folder',
         'scan directory',
@@ -87,8 +105,21 @@ export function looksLikeFileIntent(text = '') {
         'open file',
         'write file',
         'delete file',
+        'list files',
+        'list directory',
+        'check directory',
+        'file content',
         'workspace'
     ];
 
-    return keywords.some((keyword) => lowerText.includes(keyword));
+    if (keywords.some((keyword) => lowerText.includes(keyword))) {
+        return true;
+    }
+
+    const pathPatterns = [
+        /[a-z]:\\[^\s]+/i,
+        /(?:^|\s)[.~]?\/[^\s]+/,
+        /\w+\.\w{1,5}$/,
+    ];
+    return pathPatterns.some((pattern) => pattern.test(lowerText));
 }

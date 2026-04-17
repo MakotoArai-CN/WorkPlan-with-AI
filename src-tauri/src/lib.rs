@@ -115,11 +115,9 @@ fn ensure_mutation_allowed(path: &str, trusted_dirs: &[String]) -> Result<PathBu
 }
 
 fn extract_duckduckgo_url(raw_url: &str) -> String {
-    if raw_url.starts_with("http://") || raw_url.starts_with("https://") {
-        return raw_url.to_string();
-    }
-
-    let prefixed = if raw_url.starts_with('/') {
+    let prefixed = if raw_url.starts_with("http://") || raw_url.starts_with("https://") {
+        raw_url.to_string()
+    } else if raw_url.starts_with('/') {
         format!("https://html.duckduckgo.com{}", raw_url)
     } else {
         raw_url.to_string()
@@ -130,11 +128,20 @@ fn extract_duckduckgo_url(raw_url: &str) -> String {
             .query_pairs()
             .find_map(|(key, value)| (key == "uddg").then(|| value.to_string()))
         {
-            return decoded;
+            if let Ok(decoded_url) = Url::parse(&decoded) {
+                if matches!(decoded_url.scheme(), "http" | "https") {
+                    return decoded;
+                }
+            }
+            return String::new();
+        }
+
+        if matches!(parsed.scheme(), "http" | "https") {
+            return prefixed;
         }
     }
 
-    prefixed
+    String::new()
 }
 
 fn is_newer_version(current: &str, latest: &str) -> bool {
@@ -349,7 +356,7 @@ async fn search_web(
 
     let limit = max_results.unwrap_or(6).clamp(1, 10);
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.0; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
+        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.1; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -414,6 +421,118 @@ async fn search_web(
 }
 
 #[tauri::command]
+async fn fetch_web_content(
+    url: String,
+    max_chars: Option<usize>,
+) -> Result<String, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("URL 不能为空".to_string());
+    }
+
+    let limit = max_chars.unwrap_or(4000).clamp(200, 12000);
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.1; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if !content_type.contains("text/html") && !content_type.contains("text/plain") {
+        return Err(format!("不支持的内容类型: {}", content_type));
+    }
+
+    let html = response
+        .text()
+        .await
+        .map_err(|e| format!("读取内容失败: {}", e))?;
+
+    // Parse HTML and extract text content
+    let document = Html::parse_document(&html);
+
+    // Remove script, style, nav, footer, header tags
+    let skip_tags: std::collections::HashSet<&str> =
+        ["script", "style", "nav", "footer", "header", "aside", "noscript", "svg", "form"]
+            .iter()
+            .copied()
+            .collect();
+
+    let mut text_parts: Vec<String> = Vec::new();
+
+    fn extract_text(
+        node: ego_tree::NodeRef<scraper::Node>,
+        skip_tags: &std::collections::HashSet<&str>,
+        parts: &mut Vec<String>,
+    ) {
+        match node.value() {
+            scraper::Node::Text(t) => {
+                let trimmed = t.text.trim();
+                if !trimmed.is_empty() {
+                    parts.push(trimmed.to_string());
+                }
+            }
+            scraper::Node::Element(el) => {
+                if skip_tags.contains(el.name()) {
+                    return;
+                }
+                for child in node.children() {
+                    extract_text(child, skip_tags, parts);
+                }
+                // Add line break after block elements
+                let block_tags = ["p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6", "li", "tr", "blockquote", "pre", "article", "section"];
+                if block_tags.contains(&el.name()) {
+                    parts.push("\n".to_string());
+                }
+            }
+            _ => {
+                for child in node.children() {
+                    extract_text(child, skip_tags, parts);
+                }
+            }
+        }
+    }
+
+    let root = document.tree.root();
+    for child in root.children() {
+        extract_text(child, &skip_tags, &mut text_parts);
+    }
+
+    let mut result = text_parts.join(" ");
+    // Clean up whitespace
+    result = result
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Truncate
+    if result.len() > limit {
+        let truncated: String = result.chars().take(limit).collect();
+        result = format!("{}...[已截断]", truncated);
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
 async fn open_github(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url(
@@ -453,7 +572,6 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -467,6 +585,7 @@ pub fn run() {
             write_local_file,
             delete_local_file,
             search_web,
+            fetch_web_content,
             open_github,
             open_releases,
             set_close_to_quit,
@@ -576,6 +695,13 @@ pub fn run() {
                 }
             });
     }
+
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let builder = builder.setup(|app| {
+        app.handle()
+            .plugin(tauri_plugin_mobile_onbackpressed_listener::init())?;
+        Ok(())
+    });
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {

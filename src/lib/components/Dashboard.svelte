@@ -65,6 +65,13 @@
     function handleDateInput(e) {
         viewDate.set(e.target.value);
     }
+
+    function handleTaskCardKeydown(event, task) {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectTask(task);
+        }
+    }
 </script>
 
 <header class="h-16 bg-white/90 backdrop-blur px-2 md:px-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0 gap-2">
@@ -75,7 +82,8 @@
 
     <div class="flex items-center justify-center gap-1 md:gap-3 flex-1 min-w-0 overflow-hidden">
         <button on:click={() => changeDate(-1)}
-            class="w-8 h-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600">
+            class="w-8 h-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600"
+            aria-label="上一天">
             <i class="ph-bold ph-caret-left"></i>
         </button>
         <div class="flex flex-col items-center">
@@ -89,7 +97,8 @@
             <div class="text-[10px] md:text-xs text-slate-500 font-medium whitespace-nowrap">{dateInfo.week}</div>
         </div>
         <button on:click={() => changeDate(1)}
-            class="w-8 h-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600">
+            class="w-8 h-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600"
+            aria-label="下一天">
             <i class="ph-bold ph-caret-right"></i>
         </button>
         {#if $viewDate !== $today}
@@ -126,6 +135,9 @@
             </h3>
             {#each $futurePreviews as task (task.id)}
                 <div on:click={() => selectTask(task)}
+                    on:keydown={(event) => handleTaskCardKeydown(event, task)}
+                    role="button"
+                    tabindex="0"
                     class="task-card future-card bg-slate-50 rounded-xl shadow-sm border border-slate-200 p-3 flex items-center gap-3 cursor-pointer border-dashed">
                     <div class="w-6 flex justify-center text-slate-300">
                         <i class="ph-bold ph-clock-countdown text-lg"></i>
@@ -156,13 +168,16 @@
             <div class="space-y-2">
                 {#each $completedTasks as task (task.id)}
                     <div on:click={() => selectTask(task)}
+                        on:keydown={(event) => handleTaskCardKeydown(event, task)}
+                        role="button"
+                        tabindex="0"
                         class="task-card bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center gap-3 cursor-pointer hover:bg-white transition-all opacity-60 grayscale"
                         class:active={$activeTask && $activeTask.id === task.id}
                         class:opacity-100={$activeTask && $activeTask.id === task.id}
                         class:grayscale-0={$activeTask && $activeTask.id === task.id}>
                         <button on:click|stopPropagation={() => {
                             taskStore.updateTask(task.id, { status: 'doing', completedDate: null });
-                        }} class="text-green-600 hover:text-green-700">
+                        }} class="text-green-600 hover:text-green-700" aria-label="恢复任务">
                             <i class="ph-fill ph-check-circle text-xl"></i>
                         </button>
                         <div class="flex-1">

@@ -145,8 +145,8 @@
 
         <div class="space-y-4">
             <div>
-                <label class="text-xs font-bold text-slate-400 uppercase ml-1">Access Key</label>
-                <input type="text" bind:value={inputKey} 
+                <label for="login-access-key" class="text-xs font-bold text-slate-400 uppercase ml-1">Access Key</label>
+                <input id="login-access-key" type="text" bind:value={inputKey} 
                     on:input={handleInput}
                     on:keyup={(e) => e.key === 'Enter' && login()}
                     placeholder={$_('login_page.placeholder')}

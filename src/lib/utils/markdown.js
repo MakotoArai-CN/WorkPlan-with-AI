@@ -8,6 +8,28 @@ import DOMPurify from 'dompurify';
 let mermaidModule = null;
 let mermaidInitialized = false;
 
+const HTML_SANITIZE_OPTIONS = {
+    USE_PROFILES: {
+        html: true,
+        svg: true,
+        svgFilters: true,
+        mathMl: true
+    },
+    ADD_ATTR: ['target', 'rel', 'class', 'disabled', 'checked', 'type', 'id', 'aria-hidden', 'role'],
+    ALLOW_DATA_ATTR: true,
+    FORBID_TAGS: ['script', 'iframe', 'foreignObject']
+};
+
+const SVG_SANITIZE_OPTIONS = {
+    USE_PROFILES: {
+        svg: true,
+        svgFilters: true
+    },
+    ADD_ATTR: ['class', 'id', 'style', 'role', 'aria-hidden'],
+    FORBID_TAGS: ['script', 'foreignObject']
+};
+const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+
 function escapeHtml(text) {
     if (!text) return '';
     const map = {
@@ -28,11 +50,11 @@ async function initMermaid() {
         mermaidModule.default.initialize({
             startOnLoad: false,
             theme: 'default',
-            securityLevel: 'loose',
+            securityLevel: 'strict',
             fontSize: 14,
             flowchart: {
                 useMaxWidth: true,
-                htmlLabels: true,
+                htmlLabels: false,
                 curve: 'basis'
             }
         });
@@ -66,7 +88,7 @@ marked.use(markedKatex({
     output: 'html',
     displayMode: false,
     strict: false,
-    trust: true,
+    trust: false,
     macros: {
         "\\RR": "\\mathbb{R}",
         "\\NN": "\\mathbb{N}",
@@ -101,6 +123,36 @@ function extractCodeFromRaw(raw, lang) {
     return raw;
 }
 
+function sanitizeHtml(html, options = HTML_SANITIZE_OPTIONS) {
+    return DOMPurify.sanitize(html, options);
+}
+
+function sanitizeLinkHref(href) {
+    const value = String(href || '').trim();
+    if (!value) {
+        return '#';
+    }
+
+    if (
+        value.startsWith('#') ||
+        value.startsWith('/') ||
+        value.startsWith('./') ||
+        value.startsWith('../')
+    ) {
+        return escapeHtml(value);
+    }
+
+    try {
+        const parsed = new URL(value);
+        if (!SAFE_LINK_PROTOCOLS.has(parsed.protocol)) {
+            return '#';
+        }
+        return escapeHtml(parsed.toString());
+    } catch {
+        return escapeHtml(value);
+    }
+}
+
 const renderer = {
     listitem(token) {
         const text = token.text || '';
@@ -128,7 +180,9 @@ const renderer = {
                     if (!mermaidModule) {
                         const element = document.getElementById('mermaid-placeholder-' + id);
                         if (element) {
-                            element.innerHTML = `<pre><code>${escapeHtml(code)}</code></pre><p class="error-msg">Mermaid 未加载</p>`;
+                            element.innerHTML = sanitizeHtml(
+                                `<pre><code>${escapeHtml(code)}</code></pre><p class="error-msg">Mermaid 未加载</p>`
+                            );
                             element.classList.add('mermaid-error');
                         }
                         return;
@@ -138,14 +192,17 @@ const renderer = {
                         const element = document.getElementById('mermaid-placeholder-' + id);
                         if (element) {
                             const result = await mermaidModule.default.render('svg-' + id, code);
-                            element.innerHTML = result.svg;
+                            element.innerHTML = sanitizeHtml(result.svg, SVG_SANITIZE_OPTIONS);
                             element.classList.remove('mermaid-placeholder');
                             element.classList.add('mermaid-container');
                         }
                     } catch (e) {
                         const element = document.getElementById('mermaid-placeholder-' + id);
                         if (element) {
-                            element.innerHTML = `<pre><code>${escapeHtml(code)}</code></pre><p class="error-msg">Mermaid 渲染错误: ${e.message}</p>`;
+                            const message = e instanceof Error ? e.message : String(e);
+                            element.innerHTML = sanitizeHtml(
+                                `<pre><code>${escapeHtml(code)}</code></pre><p class="error-msg">Mermaid 渲染错误: ${escapeHtml(message)}</p>`
+                            );
                             element.classList.add('mermaid-error');
                         }
                     }
@@ -212,10 +269,11 @@ const renderer = {
         const href = token.href || '';
         const title = token.title || '';
         const text = token.text || '';
-        const isExternal = href && (href.startsWith('http://') || href.startsWith('https://'));
+        const safeHref = sanitizeLinkHref(href);
+        const isExternal = safeHref.startsWith('http://') || safeHref.startsWith('https://');
         const target = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
         const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-        return `<a href="${escapeHtml(href)}"${target}${titleAttr}>${text}</a>`;
+        return `<a href="${safeHref}"${target}${titleAttr}>${text}</a>`;
     }
 };
 
@@ -225,14 +283,10 @@ export function renderMarkdown(text) {
     if (!text) return '';
     try {
         const html = marked.parse(text);
-        return DOMPurify.sanitize(html, {
-            ADD_ATTR: ['target', 'rel', 'class', 'disabled', 'checked', 'type', 'id', 'style'],
-            ADD_TAGS: ['iframe', 'input', 'svg', 'g', 'path', 'rect', 'circle', 'text', 'line', 'polygon', 'polyline', 'foreignObject'],
-            ALLOW_DATA_ATTR: true
-        });
+        return sanitizeHtml(html);
     } catch (e) {
         console.error('Markdown parse error:', e);
-        return DOMPurify.sanitize(escapeHtml(text));
+        return sanitizeHtml(escapeHtml(text));
     }
 }
 
