@@ -403,12 +403,12 @@
         );
         try {
             if (type === "markdown") {
-                exportToMarkdown($activeNote.content, `${filename}.md`, {
+                await exportToMarkdown($activeNote.content, `${filename}.md`, {
                     showToast,
                 });
             } else if (type === "html") {
                 const html = renderMarkdown($activeNote.content);
-                exportToHTML(html, `${filename}.html`, $activeNote.title, {
+                await exportToHTML(html, `${filename}.html`, $activeNote.title, {
                     showToast,
                 });
             } else if (type === "pdf") {

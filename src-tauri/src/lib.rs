@@ -4,6 +4,8 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, RunEvent, WindowEvent,
 };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use tauri::Manager;
 use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs;
@@ -221,10 +223,22 @@ fn get_app_version() -> String {
 }
 
 #[tauri::command]
-fn get_workspace_root() -> Result<String, String> {
-    Ok(normalize_pathbuf(current_workspace_root()?)?
-        .to_string_lossy()
-        .to_string())
+fn get_workspace_root(app: tauri::AppHandle) -> Result<String, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let data_dir = app.path().app_data_dir()
+            .map_err(|e| e.to_string())?;
+        fs::create_dir_all(&data_dir)
+            .map_err(|e| format!("创建数据目录失败: {}", e))?;
+        Ok(data_dir.to_string_lossy().to_string())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = app;
+        Ok(normalize_pathbuf(current_workspace_root()?)?
+            .to_string_lossy()
+            .to_string())
+    }
 }
 
 #[tauri::command]
@@ -533,6 +547,66 @@ async fn fetch_web_content(
 }
 
 #[tauri::command]
+async fn save_file_to_downloads(
+    app: tauri::AppHandle,
+    filename: String,
+    content: String,
+) -> Result<String, String> {
+    let filename = filename.trim().to_string();
+    if filename.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+
+    // Determine downloads directory based on platform
+    let download_dir = {
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            // On Android/iOS: use app's external data dir or fallback to app data dir
+            app.path()
+                .download_dir()
+                .or_else(|_| app.path().app_data_dir())
+                .map_err(|e| format!("无法获取下载目录: {}", e))?
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            let _ = &app;
+            dirs::download_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Downloads"))
+                    .unwrap_or_else(|| PathBuf::from("."))
+            })
+        }
+    };
+
+    fs::create_dir_all(&download_dir)
+        .map_err(|e| format!("创建下载目录失败: {}", e))?;
+
+    let mut target = download_dir.join(&filename);
+
+    // If file already exists, add a number suffix to avoid overwriting
+    if target.exists() {
+        let stem = target.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        let mut counter = 1u32;
+        loop {
+            target = download_dir.join(format!("{} ({}){}", stem, counter, ext));
+            if !target.exists() {
+                break;
+            }
+            counter += 1;
+            if counter > 999 {
+                return Err("文件名冲突过多".to_string());
+            }
+        }
+    }
+
+    fs::write(&target, content.as_bytes())
+        .map_err(|e| format!("写入文件失败: {}", e))?;
+
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 async fn open_github(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url(
@@ -586,6 +660,7 @@ pub fn run() {
             delete_local_file,
             search_web,
             fetch_web_content,
+            save_file_to_downloads,
             open_github,
             open_releases,
             set_close_to_quit,

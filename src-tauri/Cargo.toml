@@ -27,6 +27,7 @@ scraper = "0.23"
 url = "2.5"
 walkdir = "2.5"
 ego-tree = "0.10"
+dirs = "6"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 winreg = { version = "0.52", optional = true }
