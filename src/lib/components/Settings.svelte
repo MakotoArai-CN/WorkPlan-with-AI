@@ -370,6 +370,26 @@
                         <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                     </label>
                 </div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base flex items-center gap-2">
+                            {$_('settings.ai_chat_tools')}
+                            <span class="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                                {$_('settings.experimental')}
+                            </span>
+                        </div>
+                        <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.ai_chat_tools_desc') || ''}</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={$settingsStore.enableAiChatTools}
+                            on:change={settingsStore.toggleAiChatTools}
+                            class="sr-only peer"
+                        />
+                        <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                    </label>
+                </div>
                 <div class="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
                     <div class="flex items-start justify-between gap-4">
                         <div>
@@ -506,10 +526,11 @@
                         <div class="pt-1 space-y-4">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                    <label for="database-service" class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                         数据库服务
                                     </label>
                                     <select
+                                        id="database-service"
                                         value={$settingsStore.databaseConfig?.service || 'supabase'}
                                         on:change={(e) => updateDatabaseField('service', e.target.value)}
                                         class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400"
@@ -520,24 +541,26 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                    <div class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                         启用云同步
-                                    </label>
+                                    </div>
                                     <label class="relative inline-flex items-center cursor-pointer mt-1">
                                         <input
                                             type="checkbox"
                                             checked={$settingsStore.databaseConfig?.enabled}
                                             on:change={(e) => updateDatabaseField('enabled', e.target.checked)}
                                             class="sr-only peer"
+                                            aria-label="启用云同步"
                                         />
                                         <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                                     </label>
                                 </div>
                                 <div>
-                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                    <label for="database-url" class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                         HTTP API / 项目地址
                                     </label>
                                     <input
+                                        id="database-url"
                                         value={$settingsStore.databaseConfig?.url || ''}
                                         on:input={(e) => updateDatabaseField('url', e.target.value)}
                                         type="url"
@@ -546,10 +569,11 @@
                                     />
                                 </div>
                                 <div>
-                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                    <label for="database-api-key" class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                         API Key / Token
                                     </label>
                                     <input
+                                        id="database-api-key"
                                         value={$settingsStore.databaseConfig?.apiKey || ''}
                                         on:input={(e) => updateDatabaseField('apiKey', e.target.value)}
                                         type="password"
@@ -558,10 +582,11 @@
                                     />
                                 </div>
                                 <div>
-                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                    <label for="database-table-name" class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                         数据表 / 集合名
                                     </label>
                                     <input
+                                        id="database-table-name"
                                         value={$settingsStore.databaseConfig?.tableName || ''}
                                         on:input={(e) => updateDatabaseField('tableName', e.target.value)}
                                         type="text"
@@ -570,10 +595,11 @@
                                     />
                                 </div>
                                 <div>
-                                    <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                                    <label for="database-project-id" class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                         数据库名 / 项目 ID
                                     </label>
                                     <input
+                                        id="database-project-id"
                                         value={$settingsStore.databaseConfig?.projectId || ''}
                                         on:input={(e) => updateDatabaseField('projectId', e.target.value)}
                                         type="text"

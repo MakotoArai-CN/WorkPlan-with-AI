@@ -52,6 +52,13 @@
         taskStore.updateScheduledTask(task.id, { enabled: !task.enabled });
     }
 
+    function handleTaskClick(event, task) {
+        if (event.target instanceof Element && event.target.closest('[data-no-card-select="true"]')) {
+            return;
+        }
+        selectTask(task);
+    }
+
     function formatRepeatDays(days, t) {
         if (!days || !days.length) return ['-'];
         const map = {
@@ -62,6 +69,13 @@
         return days
             .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b))
             .map(x => prefix + map[x]);
+    }
+
+    function handleTaskKeydown(event, task) {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectTask(task);
+        }
     }
 </script>
 
@@ -93,14 +107,19 @@
     {/if}
 
     {#each $taskStore.scheduledTasks as sch (sch.id)}
-        <div on:click={() => selectTask(sch)}
+        <div on:click={(event) => handleTaskClick(event, sch)}
+            on:keydown={(event) => handleTaskKeydown(event, sch)}
+            role="button"
+            tabindex="0"
             class="task-card scheduled-card bg-white rounded-xl shadow-sm border border-slate-200 p-3 flex items-center gap-3 cursor-pointer"
             class:active={$activeTask && $activeTask.id === sch.id}
             class:disabled={!sch.enabled}>
-            <label class="relative inline-flex items-center cursor-pointer shrink-0" on:click|stopPropagation>
-                <input type="checkbox" checked={sch.enabled} on:change={() => toggleEnabled(sch)} class="sr-only peer">
-                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-600"></div>
-            </label>
+            <div class="relative inline-flex items-center cursor-pointer shrink-0" data-no-card-select="true">
+                <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input type="checkbox" checked={sch.enabled} on:change={() => toggleEnabled(sch)} class="sr-only peer" aria-label="启用定时任务">
+                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-600"></div>
+                </label>
+            </div>
             <div class="font-bold text-slate-800 text-sm flex-1"
                 class:text-slate-400={!sch.enabled}>
                 {sch.title}
@@ -113,11 +132,13 @@
                 {/each}
             </div>
             <button on:click|stopPropagation={() => openModal(sch)}
-                class="p-1.5 text-slate-300 hover:text-teal-600 rounded">
+                class="p-1.5 text-slate-300 hover:text-teal-600 rounded"
+                aria-label={$_('task_detail.edit')}>
                 <i class="ph ph-pencil-simple text-lg"></i>
             </button>
             <button on:click|stopPropagation={() => deleteTask(sch.id)}
-                class="p-1.5 text-slate-300 hover:text-red-600 rounded">
+                class="p-1.5 text-slate-300 hover:text-red-600 rounded"
+                aria-label={$_('common.delete')}>
                 <i class="ph ph-trash text-lg"></i>
             </button>
         </div>

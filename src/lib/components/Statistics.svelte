@@ -371,7 +371,11 @@
                         class="text-sm text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1 px-3 py-1 rounded hover:bg-indigo-100">
                         <i class="ph ph-copy"></i> {$_('statistics_page.copy')}
                     </button>
-                    <button on:click={closeReport} class="text-slate-500 hover:text-slate-700">
+                    <button
+                        on:click={closeReport}
+                        class="text-slate-500 hover:text-slate-700"
+                        aria-label={$_('common.close')}
+                    >
                         <i class="ph ph-x text-xl"></i>
                     </button>
                 </div>

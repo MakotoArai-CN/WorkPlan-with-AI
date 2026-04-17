@@ -36,7 +36,11 @@
                     <i class="ph ph-scroll"></i> {$_('agreement_page.title')}
                 </h3>
                 {#if !isFirstTime}
-                    <button on:click={handleClose} class="text-slate-500 hover:text-slate-700">
+                    <button
+                        on:click={handleClose}
+                        class="text-slate-500 hover:text-slate-700"
+                        aria-label={$_('agreement_page.close')}
+                    >
                         <i class="ph ph-x text-xl"></i>
                     </button>
                 {/if}

@@ -153,28 +153,30 @@
                 max: 10 * 1024 * 1024,
                 handler: async (files) => {
                     const file = files[0];
-                    if (!file) return null;
-                    if (file.type.startsWith("image/")) {
-                        return new Promise((resolve) => {
-                            const reader = new FileReader();
-                            reader.onload = (e) => {
-                                resolve(e.target.result);
-                            };
-                            reader.readAsDataURL(file);
-                        });
-                    } else {
+                    if (!file) return;
+                    if (!file.type.startsWith("image/")) {
                         showToast({
                             message: get(_)('notes.only_image'),
                             type: "warning",
                         });
-                        return null;
+                        return;
+                    }
+                    try {
+                        const dataUrl = await readFileAsDataUrl(file);
+                        const safeName = sanitizeUploadName(
+                            file.name.replace(/\.[^.]+$/, ""),
+                        );
+                        vditorInstance?.insertValue(
+                            `![${safeName}](${dataUrl})`,
+                        );
+                    } catch {
+                        showToast({
+                            message: get(_)('notes.export_failed_short'),
+                            type: "error",
+                        });
                     }
                 },
-                filename: (name) =>
-                    name
-                        .replace(/[^(a-zA-Z0-9\u4e00-\u9fa5\.)]/g, "")
-                        .replace(/[\?\\/:|<>\*\[\]\(\)\$%\{\}@~]/g, "")
-                        .replace("/\\s/g", ""),
+                filename: (name) => sanitizeUploadName(name),
             },
             input: (value) => {
                 editContent = value;
@@ -475,6 +477,24 @@
     function toggleSidebar() {
         showSidebar = !showSidebar;
     }
+
+    function sanitizeUploadName(name) {
+        return (
+            String(name || "image")
+                .replace(/[^(a-zA-Z0-9\u4e00-\u9fa5\.)]/g, "")
+                .replace(/[\?\\/:|<>\*\[\]\(\)\$%\{\}@~]/g, "")
+                .replace(/\s/g, "") || "image"
+        );
+    }
+
+    function readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target?.result || "");
+            reader.onerror = () => reject(new Error("file_read_failed"));
+            reader.readAsDataURL(file);
+        });
+    }
 </script>
 
 <div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
@@ -486,6 +506,7 @@
                 <button
                     on:click={toggleSidebar}
                     class="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
+                    aria-label={$_('notes.view_list')}
                 >
                     <i class="ph ph-list text-xl"></i>
                 </button>
@@ -578,7 +599,7 @@
                             on:keydown={(e) => e.key === 'Enter' && addCategory()}
                             class="flex-1 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-emerald-400"
                         />
-                        <button on:click={addCategory} class="px-2 py-1 bg-emerald-600 text-white rounded text-xs">
+                        <button on:click={addCategory} class="px-2 py-1 bg-emerald-600 text-white rounded text-xs" aria-label={$_('common.add')}>
                             <i class="ph ph-check"></i>
                         </button>
                     </div>
@@ -654,6 +675,7 @@
                             <button
                                 on:click={startEdit}
                                 class="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                                aria-label={$_('task_detail.edit')}
                             >
                                 <i class="ph ph-pencil-simple text-lg"></i>
                             </button>
@@ -676,6 +698,7 @@
                                     on:click={() =>
                                         (showExportMenu = !showExportMenu)}
                                     class="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                    aria-label={$_('common.export')}
                                 >
                                     <i class="ph ph-export text-lg"></i>
                                 </button>
@@ -715,6 +738,7 @@
                             <button
                                 on:click={deleteNote}
                                 class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                aria-label={$_('common.delete')}
                             >
                                 <i class="ph ph-trash text-lg"></i>
                             </button>
@@ -814,20 +838,26 @@
 <style>
     :global(.vditor) {
         border: none !important;
+        overflow: visible !important;
     }
     :global(.vditor-toolbar) {
         border-bottom: 1px solid #e2e8f0 !important;
         padding: 8px !important;
         z-index: 10 !important;
+        overflow: visible !important;
+    }
+    :global(.vditor-reset),
+    :global(.vditor-toolbar__item) {
+        overflow: visible !important;
     }
     :global(.vditor-ir) {
         padding: 16px !important;
     }
     :global(.vditor-hint) {
-        z-index: 100 !important;
+        z-index: 200 !important;
     }
     :global(.vditor-tip) {
-        z-index: 100 !important;
+        z-index: 200 !important;
         top: auto !important;
         bottom: 100% !important;
         margin-bottom: 8px !important;
@@ -835,12 +865,13 @@
     :global(.vditor-toolbar__item) {
         position: relative !important;
     }
+    :global(.vditor-panel),
     :global(.vditor-panel--arrow) {
-        z-index: 100 !important;
+        z-index: 200 !important;
     }
     :global(.vditor-tooltipped::after),
     :global(.vditor-tooltipped::before) {
-        z-index: 101 !important;
+        z-index: 201 !important;
     }
     :global(.milkdown-container) {
         height: 100%;

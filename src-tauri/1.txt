@@ -1,0 +1,53 @@
+(venv) PS C:\Users\MakotoArai\Desktop\项目\cli-api> playwright install chromium
+Downloading Chrome for Testing 145.0.7632.6 (playwright chromium v1208) from https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+(node:860) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+172.8 MiB [==                  ] 8% 25.6sError: Download failed: server closed connection. URL: https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+    at IncomingMessage.<anonymous> (C:\Users\MakotoArai\Desktop\项目\cli-api\venv\Lib\site-packages\playwright\driver\package\lib\server\registry\oopDownloadBrowserMain.js:86:24)
+    at IncomingMessage.emit (node:events:508:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)
+Downloading Chrome for Testing 145.0.7632.6 (playwright chromium v1208) from https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+(node:19688) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+172.8 MiB [==                  ] 8% 28.4sError: Download failed: server closed connection. URL: https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+    at IncomingMessage.<anonymous> (C:\Users\MakotoArai\Desktop\项目\cli-api\venv\Lib\site-packages\playwright\driver\package\lib\server\registry\oopDownloadBrowserMain.js:86:24)
+    at IncomingMessage.emit (node:events:508:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)
+Downloading Chrome for Testing 145.0.7632.6 (playwright chromium v1208) from https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+(node:24048) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+172.8 MiB [==                  ] 8% 27.5sError: Download failed: server closed connection. URL: https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+    at IncomingMessage.<anonymous> (C:\Users\MakotoArai\Desktop\项目\cli-api\venv\Lib\site-packages\playwright\driver\package\lib\server\registry\oopDownloadBrowserMain.js:86:24)
+    at IncomingMessage.emit (node:events:508:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)
+Downloading Chrome for Testing 145.0.7632.6 (playwright chromium v1208) from https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+(node:28100) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+172.8 MiB [==                  ] 8% 26.4sError: Download failed: server closed connection. URL: https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+    at IncomingMessage.<anonymous> (C:\Users\MakotoArai\Desktop\项目\cli-api\venv\Lib\site-packages\playwright\driver\package\lib\server\registry\oopDownloadBrowserMain.js:86:24)
+    at IncomingMessage.emit (node:events:508:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)
+Downloading Chrome for Testing 145.0.7632.6 (playwright chromium v1208) from https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+(node:46988) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+172.8 MiB [==                  ] 8% 27.1sError: Download failed: server closed connection. URL: https://cdn.playwright.dev/chrome-for-testing-public/145.0.7632.6/win64/chrome-win64.zip
+    at IncomingMessage.<anonymous> (C:\Users\MakotoArai\Desktop\项目\cli-api\venv\Lib\site-packages\playwright\driver\package\lib\server\registry\oopDownloadBrowserMain.js:86:24)
+    at IncomingMessage.emit (node:events:508:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)
+Failed to install browsers
+Error: Failed to download Chrome for Testing 145.0.7632.6 (playwright chromium v1208), caused by
+Error: Download failure, code=1
+    at ChildProcess.<anonymous> (C:\Users\MakotoArai\Desktop\项目\cli-api\venv\Lib\site-packages\playwright\driver\package\lib\server\registry\browserFetcher.js:96:32)
+    at ChildProcess.emit (node:events:508:28)
+    at ChildProcess._handle.onexit (node:internal/child_process:294:12)
+(venv) PS C:\Users\MakotoArai\Desktop\项目\cli-api> 

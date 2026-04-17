@@ -122,11 +122,21 @@
 
 {#if show}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div on:click={close} class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"></div>
+        <div
+            on:click={close}
+            on:keydown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    close();
+                }
+            }}
+            role="button"
+            tabindex="0"
+            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"
+        ></div>
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] overflow-hidden transform transition-all">
             <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                 <h3 class="font-bold text-lg text-slate-800">{editTask ? $_('task_modal.edit') : $_('task_modal.new')}</h3>
-                <button on:click={close}><i class="ph ph-x text-xl"></i></button>
+                <button on:click={close} aria-label={$_('common.close')}><i class="ph ph-x text-xl"></i></button>
             </div>
 
             <div class="p-6 overflow-y-auto space-y-5">
@@ -143,15 +153,15 @@
                 {/if}
 
                 <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.name')}</label>
-                    <input bind:value={data.title} type="text"
+                    <label for="task-modal-title" class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.name')}</label>
+                    <input id="task-modal-title" bind:value={data.title} type="text"
                         class="w-full text-lg font-bold border-b-2 border-slate-200 py-1 focus:border-blue-500 outline-none"
                         placeholder={$_('task_modal.name_ph')}>
                 </div>
 
                 {#if $currentView === 'scheduled'}
                     <div class="bg-teal-50 p-4 rounded-xl">
-                        <label class="text-xs font-bold text-teal-700 uppercase mb-2 block">{$_('task_modal.repeat')}</label>
+                        <div class="text-xs font-bold text-teal-700 uppercase mb-2 block">{$_('task_modal.repeat')}</div>
                         <div class="flex justify-between gap-1">
                             {#each dayLabels as dayStr, idx}
                                 {@const dayValue = idx === 6 ? 0 : idx + 1}
@@ -168,8 +178,8 @@
                 {/if}
 
                 <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.notes')}</label>
-                    <textarea bind:value={data.note} rows="3"
+                    <label for="task-modal-note" class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.notes')}</label>
+                    <textarea id="task-modal-note" bind:value={data.note} rows="3"
                         class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm resize-none"></textarea>
                 </div>
 
@@ -179,11 +189,12 @@
                             <div class="flex gap-2 items-center group" draggable="true"
                                 on:dragstart={() => dragStart(index)}
                                 on:drop={() => dragDrop(index)}
-                                on:dragover|preventDefault>
+                                on:dragover|preventDefault
+                                role="listitem">
                                 <i class="ph-bold ph-dots-six-vertical text-slate-300 cursor-move"></i>
                                 <input bind:value={sub.title}
                                     class="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-sm">
-                                <button on:click={() => removeSubtask(index)}>
+                                <button on:click={() => removeSubtask(index)} aria-label={$_('common.delete')}>
                                     <i class="ph-bold ph-trash text-slate-400"></i>
                                 </button>
                             </div>
@@ -200,13 +211,13 @@
                 {#if $currentView === 'dashboard'}
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.plan')}</label>
-                            <input type="datetime-local" bind:value={data.date}
+                            <label for="task-modal-date" class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.plan')}</label>
+                            <input id="task-modal-date" type="datetime-local" bind:value={data.date}
                                 class="w-full border border-slate-200 rounded px-2 py-2 text-sm">
                         </div>
                         <div>
-                            <label class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.due')}</label>
-                            <input type="datetime-local" bind:value={data.deadline}
+                            <label for="task-modal-deadline" class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.due')}</label>
+                            <input id="task-modal-deadline" type="datetime-local" bind:value={data.deadline}
                                 class="w-full border border-slate-200 rounded px-2 py-2 text-sm">
                         </div>
                     </div>

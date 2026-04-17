@@ -26,7 +26,17 @@
 
 {#if $modalStore.show}
     <div class="fixed inset-0 z-[100] flex items-center justify-center p-4">
-        <div on:click={$modalStore.onCancel || (() => {})} class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"></div>
+        <div
+            on:click={$modalStore.onCancel || (() => {})}
+            on:keydown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    ($modalStore.onCancel || (() => {}))();
+                }
+            }}
+            role="button"
+            tabindex="0"
+            class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
+        ></div>
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden transform transition-all animate-modal-in">
             <div class="p-6 text-center">
                 <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center">
@@ -57,7 +67,11 @@
         <div class="pointer-events-auto {style.bg} {style.border} border rounded-xl px-4 py-3 shadow-lg flex items-center gap-3 min-w-[280px] max-w-md animate-toast-in">
             <i class="ph-fill {style.icon} text-xl {style.iconColor}"></i>
             <span class="flex-1 text-sm font-medium {style.text}">{toast.message}</span>
-            <button on:click={() => toastStore.remove(toast.id)} class="text-slate-400 hover:text-slate-600">
+            <button
+                on:click={() => toastStore.remove(toast.id)}
+                class="text-slate-400 hover:text-slate-600"
+                aria-label="关闭通知"
+            >
                 <i class="ph ph-x"></i>
             </button>
         </div>

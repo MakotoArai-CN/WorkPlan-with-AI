@@ -23,6 +23,10 @@
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { isG4FProvider } from "../utils/g4f-client.js";
+    import {
+        getValidatedExternalUrl,
+        openExternalUrl,
+    } from "../utils/open-external.js";
 
     function t(key, opts) { return get(_)(key, opts); }
 
@@ -206,9 +210,8 @@
         updateConnectionProfileName(trimmed);
     }
 
-    function openApiUrl(url) {
-        if (!url) return;
-        window.open(url, "_blank");
+    async function openApiUrl(url) {
+        await openExternalUrl(url);
     }
 
     function resetDailyPrompt() {
@@ -246,6 +249,8 @@
             : models;
         return [...new Set(merged.filter(Boolean))];
     })();
+    $: currentProviderDocUrl = getValidatedExternalUrl(currentProvider?.docUrl || "");
+    $: currentProviderApiUrl = getValidatedExternalUrl(currentProvider?.apiUrl || "");
 </script>
 
 {#if $showAiSettings}
@@ -271,6 +276,7 @@
                 <button
                     on:click={handleClose}
                     class="text-slate-500 hover:text-slate-700"
+                    aria-label={$_('common.close')}
                 >
                     <i class="ph ph-x text-xl"></i>
                 </button>
@@ -360,10 +366,11 @@
                         </div>
 
                         <div>
-                            <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                            <label for="ai-profile-name" class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                 连接名称
                             </label>
                             <input
+                                id="ai-profile-name"
                                 bind:value={profileNameDraft}
                                 on:blur={handleProfileNameBlur}
                                 on:keydown={(e) => e.key === "Enter" && (e.preventDefault(), handleProfileNameBlur())}
@@ -376,10 +383,12 @@
 
                     <div>
                         <label
+                            for="ai-provider"
                             class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                             >{isG4FProvider($aiConfig.provider) ? "模型提供商" : $_('ai_settings_page.provider')}</label
                         >
                         <select
+                            id="ai-provider"
                             value={$aiConfig.provider}
                             on:change={handleProviderChange}
                             class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
@@ -414,19 +423,20 @@
                             </optgroup>
                         </select>
                         <div class="flex items-center gap-3 mt-2 flex-wrap">
-                            {#if currentProvider?.docUrl}
+                            {#if currentProviderDocUrl}
                                 <a
-                                    href={currentProvider.docUrl}
+                                    href={currentProviderDocUrl}
                                     target="_blank"
+                                    rel="noopener noreferrer"
                                     class="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1"
                                 >
                                     <i class="ph ph-book-open"></i> {$_('ai_settings_page.docs')}
                                 </a>
                             {/if}
-                            {#if currentProvider?.apiUrl}
+                            {#if currentProviderApiUrl}
                                 <button
                                     on:click={() =>
-                                        openApiUrl(currentProvider.apiUrl)}
+                                        openApiUrl(currentProviderApiUrl)}
                                     class="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 font-bold"
                                 >
                                     <i class="ph ph-key"></i> {$_('ai_settings_page.get_key')}
@@ -443,10 +453,12 @@
                     {#if isCustomProvider}
                         <div>
                             <label
+                                for="ai-custom-endpoint"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                                 >{$_('ai_settings_page.custom_endpoint')}</label
                             >
                             <input
+                                id="ai-custom-endpoint"
                                 bind:value={$aiConfig.customEndpoint}
                                 type="url"
                                 placeholder="https://api.example.com/v1/chat/completions"
@@ -458,10 +470,12 @@
                         </div>
                         <div>
                             <label
+                                for="ai-custom-model"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                                 >{$_('ai_settings_page.custom_model')}</label
                             >
                             <input
+                                id="ai-custom-model"
                                 bind:value={$aiConfig.customModel}
                                 type="text"
                                 placeholder={$_('ai_settings_page.custom_model_ph')}
@@ -471,12 +485,14 @@
                     {:else if $aiConfig.provider === "ollama" || $aiConfig.provider === "lmstudio"}
                         <div>
                             <label
+                                for="ai-local-endpoint"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                             >
                                 {$_('ai_settings_page.local_addr')}
                                 <span class="text-rose-400">{$_('ai_settings_page.local_addr_custom')}</span>
                             </label>
                             <input
+                                id="ai-local-endpoint"
                                 bind:value={$aiConfig.customEndpoint}
                                 type="url"
                                 placeholder={$aiConfig.provider === "ollama"
@@ -496,6 +512,7 @@
                         <div>
                             <div class="flex items-center justify-between mb-2">
                                 <label
+                                    for="ai-model"
                                     class="text-xs font-bold text-slate-500 uppercase"
                                     >{$_('ai_settings_page.model')}</label
                                 >
@@ -514,6 +531,7 @@
                                 {/if}
                             </div>
                             <select
+                                id="ai-model"
                                 bind:value={$aiConfig.model}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
                             >
@@ -530,10 +548,12 @@
                     {#if needsApiKey}
                         <div>
                             <label
+                                for="ai-api-key"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                                 >API Key</label
                             >
                             <input
+                                id="ai-api-key"
                                 bind:value={$aiConfig.apiKey}
                                 on:blur={handleApiKeyChange}
                                 type="password"
@@ -546,10 +566,12 @@
                     {#if currentProvider?.authType === "baidu_token"}
                         <div>
                             <label
+                                for="ai-secret-key"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                                 >Secret Key</label
                             >
                             <input
+                                id="ai-secret-key"
                                 bind:value={$aiConfig.secretKey}
                                 type="password"
                                 placeholder={$_('ai_settings_page.secret_key_ph')}
@@ -561,10 +583,12 @@
                     {#if $aiConfig.provider === "cloudflare"}
                         <div>
                             <label
+                                for="ai-account-id"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                                 >Account ID</label
                             >
                             <input
+                                id="ai-account-id"
                                 bind:value={$aiConfig.accountId}
                                 type="text"
                                 placeholder="Cloudflare Account ID"
@@ -595,10 +619,11 @@
                 {:else if activeTab === "advanced"}
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="text-xs text-slate-500 mb-1 block"
+                            <label for="ai-temperature" class="text-xs text-slate-500 mb-1 block"
                                 >Temperature</label
                             >
                             <input
+                                id="ai-temperature"
                                 bind:value={$aiConfig.temperature}
                                 type="number"
                                 min="0"
@@ -611,10 +636,11 @@
                             </div>
                         </div>
                         <div>
-                            <label class="text-xs text-slate-500 mb-1 block"
+                            <label for="ai-max-tokens" class="text-xs text-slate-500 mb-1 block"
                                 >Max Tokens</label
                             >
                             <input
+                                id="ai-max-tokens"
                                 bind:value={$aiConfig.maxTokens}
                                 type="number"
                                 min="100"
@@ -639,6 +665,7 @@
                         <div>
                             <div class="flex items-center justify-between mb-2">
                                 <label
+                                    for="ai-daily-prompt"
                                     class="text-xs font-bold text-slate-500 uppercase"
                                     >{$_('ai_settings_page.daily_prompt')}</label
                                 >
@@ -650,6 +677,7 @@
                                 </button>
                             </div>
                             <textarea
+                                id="ai-daily-prompt"
                                 bind:value={dailyPrompt}
                                 rows="6"
                                 placeholder={$_('ai_settings_page.prompt_ph')}
@@ -659,6 +687,7 @@
                         <div>
                             <div class="flex items-center justify-between mb-2">
                                 <label
+                                    for="ai-weekly-prompt"
                                     class="text-xs font-bold text-slate-500 uppercase"
                                     >{$_('ai_settings_page.weekly_prompt')}</label
                                 >
@@ -670,6 +699,7 @@
                                 </button>
                             </div>
                             <textarea
+                                id="ai-weekly-prompt"
                                 bind:value={weeklyPrompt}
                                 rows="6"
                                 placeholder={$_('ai_settings_page.prompt_ph')}

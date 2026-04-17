@@ -47,6 +47,13 @@
             }
         }
     }
+
+    function handleTemplateKeydown(event, template) {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectTemplate(template);
+        }
+    }
 </script>
 
 <header class="h-16 bg-white/90 backdrop-blur px-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0">
@@ -78,16 +85,21 @@
 
     {#each $taskStore.templates as tmpl (tmpl.id)}
         <div on:click={() => selectTemplate(tmpl)}
+            on:keydown={(event) => handleTemplateKeydown(event, tmpl)}
+            role="button"
+            tabindex="0"
             class="task-card template-card bg-white rounded-xl shadow-sm border border-slate-200 p-3 flex items-center gap-3 cursor-pointer relative"
             class:active={$activeTask && $activeTask.id === tmpl.id}>
             <div class="font-bold text-slate-800 text-sm flex-1">{tmpl.title}</div>
             <div class="flex items-center gap-1">
                 <button on:click|stopPropagation={() => openModal(tmpl)}
-                    class="p-1.5 text-slate-300 hover:text-purple-600 rounded">
+                    class="p-1.5 text-slate-300 hover:text-purple-600 rounded"
+                    aria-label={$_('task_detail.edit')}>
                     <i class="ph ph-pencil-simple text-lg"></i>
                 </button>
                 <button on:click|stopPropagation={() => deleteTemplate(tmpl.id)}
-                    class="p-1.5 text-slate-300 hover:text-red-600 rounded">
+                    class="p-1.5 text-slate-300 hover:text-red-600 rounded"
+                    aria-label={$_('common.delete')}>
                     <i class="ph ph-trash text-lg"></i>
                 </button>
             </div>

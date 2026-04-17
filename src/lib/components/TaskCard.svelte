@@ -104,9 +104,26 @@
     function getLatestNoteLine(note) {
         return note ? note.split('\n').filter(l => l.trim()).pop() : '';
     }
+
+    function handleCardClick(event) {
+        if (event.target instanceof Element && event.target.closest('[data-no-card-select="true"]')) {
+            return;
+        }
+        onSelect();
+    }
+
+    function handleCardKeydown(event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelect();
+        }
+    }
 </script>
 
-<div on:click={onSelect}
+<div on:click={handleCardClick}
+    on:keydown={handleCardKeydown}
+    role="button"
+    tabindex="0"
     class="task-card bg-white rounded-xl shadow-sm border border-slate-200 relative overflow-hidden cursor-pointer group"
     class:active={$activeTask && $activeTask.id === task.id}>
     {#if isOverdue}
@@ -116,12 +133,13 @@
     <div class="p-3 flex items-center gap-2 md:gap-3 relative z-0 min-h-[4rem]">
         <button on:click|stopPropagation={toggleExpanded}
             class="shrink-0 text-slate-400 w-5 md:w-6 transition-transform"
-            class:rotate-90={task.expanded}>
+            class:rotate-90={task.expanded}
+            aria-label={task.expanded ? $_('dashboard.collapse') : $_('dashboard.expand')}>
             <i class="ph-bold ph-caret-right text-lg"></i>
         </button>
 
-        <div class="relative w-14 md:w-24 shrink-0" on:click|stopPropagation>
-            <select value={task.priority} on:change={updatePriority}
+        <div class="relative w-14 md:w-24 shrink-0">
+            <select value={task.priority} on:change={updatePriority} on:click|stopPropagation
                 class="w-full appearance-none px-1 md:pl-7 md:pr-2 py-1.5 rounded-lg text-xs font-bold border bg-white focus:outline-none text-center md:text-left {getPriorityStyle(task.priority)}">
                 <option value="normal">{$_('task_priority.normal')}</option>
                 <option value="urgent">{$_('task_priority.urgent')}</option>
@@ -132,8 +150,8 @@
             </div>
         </div>
 
-        <div class="relative w-16 md:w-28 shrink-0" on:click|stopPropagation>
-            <select value={task.status} on:change={updateStatus}
+        <div class="relative w-16 md:w-28 shrink-0">
+            <select value={task.status} on:change={updateStatus} on:click|stopPropagation
                 class="w-full appearance-none px-1 md:pl-7 md:pr-2 py-1.5 rounded-lg text-xs font-bold border bg-white focus:outline-none text-center md:text-left {getStatusStyle(task.status)}">
                 <option value="todo">{$_('task_status.todo')}</option>
                 <option value="doing">{$_('task_status.doing')}</option>
@@ -165,18 +183,23 @@
 
         <div class="flex items-center gap-1 shrink-0 ml-1">
             <button on:click|stopPropagation={() => openModal(task)}
-                class="p-1.5 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded">
+                class="p-1.5 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded"
+                aria-label={$_('task_detail.edit')}>
                 <i class="ph ph-pencil-simple text-lg"></i>
             </button>
             <button on:click|stopPropagation={deleteTask}
-                class="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded">
+                class="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded"
+                aria-label={$_('common.delete')}>
                 <i class="ph ph-trash text-lg"></i>
             </button>
         </div>
     </div>
 
     {#if task.expanded}
-        <div class="bg-slate-50 border-t border-slate-100 px-4 py-3 ml-0 md:ml-14" on:click|stopPropagation>
+        <div
+            class="bg-slate-50 border-t border-slate-100 px-4 py-3 ml-0 md:ml-14"
+            data-no-card-select="true"
+        >
             <div class="space-y-2">
                 {#each task.subtasks || [] as sub, idx}
                     <div class="flex items-start gap-2">
@@ -189,7 +212,7 @@
                                 {sub.title}
                             </span>
                         </label>
-                        <button on:click={() => removeSubtask(idx)} class="text-slate-300 hover:text-red-500">
+                        <button on:click={() => removeSubtask(idx)} class="text-slate-300 hover:text-red-500" aria-label={$_('common.delete')}>
                             <i class="ph ph-x"></i>
                         </button>
                     </div>

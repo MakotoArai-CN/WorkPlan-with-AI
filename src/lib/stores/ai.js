@@ -1,4 +1,4 @@
-import { writable, get } from 'svelte/store';
+import { writable, get, derived } from 'svelte/store';
 import { isG4FProvider } from '../utils/g4f-client.js';
 import {
     looksLikeFileIntent,
@@ -9,8 +9,10 @@ import {
 } from '../utils/local-file-tools.js';
 import {
     looksLikeWebSearchIntent,
-    searchWeb
+    searchWeb,
+    fetchWebContent
 } from '../utils/web-search.js';
+import { settingsStore } from './settings.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
 const AI_CHAT_HISTORY_KEY = 'planpro_ai_chat_history';
@@ -104,6 +106,112 @@ export const modelsLoading = writable(false);
 export const lastFailedMessage = writable(null);
 export const streamingContent = writable('');
 export const pendingTaskOperation = writable(null);
+export const aiChatRuntimeCapabilities = writable({
+    probed: false,
+    probing: false,
+    localFilesRuntimeAvailable: null,
+    webSearchRuntimeAvailable: null,
+    toolCallRuntimeAvailable: null
+});
+export const aiChatCapabilities = derived(
+    [settingsStore, aiConfig, aiChatRuntimeCapabilities],
+    ([$settings, $config, $runtime]) => {
+        const needsApiKey = !isG4FProvider($config.provider) &&
+            $config.provider !== 'ollama' &&
+            $config.provider !== 'lmstudio';
+        const toolRouterEnabled = $settings.enableAiChatTools ?? true;
+        const localFileEnabled = $settings.localFileConfig?.enabled ?? false;
+
+        const localFilesSettingAvailable = toolRouterEnabled && localFileEnabled;
+        const localFilesAvailable = $runtime.probed
+            ? localFilesSettingAvailable && ($runtime.localFilesRuntimeAvailable !== false)
+            : localFilesSettingAvailable;
+        const webSearchAvailable = $runtime.probed
+            ? toolRouterEnabled && ($runtime.webSearchRuntimeAvailable !== false)
+            : toolRouterEnabled;
+        const toolCallAvailable = $runtime.probed
+            ? ($runtime.toolCallRuntimeAvailable !== false)
+            : true;
+
+        return {
+            mode: toolRouterEnabled ? 'internal_router' : 'chat_only',
+            connectionReady: !needsApiKey || Boolean($config.apiKey),
+            toolRouterEnabled,
+            projectToolsAvailable: toolRouterEnabled && toolCallAvailable,
+            localFilesAvailable,
+            localFilesRequireConfirmation: localFilesAvailable &&
+                ($settings.localFileConfig?.requireConfirmation ?? true),
+            webSearchAvailable,
+            toolCallRuntimeAvailable: toolCallAvailable,
+            workspaceRoot: $settings.workspaceRoot || '',
+            probed: $runtime.probed,
+            probing: $runtime.probing
+        };
+    }
+);
+
+export async function probeAiCapabilities() {
+    const runtime = get(aiChatRuntimeCapabilities);
+    if (runtime.probing) return;
+
+    aiChatRuntimeCapabilities.update(r => ({ ...r, probing: true }));
+
+    let localFilesOk = null;
+    let webSearchOk = null;
+    let toolCallOk = null;
+
+    try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('get_workspace_root');
+        localFilesOk = true;
+    } catch {
+        localFilesOk = false;
+    }
+
+    try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('search_web', { query: 'test', maxResults: 1 });
+        webSearchOk = true;
+    } catch (e) {
+        const errMsg = String(e?.message || e || '').toLowerCase();
+        if (errMsg.includes('not found') || errMsg.includes('not implemented') ||
+            errMsg.includes('no such') || errMsg.includes('plugin')) {
+            webSearchOk = false;
+        } else {
+            webSearchOk = true;
+        }
+    }
+
+    try {
+        const config = getEffectiveConfig();
+        const needsApiKey = !isG4FProvider(config.provider) &&
+            config.provider !== 'ollama' &&
+            config.provider !== 'lmstudio';
+        if (needsApiKey && !config.apiKey) {
+            toolCallOk = false;
+        } else {
+            const { callAI } = await import('../utils/ai-providers.js');
+            const probe = await callAI(config, 'respond with only the word OK', 'You are a test probe. Respond with only the word OK.');
+            toolCallOk = typeof probe === 'string' && probe.length > 0;
+        }
+    } catch {
+        toolCallOk = false;
+    }
+
+    aiChatRuntimeCapabilities.set({
+        probed: true,
+        probing: false,
+        localFilesRuntimeAvailable: localFilesOk,
+        webSearchRuntimeAvailable: webSearchOk,
+        toolCallRuntimeAvailable: toolCallOk
+    });
+
+    return {
+        localFilesRuntimeAvailable: localFilesOk,
+        webSearchRuntimeAvailable: webSearchOk,
+        toolCallRuntimeAvailable: toolCallOk
+    };
+}
 
 const WEEKDAY_MAP = ['日', '一', '二', '三', '四', '五', '六'];
 const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -929,6 +1037,16 @@ const PROJECT_CHAT_KEYWORDS = [
     'priority', 'deadline', 'subtask', 'task', 'tasks', 'template',
     'templates', 'schedule', 'scheduled', 'kanban', 'note', 'notes'
 ];
+const PROJECT_ANALYSIS_KEYWORDS = [
+    '总结', '汇总', '复盘', '统计', '分析', '日报', '周报', '月报', '进展',
+    '完成情况', 'report', 'summary', 'review', 'progress', 'analysis'
+];
+const NATURAL_TASK_ACTION_KEYWORDS = [
+    '安排', '提醒', '记得', '跟进', '处理', '提交', '开会', '会议', '沟通', '拜访',
+    '面试', '复盘', '汇报', '发布', '上线', '整理', '采购', '报销', 'review',
+    'meeting', 'call', 'sync', 'submit', 'follow up', 'follow-up', 'remind'
+];
+const TIME_REFERENCE_REGEX = /(今天|明天|后天|今晚|今早|上午|中午|下午|傍晚|晚上|本周|下周|本月|下个月|周一|周二|周三|周四|周五|周六|周日|\b(today|tomorrow|tonight|this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b\d{1,2}(:\d{2})?\s?(am|pm)\b|\d{1,2}\s*点(\d{1,2}分)?)/i;
 const SOURCE_KEYWORD_MAP = {
     scheduled: ['定时', '周期', '每周', '每天', '重复', 'scheduled', 'schedule', 'recurring'],
     templates: ['模板', '模版', 'template', 'templates'],
@@ -961,7 +1079,21 @@ function looksLikeProjectIntent(text = '') {
         QUERY_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
         SUBTASK_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
         ['新增', '添加', '创建', '新建', '整理', '汇总', '总结', '复盘', '统计', 'report'].some(keyword => lowerText.includes(keyword));
-    return hasProjectKeyword && hasActionKeyword;
+    const hasAnalysisKeyword = PROJECT_ANALYSIS_KEYWORDS.some(keyword => lowerText.includes(keyword));
+    return (hasProjectKeyword && hasActionKeyword) ||
+        looksLikeNaturalTaskIntent(text) ||
+        (hasAnalysisKeyword && (hasProjectKeyword || TIME_REFERENCE_REGEX.test(text)));
+}
+
+function looksLikeNaturalTaskIntent(text = '') {
+    const lowerText = String(text).toLowerCase();
+    const hasTimeHint = TIME_REFERENCE_REGEX.test(text);
+    const hasActionHint = NATURAL_TASK_ACTION_KEYWORDS.some(keyword => lowerText.includes(keyword));
+    const hasImperativeHint = /(帮我|请帮我|记一下|安排一下|提醒我|创建一个|新建一个|add|create|schedule|remind)/i.test(text);
+    const hasEventLikePattern = /(会议|开会|跟进|提交|汇报|提醒|面试|复盘|付款|报销|review|meeting|call|sync)/i.test(text);
+
+    return (hasTimeHint && (hasActionHint || hasImperativeHint || hasEventLikePattern)) ||
+        (hasImperativeHint && hasEventLikePattern);
 }
 
 function detectAssistantSourceFromText(text = '', fallbackSource = 'tasks') {
@@ -1199,6 +1331,143 @@ function shouldUseAssistantToolsInChat(text = '') {
         looksLikeProjectIntent(text);
 }
 
+function extractQuotedSegment(text = '') {
+    const patterns = [
+        /`([^`]+)`/,
+        /“([^”]+)”/,
+        /"([^"]+)"/,
+        /'([^']+)'/
+    ];
+    for (const pattern of patterns) {
+        const match = String(text).match(pattern);
+        if (match?.[1]?.trim()) {
+            return match[1].trim();
+        }
+    }
+    return '';
+}
+
+function extractLikelyPath(text = '') {
+    const candidates = [
+        extractQuotedSegment(text),
+        String(text).match(/[A-Za-z]:\\[^\n\r"'`]+/)?.[0] || '',
+        String(text).match(/(?:^|[\s(])(\.\/[^\s"'`]+|\/[^\s"'`]+)(?=$|[\s)])/i)?.[1] || '',
+        String(text).match(/([A-Za-z0-9_.\-\/\\]+\.(?:md|txt|json|js|ts|tsx|jsx|svelte|rs|html|css|scss|yml|yaml|toml|csv|sql|log|xml))/i)?.[1] || ''
+    ];
+
+    return candidates.find((candidate) => candidate && /[\\/\.]/.test(candidate)) || '';
+}
+
+function extractFencedContent(text = '') {
+    const fenced = String(text).match(/```(?:[\w-]+)?\n([\s\S]*?)```/);
+    if (fenced?.[1] !== undefined) {
+        return fenced[1].trimEnd();
+    }
+
+    const inline = String(text).match(/内容[：:]\s*([\s\S]+)/);
+    return inline?.[1]?.trim() || '';
+}
+
+function inferLocalFileOperation(text = '') {
+    const lowerText = String(text).toLowerCase();
+    if (/(删除文件|移除文件|删掉文件|delete file|remove file|unlink)/i.test(text)) {
+        return 'delete';
+    }
+    if (/(写入|保存到|创建文件|新建文件|修改文件|覆盖|追加|write file|save file|create file|update file)/i.test(text)) {
+        return 'write';
+    }
+    if (/(读取|打开文件|查看文件|读取文件|read file|open file|cat )/i.test(text)) {
+        return 'read';
+    }
+    if (/(扫描|列出|搜索文件|查找文件|找文件|scan|search file|find file|list files|workspace)/i.test(text)) {
+        return 'search';
+    }
+    return null;
+}
+
+function buildFallbackLocalFileIntent(userText, settings = get(settingsStore)) {
+    if (!looksLikeFileIntent(userText)) {
+        return null;
+    }
+
+    const operation = inferLocalFileOperation(userText) || 'search';
+    const path = extractLikelyPath(userText);
+    const cleanedQuery = String(userText)
+        .replace(/请|帮我|麻烦|一下|在项目里|在工作目录里|工作目录|workspace|目录里|文件夹里/gi, ' ')
+        .replace(/(读取|打开|查看|扫描|列出|搜索|查找|找|写入|保存|创建|新建|修改|删除)(文件|目录|文件夹)?/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const fallbackQuery = extractQuotedSegment(userText) || path || cleanedQuery;
+
+    if ((operation === 'read' || operation === 'delete') && !path) {
+        return null;
+    }
+
+    if (operation === 'write' && !path) {
+        return null;
+    }
+
+    if (operation === 'write') {
+        return {
+            mode: 'file',
+            operation,
+            path,
+            content: extractFencedContent(userText),
+            response_goal: '说明文件已写入的位置；如果用户给了内容，概括写入结果。',
+            message: '已按本地文件兼容模式解析为写入操作。'
+        };
+    }
+
+    if (operation === 'read') {
+        return {
+            mode: 'file',
+            operation,
+            path,
+            response_goal: '基于文件内容直接回答用户，并明确说明读取的是哪个文件。',
+            message: '已按本地文件兼容模式解析为读取操作。'
+        };
+    }
+
+    if (operation === 'delete') {
+        return {
+            mode: 'file',
+            operation,
+            path,
+            response_goal: '明确说明文件删除结果。',
+            message: '已按本地文件兼容模式解析为删除操作。'
+        };
+    }
+
+    return {
+        mode: 'file',
+        operation: 'search',
+        root: '',
+        query: fallbackQuery || settings.workspaceRoot || '',
+        response_goal: '列出匹配的本地文件或目录，并指出最相关的候选结果。',
+        message: '已按本地文件兼容模式解析为搜索操作。'
+    };
+}
+
+function buildFallbackWebSearchIntent(userText = '') {
+    if (!looksLikeWebSearchIntent(userText)) {
+        return null;
+    }
+
+    const query = String(userText)
+        .replace(/请|帮我|麻烦|一下/gi, ' ')
+        .replace(/(联网|网页|网上|在线|online|web)\s*(搜索|查找|查询)/gi, ' ')
+        .replace(/搜索一下|查一下|搜一下|帮我搜索|web search|online search/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return {
+        mode: 'web',
+        query: query || userText,
+        response_goal: '根据搜索结果回答用户，并保留关键链接与来源。',
+        message: '已按网页搜索兼容模式执行检索。'
+    };
+}
+
 function extractJsonPayload(value = '') {
     const cleanValue = String(value || '')
         .replace(/```json/g, '')
@@ -1242,19 +1511,22 @@ function formatNoteContextForAI(context = {}) {
     ].join('\n');
 }
 
-async function buildContextualAssistantResponse(userText, assistantContext, config) {
+async function buildContextualAssistantResponse(userText, assistantContext, config, options = {}) {
     const { callAIWithMessages } = await import('../utils/ai-providers.js');
     const nowStr = getFormattedDateTime();
     const projectContext = await getProjectContextSummary();
     const scopedItems = formatContextItemsForAI(assistantContext.items, assistantContext);
     const noteContext = formatNoteContextForAI(assistantContext);
+    const allowActions = options.allowActions ?? true;
 
     const messages = [
         {
             role: 'system',
             content: `你是 WorkPlan 的内置 AI 助手。当前时间：${nowStr}。
 你正在右侧助手面板中工作，必须优先基于当前页面上下文回答。
-如果用户没有明确要求执行结构化的新增/修改/删除操作，就直接给出专业回答、总结、规划建议或内容改写结果。
+${allowActions
+        ? '如果用户没有明确要求执行结构化的新增/修改/删除操作，就直接给出专业回答、总结、规划建议或内容改写结果。'
+        : '当前 AI 聊天的工具调用能力已关闭。你只能基于现有上下文提供建议、解释、总结或草稿，不能声称已经执行项目修改、本地文件操作或网页搜索。'}
 回答必须准确、克制，不要捏造项目中不存在的数据。
 
 【当前页面】
@@ -1291,13 +1563,39 @@ function formatLocalFileSearchResult(entries = []) {
     ].join('\n');
 }
 
-async function analyzeLocalFileIntent(userText, config, callAI) {
-    const { settingsStore } = await import('./settings.js');
-    const settings = get(settingsStore);
-    const localFileConfig = settings.localFileConfig || {};
-    if (!localFileConfig.enabled || !looksLikeFileIntent(userText)) {
+const VALID_INTENTS = new Set(['chat', 'web_search', 'file', 'task']);
+
+async function classifyUserIntent(text, config) {
+    const systemPrompt = `You are a strict intent classifier. Classify the user message into exactly one category. Return ONLY valid JSON, no explanation.
+
+Categories:
+- "chat": general conversation, Q&A, writing, translation, explaining concepts, greetings, jokes
+- "web_search": requires real-time or online information (weather, news, stock/gold/oil prices, exchange rates, search the web, latest version of something, current events, official websites)
+- "file": involves local file operations (read, write, delete, scan, search files/directories, check file contents, file paths mentioned)
+- "task": involves tasks/todos/templates/scheduled tasks — adding, deleting, modifying, querying, completing, or listing tasks
+
+Output: {"intent": "chat"}  or  {"intent": "web_search"}  or  {"intent": "file"}  or  {"intent": "task"}`;
+
+    try {
+        const { callAI } = await import('../utils/ai-providers.js');
+        const aiResponse = await callAI(config, text, systemPrompt);
+        if (!aiResponse) return 'chat';
+        const parsed = extractJsonPayload(aiResponse);
+        const intent = String(parsed?.intent || 'chat').toLowerCase();
+        return VALID_INTENTS.has(intent) ? intent : 'chat';
+    } catch (error) {
+        console.warn('classifyUserIntent failed, falling back to keyword detection:', error);
         return null;
     }
+}
+
+async function analyzeLocalFileIntent(userText, config, callAI, intentHint = null) {
+    const settings = get(settingsStore);
+    const localFileConfig = settings.localFileConfig || {};
+    if (!localFileConfig.enabled || (!looksLikeFileIntent(userText) && intentHint !== 'file')) {
+        return null;
+    }
+    const fallbackPlan = buildFallbackLocalFileIntent(userText, settings);
 
     const workspaceRoot = settings.workspaceRoot || '未知工作目录';
     const trustedDirectories = localFileConfig.trustedDirectories || [];
@@ -1331,18 +1629,26 @@ ${trustedDirectories.length > 0 ? trustedDirectories.map((item) => `- ${item}`).
   "message": "给用户的简短说明"
 }`;
 
-    const aiResponse = await callAI(config, userText, systemPrompt);
-    if (!aiResponse) return null;
-
     try {
+        const aiResponse = await callAI(config, userText, systemPrompt);
+        if (!aiResponse) return fallbackPlan;
         const parsed = extractJsonPayload(aiResponse);
         if (parsed.mode !== 'file' || !parsed.operation) {
-            return null;
+            return fallbackPlan;
         }
-        return parsed;
+        return {
+            ...fallbackPlan,
+            ...parsed,
+            path: parsed.path || fallbackPlan?.path || '',
+            root: parsed.root || fallbackPlan?.root || '',
+            query: parsed.query || fallbackPlan?.query || '',
+            content: parsed.content ?? fallbackPlan?.content ?? '',
+            response_goal: parsed.response_goal || fallbackPlan?.response_goal,
+            message: parsed.message || fallbackPlan?.message
+        };
     } catch (error) {
-        console.error('Failed to parse local file intent:', error, aiResponse);
-        return null;
+        console.error('Failed to parse local file intent:', error);
+        return fallbackPlan;
     }
 }
 
@@ -1366,10 +1672,11 @@ function formatWebSearchResult(entries = []) {
     ].join('\n');
 }
 
-async function analyzeWebSearchIntent(userText, config, callAI) {
-    if (!looksLikeWebSearchIntent(userText)) {
+async function analyzeWebSearchIntent(userText, config, callAI, intentHint = null) {
+    if (!looksLikeWebSearchIntent(userText) && intentHint !== 'web_search') {
         return null;
     }
+    const fallbackPlan = buildFallbackWebSearchIntent(userText);
 
     const systemPrompt = `你是 WorkPlan 的网页搜索技能路由器。你需要判断用户是否真的需要联网搜索，并提取搜索词。
 
@@ -1391,18 +1698,23 @@ async function analyzeWebSearchIntent(userText, config, callAI) {
   "message": "给用户的简短提示"
 }`;
 
-    const aiResponse = await callAI(config, userText, systemPrompt);
-    if (!aiResponse) return null;
-
     try {
+        const aiResponse = await callAI(config, userText, systemPrompt);
+        if (!aiResponse) return fallbackPlan;
         const parsed = extractJsonPayload(aiResponse);
         if (parsed.mode !== 'web' || !parsed.query) {
-            return null;
+            return fallbackPlan;
         }
-        return parsed;
+        return {
+            ...fallbackPlan,
+            ...parsed,
+            query: parsed.query || fallbackPlan?.query || userText,
+            response_goal: parsed.response_goal || fallbackPlan?.response_goal,
+            message: parsed.message || fallbackPlan?.message
+        };
     } catch (error) {
-        console.error('Failed to parse web search intent:', error, aiResponse);
-        return null;
+        console.error('Failed to parse web search intent:', error);
+        return fallbackPlan;
     }
 }
 
@@ -1433,7 +1745,6 @@ ${toolResult}`
 }
 
 async function runLocalFilePlan(plan, userText, config, requireConfirmation = true) {
-    const { settingsStore } = await import('./settings.js');
     const settings = get(settingsStore);
     const trustedDirectories = settings.localFileConfig?.trustedDirectories || [];
     const operation = String(plan.operation || '').toLowerCase();
@@ -1516,11 +1827,28 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
     };
 }
 
-async function runWebSearchPlan(plan, userText, config) {
+async function runWebSearchPlan(plan, userText, config, onProgress = null) {
     const results = await searchWeb({
         query: plan.query || userText,
         maxResults: plan.maxResults || 6
     });
+
+    // Fetch page content for top results to give AI richer context
+    let pageContents = '';
+    if (results.length > 0) {
+        if (onProgress) onProgress('fetching');
+        const fetches = await Promise.allSettled(
+            results.slice(0, 3).map(r => fetchWebContent(r.url, 3000))
+        );
+        const contents = fetches
+            .map((r, i) => r.status === 'fulfilled' && r.value ? `[${results[i].title}]\n${r.value}` : null)
+            .filter(Boolean);
+        if (contents.length > 0) {
+            pageContents = '\n\n网页正文摘录:\n' + contents.join('\n\n---\n\n');
+        }
+    }
+
+    if (onProgress) onProgress('generating');
     const fallback = formatWebSearchResult(results);
     const summarized = await finalizeToolAnswer(
         userText,
@@ -1528,7 +1856,7 @@ async function runWebSearchPlan(plan, userText, config) {
             operation: 'web_search',
             response_goal: plan.response_goal || '根据网页搜索结果直接回答用户，并保留关键链接。'
         },
-        fallback,
+        fallback + pageContents,
         config
     );
     return {
@@ -1583,9 +1911,11 @@ function normalizeAssistantResult(result, assistantContext) {
     };
 }
 
-async function resolveAssistantMessage(text, existingTasks = [], currentConfig = getEffectiveConfig()) {
+async function resolveAssistantMessage(text, existingTasks = [], currentConfig = getEffectiveConfig(), intentHint = null, onProgress = null) {
+    const progress = (step) => { if (onProgress) onProgress(step); };
     const assistantContext = normalizeAssistantPayload(existingTasks);
     const scopedItems = assistantContext.items || [];
+    const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
     const subtaskOperation = detectSubtaskOperation(text);
     const lowerText = text.toLowerCase();
     const createKeywords = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
@@ -1598,9 +1928,18 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     const timeScope = detectTimeScope(text, dateInfo);
 
     const { callAI } = await import('../utils/ai-providers.js');
-    const requireFileConfirmation = get((await import('./settings.js')).settingsStore).localFileConfig?.requireConfirmation ?? true;
-    const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI);
-    const localFilePlan = await analyzeLocalFileIntent(text, currentConfig, callAI);
+    const requireFileConfirmation = get(settingsStore).localFileConfig?.requireConfirmation ?? true;
+
+    if (!aiChatToolsEnabled) {
+        return normalizeAssistantResult(
+            await buildContextualAssistantResponse(text, assistantContext, currentConfig, { allowActions: false }),
+            assistantContext
+        );
+    }
+
+    progress('classifying');
+    const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI, intentHint);
+    const localFilePlan = await analyzeLocalFileIntent(text, currentConfig, callAI, intentHint);
     const relevantTasks = filterTasksByTimeScope(scopedItems, timeScope, dateInfo);
     const allowImplicitCreate = assistantContext.scope === 'dashboard' ||
         assistantContext.scope === 'project' ||
@@ -1609,44 +1948,64 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
 
     let result;
     if (localFilePlan) {
+        progress('file_operating');
         result = await runLocalFilePlan(localFilePlan, text, currentConfig, requireFileConfirmation);
     } else if (webSearchPlan) {
-        result = await runWebSearchPlan(webSearchPlan, text, currentConfig);
+        progress('web_searching');
+        result = await runWebSearchPlan(webSearchPlan, text, currentConfig, progress);
     } else if (assistantContext.mode === 'note') {
+        progress('generating');
         result = await buildContextualAssistantResponse(text, assistantContext, currentConfig);
     } else if (assistantContext.source === 'templates' && subtaskOperation) {
+        progress('task_processing');
         result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     } else if (assistantContext.source === 'templates' && (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword))) {
+        progress('task_processing');
         result = await analyzeTemplateCreateIntent(text, scopedItems, currentConfig, callAI);
     } else if (assistantContext.source === 'templates' && operationType === 'mixed') {
+        progress('task_processing');
         result = await analyzeTemplateMixedIntent(text, scopedItems, currentConfig, callAI);
     } else if (assistantContext.source === 'templates' && operationType === 'delete') {
+        progress('task_processing');
         result = await analyzeTemplateDeleteIntent(text, scopedItems, currentConfig, callAI);
     } else if (assistantContext.source === 'templates' && operationType === 'update') {
+        progress('task_processing');
         result = await analyzeTemplateUpdateIntent(text, scopedItems, currentConfig, callAI);
     } else if (assistantContext.source === 'templates' && operationType === 'query') {
+        progress('task_processing');
         result = await analyzeTemplateQueryIntent(text, scopedItems, currentConfig, callAI);
     } else if (assistantContext.source === 'scheduled' && subtaskOperation) {
+        progress('task_processing');
         result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     } else if (assistantContext.source === 'scheduled' && (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword))) {
+        progress('task_processing');
         result = await analyzeScheduledCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     } else if (assistantContext.source === 'scheduled' && operationType === 'update') {
+        progress('task_processing');
         result = await analyzeScheduledUpdateIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
     } else if (subtaskOperation) {
+        progress('task_processing');
         result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     } else if (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword)) {
+        progress('task_processing');
         result = await analyzeCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     } else if (operationType === 'mixed') {
+        progress('task_processing');
         result = await analyzeMixedIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
     } else if (operationType === 'delete') {
+        progress('task_processing');
         result = await analyzeDeleteIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
     } else if (operationType === 'update') {
+        progress('task_processing');
         result = await analyzeUpdateIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
     } else if (operationType === 'query') {
+        progress('task_processing');
         result = await analyzeQueryIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
     } else if (hasNoActionKeyword) {
+        progress('generating');
         result = await buildContextualAssistantResponse(text, assistantContext, currentConfig);
     } else {
+        progress('task_processing');
         result = await analyzeCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     }
 
@@ -1773,6 +2132,7 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
         }
         return nextHistory;
     });
+    saveAiChatHistory();
 
     try {
         const result = await runLocalFilePlan(operation, operation.message || '', currentConfig, false);
@@ -1782,6 +2142,7 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
             return nextHistory;
         });
         saveAiChatHistory();
+        return { success: true, result };
     } catch (error) {
         aiChatHistory.update(history => {
             const nextHistory = [...history];
@@ -1794,6 +2155,7 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
             return nextHistory;
         });
         saveAiChatHistory();
+        return { success: false, error: error.message || String(error) };
     }
 }
 
@@ -3068,9 +3430,50 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     streamingContent.set('');
 
     try {
-        if (shouldUseAssistantToolsInChat(text)) {
+        const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
+
+        // Helper: update tool progress in chat history
+        function updateToolProgress(stepKey) {
+            aiChatHistory.update(h => {
+                const nh = [...h];
+                const existing = nh[streamingIndex];
+                const prevSteps = existing?.steps || [];
+                if (existing?.currentStep) prevSteps.push(existing.currentStep);
+                nh[streamingIndex] = {
+                    role: 'assistant',
+                    type: 'tool_progress',
+                    steps: prevSteps,
+                    currentStep: stepKey
+                };
+                return nh;
+            });
+        }
+
+        let useToolRouter = false;
+        let intentHint = null;
+
+        if (aiChatToolsEnabled) {
+            if (shouldUseAssistantToolsInChat(text)) {
+                // Fast path: keyword match → go straight to tool router (zero delay)
+                useToolRouter = true;
+                updateToolProgress('classifying');
+            } else {
+                // AI fallback: keywords missed, let AI classify intent
+                updateToolProgress('ai_classifying');
+                const aiIntent = await classifyUserIntent(text, currentConfig);
+                if (aiIntent === null) {
+                    // classifyUserIntent failed (API error), fall back to chat
+                    useToolRouter = false;
+                } else if (aiIntent !== 'chat') {
+                    useToolRouter = true;
+                    intentHint = aiIntent;
+                }
+            }
+        }
+
+        if (useToolRouter) {
             const assistantPayload = await buildAiChatAssistantPayload(text);
-            const assistantResult = await resolveAssistantMessage(text, assistantPayload, currentConfig);
+            const assistantResult = await resolveAssistantMessage(text, assistantPayload, currentConfig, intentHint, updateToolProgress);
             aiChatHistory.update(h => {
                 const newHistory = [...h];
                 if (newHistory[streamingIndex]) {
@@ -3118,7 +3521,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
                 newHistory[streamingIndex] = {
                     role: 'assistant',
                     type: 'text',
-                    content: result || '抱歉，我无法理解您的问题。',
+                    content: result || 'Sorry, I could not understand your question.',
                     isStreaming: false
                 };
             }
@@ -3156,6 +3559,84 @@ export async function retryChatMessage(index) {
             await sendChatMessage(originalText, chatStyle, index);
         }
     }
+}
+
+export async function retryFromAssistantMessage(assistantIndex) {
+    const history = get(aiChatHistory);
+    // Find the user message before this assistant message
+    let userIndex = -1;
+    for (let i = assistantIndex - 1; i >= 0; i--) {
+        if (history[i]?.role === 'user') {
+            userIndex = i;
+            break;
+        }
+    }
+    if (userIndex === -1) return;
+
+    const originalText = history[userIndex].content;
+    if (!originalText) return;
+
+    // Remove the assistant message at assistantIndex, replace with loading
+    aiChatHistory.update(h => {
+        const newHistory = [...h];
+        newHistory[assistantIndex] = { role: 'assistant', type: 'loading' };
+        return newHistory;
+    });
+
+    await sendChatMessage(originalText, 'default', assistantIndex);
+}
+
+export function editAndResend(messageIndex) {
+    const history = get(aiChatHistory);
+    const msg = history[messageIndex];
+    if (!msg || msg.role !== 'user') return null;
+
+    const content = msg.content;
+    // Remove this message and everything after it
+    aiChatHistory.update(h => h.slice(0, messageIndex));
+    saveAiChatHistory();
+    return content;
+}
+
+export function rollbackMessage(messageIndex) {
+    const history = get(aiChatHistory);
+    const msg = history[messageIndex];
+    if (!msg || msg.role !== 'user') return;
+
+    // Remove the user message and the next assistant message (if exists)
+    const removeEnd = (messageIndex + 1 < history.length && history[messageIndex + 1]?.role === 'assistant')
+        ? messageIndex + 2
+        : messageIndex + 1;
+
+    aiChatHistory.update(h => [...h.slice(0, messageIndex), ...h.slice(removeEnd)]);
+    saveAiChatHistory();
+}
+
+export function exportChatToMarkdown() {
+    const history = get(aiChatHistory);
+    const session = get(aiChatSessions).find(s => s.id === get(activeAiChatSessionId));
+    const title = session?.title || 'AI Chat';
+    const lines = [`# ${title}\n`];
+
+    for (const msg of history) {
+        if (msg.role === 'user') {
+            lines.push(`**You:**\n> ${msg.content.replace(/\n/g, '\n> ')}\n`);
+        } else if (msg.type === 'text' || msg.type === 'streaming') {
+            lines.push(`**AI:**\n${msg.content || ''}\n`);
+        } else if (msg.type === 'web_search_result') {
+            lines.push(`**AI (Web Search):**\n${msg.summary || ''}\n`);
+            if (msg.entries?.length) {
+                for (const entry of msg.entries) {
+                    lines.push(`- [${entry.title}](${entry.url}): ${entry.snippet || ''}`);
+                }
+                lines.push('');
+            }
+        } else if (msg.type === 'error') {
+            lines.push(`**Error:** ${msg.content || ''}\n`);
+        }
+    }
+
+    return lines.join('\n');
 }
 
 export async function generateReport(tasks, reportType) {

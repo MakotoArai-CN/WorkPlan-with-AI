@@ -1539,6 +1539,7 @@
                 on:click={handleSend}
                 class="p-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-transform disabled:opacity-50"
                 disabled={!inputText.trim() || $isAiLoading}
+                aria-label={$_("common.send")}
             >
                 <i class="ph-bold ph-paper-plane-right"></i>
             </button>

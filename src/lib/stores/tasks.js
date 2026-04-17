@@ -50,13 +50,119 @@ function readDatabaseConfig() {
     }
 }
 
-async function getSupabase() {
-    if (typeof window === 'undefined') return null;
-    const databaseConfig = readDatabaseConfig();
-    if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
-        console.warn('Supabase configuration missing. Cloud sync disabled.');
-        return null;
+function shouldUseCustomHttpAdapter(databaseConfig) {
+    return Boolean(databaseConfig?.useCustomConfig);
+}
+
+function trimTrailingSlash(value = '') {
+    return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function resolveRestBaseUrl(url = '') {
+    const normalized = trimTrailingSlash(url);
+    if (!normalized) return '';
+    if (/\/rest\/v1$/i.test(normalized)) {
+        return normalized;
     }
+    return `${normalized}/rest/v1`;
+}
+
+function buildRestTableUrl(databaseConfig) {
+    const restBaseUrl = resolveRestBaseUrl(databaseConfig.url);
+    const tableName = databaseConfig.tableName || DEFAULT_TABLE_NAME;
+    return `${restBaseUrl}/${tableName}`;
+}
+
+function buildRestHeaders(databaseConfig, prefer = '') {
+    const headers = {
+        apikey: databaseConfig.apiKey,
+        Authorization: `Bearer ${databaseConfig.apiKey}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+    };
+    if (prefer) {
+        headers.Prefer = prefer;
+    }
+    return headers;
+}
+
+async function parseRestPayload(response) {
+    const raw = await response.text();
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return raw;
+    }
+}
+
+function toDatabaseError(response, payload) {
+    const error = new Error(
+        payload?.message ||
+        payload?.error?.message ||
+        payload?.hint ||
+        payload?.details ||
+        (typeof payload === 'string' ? payload : `HTTP ${response.status}`)
+    );
+    error.code = payload?.code || String(response.status);
+    error.status = response.status;
+    return error;
+}
+
+async function requestRestRecord(databaseConfig, accessKey) {
+    const url = new URL(buildRestTableUrl(databaseConfig));
+    url.searchParams.set('select', 'content,updated_at');
+    url.searchParams.set('user_key', `eq.${accessKey}`);
+    url.searchParams.set('limit', '1');
+
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: buildRestHeaders(databaseConfig)
+    });
+    const payload = await parseRestPayload(response);
+    if (!response.ok) {
+        throw toDatabaseError(response, payload);
+    }
+    return Array.isArray(payload) ? (payload[0] || null) : payload;
+}
+
+async function upsertRestRecord(databaseConfig, accessKey, content, updatedAt) {
+    const url = new URL(buildRestTableUrl(databaseConfig));
+    url.searchParams.set('on_conflict', 'user_key');
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: buildRestHeaders(databaseConfig, 'resolution=merge-duplicates,return=minimal'),
+        body: JSON.stringify([{
+            user_key: accessKey,
+            content,
+            updated_at: updatedAt
+        }])
+    });
+    const payload = await parseRestPayload(response);
+    if (!response.ok) {
+        throw toDatabaseError(response, payload);
+    }
+    return payload;
+}
+
+async function deleteRestRecord(databaseConfig, accessKey) {
+    const url = new URL(buildRestTableUrl(databaseConfig));
+    url.searchParams.set('user_key', `eq.${accessKey}`);
+
+    const response = await fetch(url, {
+        method: 'DELETE',
+        headers: buildRestHeaders(databaseConfig, 'return=minimal')
+    });
+    const payload = await parseRestPayload(response);
+    if (!response.ok) {
+        throw toDatabaseError(response, payload);
+    }
+    return payload;
+}
+
+async function getSupabaseClient(databaseConfig) {
+    if (typeof window === 'undefined') return null;
     const cacheKey = `${databaseConfig.url}|${databaseConfig.apiKey}`;
     if (supabase && supabaseCacheKey === cacheKey) return supabase;
     const { createClient } = await import('@supabase/supabase-js');
@@ -65,6 +171,79 @@ async function getSupabase() {
     });
     supabaseCacheKey = cacheKey;
     return supabase;
+}
+
+async function loadCloudRecord(accessKey) {
+    if (typeof window === 'undefined') return null;
+    const databaseConfig = readDatabaseConfig();
+    if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
+        console.warn('Database configuration missing. Cloud sync disabled.');
+        return null;
+    }
+
+    if (shouldUseCustomHttpAdapter(databaseConfig)) {
+        return await requestRestRecord(databaseConfig, accessKey);
+    }
+
+    const client = await getSupabaseClient(databaseConfig);
+    if (!client) return null;
+    const { data, error } = await client
+        .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
+        .select('content, updated_at')
+        .eq('user_key', accessKey)
+        .maybeSingle();
+
+    if (error) {
+        throw error;
+    }
+    return data;
+}
+
+async function saveCloudRecord(accessKey, content, updatedAt) {
+    if (typeof window === 'undefined') return;
+    const databaseConfig = readDatabaseConfig();
+    if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
+        return;
+    }
+
+    if (shouldUseCustomHttpAdapter(databaseConfig)) {
+        await upsertRestRecord(databaseConfig, accessKey, content, updatedAt);
+        return;
+    }
+
+    const client = await getSupabaseClient(databaseConfig);
+    if (!client) return;
+    const { error } = await client
+        .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
+        .upsert({ user_key: accessKey, content, updated_at: updatedAt }, { onConflict: 'user_key' });
+
+    if (error) {
+        throw error;
+    }
+}
+
+async function deleteCloudRecord(accessKey) {
+    if (typeof window === 'undefined') return;
+    const databaseConfig = readDatabaseConfig();
+    if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
+        return;
+    }
+
+    if (shouldUseCustomHttpAdapter(databaseConfig)) {
+        await deleteRestRecord(databaseConfig, accessKey);
+        return;
+    }
+
+    const client = await getSupabaseClient(databaseConfig);
+    if (!client) return;
+    const { error } = await client
+        .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
+        .delete()
+        .eq('user_key', accessKey);
+
+    if (error) {
+        throw error;
+    }
 }
 
 function isRetryableError(error) {
@@ -106,34 +285,14 @@ function createTaskStore() {
     }
 
     async function loadData(accessKey) {
-        const client = await getSupabase();
-        if (!client) {
+        const databaseConfig = readDatabaseConfig();
+        if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
             update(s => ({ ...s, syncStatus: 'idle' }));
             return;
         }
         update(s => ({ ...s, syncStatus: 'syncing' }));
         try {
-            const { data, error } = await client
-                .from(getTableName())
-                .select('content, updated_at')
-                .eq('user_key', accessKey)
-                .maybeSingle();
-
-            if (error) {
-                const msg = error.message || '';
-                if (error.code === 'PGRST116' || msg.includes('not find')) {
-                    update(s => ({ ...s, syncStatus: 'idle' }));
-                    return;
-                }
-                if (error.code === '42P01' || msg.includes('does not exist')) {
-                    console.warn('Table not found. Please create the planpro_data table in Supabase.');
-                    update(s => ({ ...s, syncStatus: 'idle' }));
-                    return;
-                }
-                console.error('Load data error:', error.code, error.message);
-                update(s => ({ ...s, syncStatus: 'error' }));
-                return;
-            }
+            const data = await loadCloudRecord(accessKey);
 
             if (data && data.content) {
                 const json = data.content;
@@ -154,14 +313,23 @@ function createTaskStore() {
                 update(s => ({ ...s, syncStatus: 'idle' }));
             }
         } catch (e) {
+            const msg = e?.message || '';
+            if (e?.code === 'PGRST116' || msg.includes('not find')) {
+                update(s => ({ ...s, syncStatus: 'idle' }));
+                return;
+            }
+            if (e?.code === '42P01' || e?.code === 'PGRST205' || msg.includes('does not exist')) {
+                console.warn('Table not found. Please create the planpro_data table in your database service.');
+                update(s => ({ ...s, syncStatus: 'idle' }));
+                return;
+            }
             console.error('Load error:', e);
             update(s => ({ ...s, syncStatus: 'error' }));
         }
     }
 
     async function saveData(state) {
-        const client = await getSupabase();
-        if (!client || !state.accessKey) return;
+        if (!state.accessKey) return;
 
         const currentPureStr = getPureDataString({
             tasks: state.tasks,
@@ -178,17 +346,9 @@ function createTaskStore() {
             try {
                 const nowTimestamp = Date.now();
                 const rawData = JSON.parse(currentPureStr);
-                const { error } = await client
-                    .from(getTableName())
-                    .upsert({ user_key: state.accessKey, content: rawData, updated_at: nowTimestamp }, { onConflict: 'user_key' });
-
-                if (error) {
-                    console.error('Save error:', error);
-                    update(s => ({ ...s, syncStatus: 'error' }));
-                } else {
-                    update(s => ({ ...s, syncStatus: 'done', lastCloudStr: currentPureStr }));
-                    setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
-                }
+                await saveCloudRecord(state.accessKey, rawData, nowTimestamp);
+                update(s => ({ ...s, syncStatus: 'done', lastCloudStr: currentPureStr }));
+                setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
             } catch (e) {
                 console.error('Save error:', e);
                 update(s => ({ ...s, syncStatus: 'error' }));
@@ -311,13 +471,10 @@ function createTaskStore() {
             return s;
         }),
         clearAllData: async (accessKey) => {
-            const client = await getSupabase();
-            if (client) {
-                try {
-                    await client.from(getTableName()).delete().eq('user_key', accessKey);
-                } catch (e) {
-                    console.error('Delete error:', e);
-                }
+            try {
+                await deleteCloudRecord(accessKey);
+            } catch (e) {
+                console.error('Delete error:', e);
             }
             if (typeof window !== 'undefined') {
                 localStorage.removeItem('planpro_access_key');

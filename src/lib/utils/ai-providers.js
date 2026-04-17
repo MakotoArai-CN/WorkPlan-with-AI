@@ -377,11 +377,30 @@ const PROVIDER_CONFIGS = {
 
 let baiduTokenCache = { token: null, expireTime: 0 };
 let modelCache = {};
+const ALLOWED_ENDPOINT_PROTOCOLS = new Set(['http:', 'https:']);
+
+function normalizeHttpEndpoint(url) {
+    const value = String(url || '').trim();
+    if (!value) {
+        throw new Error('未配置 API 端点');
+    }
+
+    try {
+        const parsed = new URL(value);
+        if (!ALLOWED_ENDPOINT_PROTOCOLS.has(parsed.protocol)) {
+            throw new Error('仅支持 http/https 协议');
+        }
+        return parsed.toString();
+    } catch {
+        throw new Error('无效的 API 地址，仅支持 http/https 协议');
+    }
+}
 
 async function fetchWithTauri(url, options = {}) {
     if (typeof window === 'undefined') {
         throw new Error('Not in browser environment');
     }
+    const safeUrl = normalizeHttpEndpoint(url);
     try {
         const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
         const headers = {};
@@ -403,7 +422,7 @@ async function fetchWithTauri(url, options = {}) {
                 fetchOptions.body = JSON.stringify(options.body);
             }
         }
-        const response = await tauriFetch(url, fetchOptions);
+        const response = await tauriFetch(safeUrl, fetchOptions);
         return {
             ok: response.ok,
             status: response.status,
@@ -888,7 +907,7 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
     }
     let fullContent = '';
     try {
-        const response = await fetch(finalEndpoint, {
+        const response = await fetch(normalizeHttpEndpoint(finalEndpoint), {
             method: 'POST',
             headers,
             body: JSON.stringify(requestBody)

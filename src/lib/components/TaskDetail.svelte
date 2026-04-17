@@ -85,8 +85,8 @@
             </div>
 
             <div class="flex-1 flex flex-col mb-6 min-h-[150px]">
-                <label class="text-xs font-bold text-slate-500 uppercase mb-2">{$_('task_detail.notes')}</label>
-                <textarea value={$activeTask.note || ''} on:input={updateNote} placeholder="..."
+                <label for="task-detail-note" class="text-xs font-bold text-slate-500 uppercase mb-2">{$_('task_detail.notes')}</label>
+                <textarea id="task-detail-note" value={$activeTask.note || ''} on:input={updateNote} placeholder="..."
                     class="flex-1 w-full bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-slate-700 leading-relaxed focus:outline-none focus:ring-2 focus:ring-yellow-300 resize-none font-mono"></textarea>
             </div>
 
@@ -133,6 +133,7 @@
                     <i class="ph ph-pencil-simple"></i> {$_('task_detail.edit')}
                 </button>
                 <button on:click={deleteTask}
+                    aria-label={$_('common.delete')}
                     class="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-bold hover:bg-red-100 border border-red-100">
                     <i class="ph ph-trash"></i>
                 </button>

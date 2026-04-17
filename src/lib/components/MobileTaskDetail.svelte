@@ -64,11 +64,11 @@
             </div>
             <div class="flex gap-3">
                 {#if $currentView !== 'scheduled'}
-                    <button on:click={markDone} class="text-green-600">
+                    <button on:click={markDone} class="text-green-600" aria-label={$_('task_status.done')}>
                         <i class="ph-fill ph-check-circle text-2xl"></i>
                     </button>
                 {/if}
-                <button on:click={deleteTask} class="text-red-500">
+                <button on:click={deleteTask} class="text-red-500" aria-label={$_('common.delete')}>
                     <i class="ph-bold ph-trash text-xl"></i>
                 </button>
             </div>
@@ -91,16 +91,22 @@
             </div>
 
             <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                <label class="text-xs font-bold text-slate-400 uppercase mb-2 block">{$_('task_detail.notes')}</label>
-                <textarea value={$activeTask.note || ''} on:input={updateNote} rows="5" placeholder="..."
+                <label for="mobile-task-note" class="text-xs font-bold text-slate-400 uppercase mb-2 block">{$_('task_detail.notes')}</label>
+                <textarea id="mobile-task-note" value={$activeTask.note || ''} on:input={updateNote} rows="5" placeholder="..."
                     class="w-full text-sm text-slate-700 leading-relaxed focus:outline-none resize-none font-mono placeholder-slate-300"></textarea>
             </div>
 
             <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                <label class="text-xs font-bold text-slate-400 uppercase mb-3 block flex justify-between">
+                <div class="text-xs font-bold text-slate-400 uppercase mb-3 flex justify-between items-center">
                     {$_('task_detail.subtasks')}
-                    <span class="text-blue-500" on:click={() => openModal($activeTask)}>{$_('task_detail.edit')}</span>
-                </label>
+                    <button
+                        type="button"
+                        class="text-blue-500"
+                        on:click={() => openModal($activeTask)}
+                    >
+                        {$_('task_detail.edit')}
+                    </button>
+                </div>
                 <ul class="space-y-3">
                     {#each $activeTask.subtasks || [] as sub}
                         <li class="text-sm flex items-start gap-3">
@@ -142,6 +148,7 @@
 
         <div class="absolute bottom-6 right-6 z-10 fab-button">
             <button on:click={() => openModal($activeTask)}
+                aria-label={$_('task_detail.edit')}
                 class="w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-300 flex items-center justify-center active:scale-90 transition-transform">
                 <i class="ph-bold ph-pencil-simple text-2xl"></i>
             </button>
