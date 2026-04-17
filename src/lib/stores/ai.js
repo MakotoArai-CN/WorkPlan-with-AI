@@ -3376,14 +3376,34 @@ async function buildContextMessages(history, chatStyle) {
     };
     const systemPrompt = stylePrompts[chatStyle] || stylePrompts.default;
     const messages = [{ role: 'system', content: systemPrompt }];
-    const validHistory = history.filter(msg =>
-        msg.type === 'text' &&
-        msg.content &&
-        (msg.role === 'user' || msg.role === 'assistant')
-    );
+    const validHistory = history.filter(msg => {
+        if (!msg.content && !msg.summary && !msg.data) return false;
+        if (msg.role !== 'user' && msg.role !== 'assistant') return false;
+        // Skip transient types that don't carry meaningful content
+        if (msg.type === 'loading' || msg.type === 'streaming' || msg.type === 'tool_progress') return false;
+        return true;
+    });
     const recentHistory = validHistory.slice(-20);
     for (const msg of recentHistory) {
-        messages.push({ role: msg.role, content: msg.content });
+        if (msg.role === 'user') {
+            messages.push({ role: 'user', content: msg.content });
+        } else {
+            // Flatten non-text assistant message types into text for context
+            let content = msg.content || '';
+            if (msg.type === 'web_search_result') {
+                const entries = (msg.entries || []).map(e => `- [${e.title}](${e.url}): ${e.snippet || ''}`).join('\n');
+                content = (msg.summary || '') + (entries ? '\n' + entries : '');
+            } else if (msg.type === 'task_card' && msg.data) {
+                content = `[任务] ${msg.data.title || ''}${msg.data.date ? ' (' + msg.data.date + ')' : ''}${msg.data.note ? ' - ' + msg.data.note : ''}`;
+            } else if (msg.type === 'file_confirm' && msg.operation) {
+                content = `[文件操作待确认] ${msg.message || ''} - ${msg.operation.path || ''}`;
+            } else if (msg.type === 'error') {
+                content = `[错误] ${msg.content || ''}`;
+            }
+            if (content) {
+                messages.push({ role: 'assistant', content });
+            }
+        }
     }
     return messages;
 }
