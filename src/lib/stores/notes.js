@@ -63,7 +63,8 @@ function createNotesStore() {
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
                 tags: note.tags || [],
-                attachments: note.attachments || []
+                attachments: note.attachments || [],
+                aiLocked: false
             };
             const newState = { ...s, notes: [newNote, ...s.notes], activeNoteId: newNote.id };
             save(newState);
@@ -86,6 +87,14 @@ function createNotesStore() {
         }),
         setActiveNote: (id) => update(s => ({ ...s, activeNoteId: id })),
         clearActiveNote: () => update(s => ({ ...s, activeNoteId: null })),
+        toggleAiLock: (id) => update(s => {
+            const notes = s.notes.map(n =>
+                n.id === id ? { ...n, aiLocked: !n.aiLocked, updatedAt: new Date().toISOString() } : n
+            );
+            const newState = { ...s, notes };
+            save(newState);
+            return newState;
+        }),
         addCategory: (name) => update(s => {
             if (s.categories.includes(name)) return s;
             const newState = { ...s, categories: [...s.categories, name] };

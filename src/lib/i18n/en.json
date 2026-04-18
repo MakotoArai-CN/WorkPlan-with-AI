@@ -141,7 +141,11 @@
     "ai_panel_followup_hint": "Follow-up questions stay grounded in the note content already open on the page.",
     "ai_panel_quick_summary": "Summarize the current note and extract the key points",
     "ai_panel_quick_polish": "Polish the current note and make it more professional",
-    "ai_panel_quick_actions": "Turn the current note into a clear action list"
+    "ai_panel_quick_actions": "Turn the current note into a clear action list",
+    "ai_locked": "Block AI access",
+    "ai_unlocked": "Allow AI access",
+    "toggle_ai_lock": "Toggle AI access",
+    "ai_locked_hint": "This note is blocked from AI access. Unlock it first."
   },
   "passwords": {
     "title": "Password Manager",
@@ -347,7 +351,8 @@
     "trusted_directories": "Trusted directories",
     "trusted_directories_desc": "Add extra authorized folders here. AI can only write, edit, or delete inside the workspace and these trusted directories.",
     "trusted_directories_placeholder": "Enter an absolute path, for example D:\\AI\\trusted",
-    "trusted_directories_empty": "No extra trusted directories yet"
+    "trusted_directories_empty": "No extra trusted directories yet",
+    "browse": "Browse"
   },
   "ai": {
     "loading": "Thinking...",
@@ -570,6 +575,7 @@
     "sessions": "Sessions",
     "edit_resend": "Edit & Resend",
     "rollback": "Undo",
+    "rollback_confirm": "This will delete this message and its AI response. Are you sure?",
     "export": "Export",
     "export_chat": "Export Chat",
     "export_success": "Chat exported successfully",
@@ -583,7 +589,8 @@
     "tool_step_file_operating": "Operating files...",
     "tool_step_task_processing": "Processing tasks...",
     "tool_step_generating": "Generating response...",
-    "tool_step_ai_classifying": "AI classifying intent..."
+    "tool_step_ai_classifying": "AI classifying intent...",
+    "action_cancelled": "Action cancelled."
   },
   "ai_settings_page": {
     "title": "AI Settings",

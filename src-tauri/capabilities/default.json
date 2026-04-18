@@ -31,6 +31,8 @@
     "store:allow-set",
     "store:allow-delete",
     "store:allow-save",
-    "store:allow-load"
+    "store:allow-load",
+    "dialog:default",
+    "dialog:allow-open"
   ]
 }

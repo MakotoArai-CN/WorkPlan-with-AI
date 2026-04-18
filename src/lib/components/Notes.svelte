@@ -366,6 +366,10 @@
 
     function openNoteAiAssistant(mode = 'general') {
         if (!$activeNote) return;
+        if ($activeNote.aiLocked) {
+            showToast({ message: get(_)('notes.ai_locked_hint'), type: 'warning', duration: 2000 });
+            return;
+        }
 
         const noteTitle = $activeNote.title || $_('notes.new_note_title');
         const noteCategory = $activeNote.category || $_('notes.category_all');
@@ -621,6 +625,11 @@
                             class:border-l-emerald-500={$activeNote?.id === note.id}
                         >
                             <div class="flex items-center gap-1 mb-0.5">
+                                {#if note.aiLocked}
+                                    <span class="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-600 rounded font-bold" title={$_('notes.ai_locked')}>
+                                        <i class="ph ph-lock-simple"></i>
+                                    </span>
+                                {/if}
                                 {#if note.category && note.category !== $_('notes.category_all')}
                                     <span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded font-bold">{note.category}</span>
                                 {/if}
@@ -735,6 +744,19 @@
                                     </div>
                                 {/if}
                             </div>
+                            <button
+                                on:click={() => notesStore.toggleAiLock($activeNote.id)}
+                                class="p-2 rounded-lg transition"
+                                class:text-red-500={$activeNote.aiLocked}
+                                class:hover:text-red-600={$activeNote.aiLocked}
+                                class:hover:bg-red-50={$activeNote.aiLocked}
+                                class:text-slate-400={!$activeNote.aiLocked}
+                                class:hover:text-orange-600={!$activeNote.aiLocked}
+                                class:hover:bg-orange-50={!$activeNote.aiLocked}
+                                title={$activeNote.aiLocked ? $_('notes.ai_unlocked') : $_('notes.ai_locked')}
+                            >
+                                <i class="ph {$activeNote.aiLocked ? 'ph-lock-simple' : 'ph-lock-simple-open'} text-lg"></i>
+                            </button>
                             <button
                                 on:click={deleteNote}
                                 class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"

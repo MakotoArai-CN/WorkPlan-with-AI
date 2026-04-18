@@ -1,6 +1,6 @@
 {
   "name": "workplan",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "",
   "type": "module",
   "scripts": {
@@ -16,12 +16,18 @@
   "license": "AGPL-3.0",
   "dependencies": {
     "@kingsword/tauri-plugin-mobile-onbackpressed-listener": "npm:@jsr/kingsword__tauri-plugin-mobile-onbackpressed-listener",
+    "@milkdown/core": "^7.6.0",
+    "@milkdown/plugin-listener": "^7.6.0",
+    "@milkdown/preset-commonmark": "^7.6.0",
+    "@milkdown/theme-nord": "^7.6.0",
     "@phosphor-icons/web": "^2.1.2",
     "@supabase/supabase-js": "^2.87.1",
     "@tauri-apps/api": "2.9.1",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-http": "2.5.4",
     "@tauri-apps/plugin-notification": "2.3.3",
     "@tauri-apps/plugin-opener": "2.5.2",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-store": "2.4.1",
     "autoprefixer": "^10.4.22",
     "chart.js": "^4.5.1",
@@ -39,13 +45,9 @@
     "mermaid": "^11.12.2",
     "postcss": "^8.5.6",
     "recharts": "^3.6.0",
-    "tailwindcss": "^4.1.18",
     "svelte-i18n": "^4.0.0",
-    "vditor": "^3.11.2",
-    "@milkdown/core": "^7.6.0",
-    "@milkdown/preset-commonmark": "^7.6.0",
-    "@milkdown/plugin-listener": "^7.6.0",
-    "@milkdown/theme-nord": "^7.6.0"
+    "tailwindcss": "^4.1.18",
+    "vditor": "^3.11.2"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
