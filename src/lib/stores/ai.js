@@ -105,6 +105,14 @@ export const providerModels = writable({});
 export const modelsLoading = writable(false);
 export const lastFailedMessage = writable(null);
 export const streamingContent = writable('');
+let _streamAbortController = null;
+
+export function stopStreaming() {
+    if (_streamAbortController) {
+        _streamAbortController.abort();
+        _streamAbortController = null;
+    }
+}
 export const pendingTaskOperation = writable(null);
 export const aiChatRuntimeCapabilities = writable({
     probed: false,
@@ -118,7 +126,8 @@ export const aiChatCapabilities = derived(
     ([$settings, $config, $runtime]) => {
         const needsApiKey = !isG4FProvider($config.provider) &&
             $config.provider !== 'ollama' &&
-            $config.provider !== 'lmstudio';
+            $config.provider !== 'lmstudio' &&
+            $config.provider !== 'custom';
         const toolRouterEnabled = $settings.enableAiChatTools ?? true;
         const localFileEnabled = $settings.localFileConfig?.enabled ?? false;
 
@@ -186,7 +195,8 @@ export async function probeAiCapabilities() {
         const config = getEffectiveConfig();
         const needsApiKey = !isG4FProvider(config.provider) &&
             config.provider !== 'ollama' &&
-            config.provider !== 'lmstudio';
+            config.provider !== 'lmstudio' &&
+            config.provider !== 'custom';
         if (needsApiKey && !config.apiKey) {
             toolCallOk = false;
         } else {
@@ -194,7 +204,8 @@ export async function probeAiCapabilities() {
             const probe = await callAI(config, 'respond with only the word OK', 'You are a test probe. Respond with only the word OK.');
             toolCallOk = typeof probe === 'string' && probe.length > 0;
         }
-    } catch {
+    } catch (e) {
+        console.warn('[Probe] tool call probe failed:', e?.message || e);
         toolCallOk = false;
     }
 
@@ -2002,8 +2013,8 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         progress('task_processing');
         result = await analyzeQueryIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
     } else if (hasNoActionKeyword) {
-        progress('generating');
-        result = await buildContextualAssistantResponse(text, assistantContext, currentConfig);
+        // No specific tool action matched — signal caller to use streaming chat instead
+        return { __useStreamingChat: true };
     } else {
         progress('task_processing');
         result = await analyzeCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
@@ -2019,7 +2030,8 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
 
     const needsApiKey = !isG4FProvider(currentConfig.provider) &&
         currentConfig.provider !== 'ollama' &&
-        currentConfig.provider !== 'lmstudio';
+        currentConfig.provider !== 'lmstudio' &&
+        currentConfig.provider !== 'custom';
 
     if (needsApiKey && !currentConfig.apiKey) {
         showAiSettings.set(true);
@@ -2043,7 +2055,14 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     lastFailedMessage.set({ text, index: retryIndex });
 
     try {
-        const result = await resolveAssistantMessage(text, existingTasks, currentConfig);
+        let result = await resolveAssistantMessage(text, existingTasks, currentConfig);
+
+        // Right-side assistant doesn't support streaming — fallback to non-stream response
+        if (result?.__useStreamingChat) {
+            const { callAI } = await import('../utils/ai-providers.js');
+            const reply = await callAI(currentConfig, text, null);
+            result = { role: 'assistant', type: 'text', content: reply || '' };
+        }
 
         chatHistory.update(h => {
             const newHistory = [...h];
@@ -3414,7 +3433,8 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     const currentConfig = getEffectiveConfig();
     const needsApiKey = !isG4FProvider(currentConfig.provider) &&
         currentConfig.provider !== 'ollama' &&
-        currentConfig.provider !== 'lmstudio';
+        currentConfig.provider !== 'lmstudio' &&
+        currentConfig.provider !== 'custom';
 
     if (needsApiKey && !currentConfig.apiKey) {
         showAiSettings.set(true);
@@ -3494,25 +3514,30 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         if (useToolRouter) {
             const assistantPayload = await buildAiChatAssistantPayload(text);
             const assistantResult = await resolveAssistantMessage(text, assistantPayload, currentConfig, intentHint, updateToolProgress);
-            aiChatHistory.update(h => {
-                const newHistory = [...h];
-                if (newHistory[streamingIndex]) {
-                    newHistory[streamingIndex] = assistantResult;
-                }
-                return newHistory;
-            });
-            saveAiChatHistory();
-            return;
+            // If resolveAssistantMessage signals no tool action matched, fall through to streaming chat
+            if (!assistantResult?.__useStreamingChat) {
+                aiChatHistory.update(h => {
+                    const newHistory = [...h];
+                    if (newHistory[streamingIndex]) {
+                        newHistory[streamingIndex] = assistantResult;
+                    }
+                    return newHistory;
+                });
+                saveAiChatHistory();
+                return;
+            }
         }
 
+        console.log('[Chat] Entering streaming path');
         const { callAIWithMessagesStream } = await import('../utils/ai-providers.js');
         const currentHistory = get(aiChatHistory);
-        const historyWithoutStreaming = currentHistory.filter(m => m.type !== 'streaming' && m.type !== 'loading');
+        const historyWithoutStreaming = currentHistory.filter(m => m.type !== 'streaming' && m.type !== 'loading' && m.type !== 'tool_progress');
         const messages = await buildContextMessages(historyWithoutStreaming, chatStyle);
 
         aiChatHistory.update(h => {
             const newHistory = [...h];
-            if (newHistory[streamingIndex] && newHistory[streamingIndex].type === 'loading') {
+            const msgType = newHistory[streamingIndex]?.type;
+            if (msgType === 'loading' || msgType === 'tool_progress') {
                 newHistory[streamingIndex] = { role: 'assistant', type: 'streaming', content: '', isStreaming: true };
             }
             return newHistory;
@@ -3533,17 +3558,23 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             });
         };
 
-        const result = await callAIWithMessagesStream(currentConfig, messages, onChunk);
+        _streamAbortController = new AbortController();
+        const result = await callAIWithMessagesStream(currentConfig, messages, onChunk, { signal: _streamAbortController.signal });
+        _streamAbortController = null;
 
         aiChatHistory.update(h => {
             const newHistory = [...h];
             if (newHistory[streamingIndex]) {
-                newHistory[streamingIndex] = {
-                    role: 'assistant',
-                    type: 'text',
-                    content: result || 'Sorry, I could not understand your question.',
-                    isStreaming: false
-                };
+                if (!result) {
+                    newHistory.splice(streamingIndex, 1);
+                } else {
+                    newHistory[streamingIndex] = {
+                        role: 'assistant',
+                        type: 'text',
+                        content: result,
+                        isStreaming: false
+                    };
+                }
             }
             return newHistory;
         });
@@ -3551,6 +3582,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         streamingContent.set('');
         saveAiChatHistory();
     } catch (error) {
+        _streamAbortController = null;
         aiChatHistory.update(h => {
             const newHistory = [...h];
             if (newHistory[streamingIndex]) {

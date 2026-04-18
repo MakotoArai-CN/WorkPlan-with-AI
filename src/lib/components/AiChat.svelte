@@ -23,6 +23,7 @@
         clearAiChatDraft,
         saveAiChatHistory,
         probeAiCapabilities,
+        stopStreaming,
     } from "../stores/ai.js";
     import { showConfirm, showToast } from "../stores/modal.js";
     import { taskStore } from "../stores/tasks.js";
@@ -969,11 +970,9 @@
                         <div class="max-w-[85%] md:max-w-[80%] group">
                             {#if msg.role === "user"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-blue-600 text-white rounded-tr-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-blue-600 text-white rounded-tr-none markdown-message user-markdown"
                                 >
-                                    <div class="whitespace-pre-wrap break-words leading-relaxed">
-                                        {msg.content}
-                                    </div>
+                                    <MarkdownRenderer content={msg.content} />
                                 </div>
                                 <div
                                     class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end"
@@ -1561,18 +1560,24 @@
                     disabled={$isAiLoading}
                     class="flex-1 min-h-[44px] bg-transparent border-none focus:ring-0 text-sm resize-none py-2 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none disabled:opacity-50"
                 ></textarea>
-                <button
-                    on:click={handleSend}
-                    class="p-2 md:p-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200"
-                    disabled={!inputText.trim() || $isAiLoading}
-                    aria-label={$_("common.send")}
-                >
-                    {#if $isAiLoading}
-                        <i class="ph ph-circle-notch animate-spin text-base md:text-lg"></i>
-                    {:else}
+                {#if $isAiLoading}
+                    <button
+                        on:click={stopStreaming}
+                        class="p-2 md:p-2.5 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl hover:from-red-600 hover:to-rose-700 active:scale-95 transition-all shadow-lg shadow-red-200"
+                        aria-label={$_("ai_chat.stop_generating")}
+                    >
+                        <i class="ph-bold ph-stop text-base md:text-lg"></i>
+                    </button>
+                {:else}
+                    <button
+                        on:click={handleSend}
+                        class="p-2 md:p-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200"
+                        disabled={!inputText.trim()}
+                        aria-label={$_("common.send")}
+                    >
                         <i class="ph-bold ph-paper-plane-right text-base md:text-lg"></i>
-                    {/if}
-                </button>
+                    </button>
+                {/if}
             </div>
             <div class="mt-2 text-center text-[10px] text-slate-400 dark:text-slate-500">
                 {$_("ai_chat.style_hint", {
@@ -1600,6 +1605,19 @@
 
     .markdown-message :global(.markdown-content) {
         font-size: 0.875rem;
+    }
+
+    .user-markdown :global(.markdown-content a) {
+        color: #bfdbfe;
+        text-decoration: underline;
+    }
+    .user-markdown :global(.markdown-content code) {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+    }
+    .user-markdown :global(.markdown-content pre) {
+        background: rgba(0, 0, 0, 0.2);
+        border-color: rgba(255, 255, 255, 0.1);
     }
 
     @media (max-width: 767px) {

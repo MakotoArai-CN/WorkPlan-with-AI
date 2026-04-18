@@ -370,7 +370,7 @@ async fn search_web(
 
     let limit = max_results.unwrap_or(6).clamp(1, 10);
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.2; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
+        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.3; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -446,7 +446,7 @@ async fn fetch_web_content(
 
     let limit = max_chars.unwrap_or(4000).clamp(200, 12000);
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.2; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
+        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.3; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()

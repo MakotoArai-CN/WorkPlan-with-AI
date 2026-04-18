@@ -836,7 +836,7 @@ export async function callAIWithMessages(config, messages) {
     return parseResponse(provider, responseData);
 }
 
-export async function callAIWithMessagesStream(config, messages, onChunk) {
+export async function callAIWithMessagesStream(config, messages, onChunk, { signal } = {}) {
     const providerId = config.provider || 'g4f-default';
 
     if (isG4FProvider(providerId)) {
@@ -906,23 +906,69 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
         finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
     }
     let fullContent = '';
+    const safeUrl = normalizeHttpEndpoint(finalEndpoint);
+    const bodyStr = JSON.stringify(requestBody);
+    console.log('[Stream] callAIWithMessagesStream called, url:', safeUrl, 'stream:', requestBody.stream, 'TAURI:', !!window.__TAURI__);
+
     try {
-        const response = await fetch(normalizeHttpEndpoint(finalEndpoint), {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestBody)
-        });
+        let response;
+        if (window.__TAURI__) {
+            const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+            const tauriHeaders = {};
+            for (const [k, v] of Object.entries(headers)) {
+                if (v !== undefined && v !== null) tauriHeaders[k] = String(v);
+            }
+            response = await tauriFetch(safeUrl, {
+                method: 'POST',
+                headers: tauriHeaders,
+                body: bodyStr,
+                ...(signal ? { signal } : {})
+            });
+        } else {
+            response = await fetch(safeUrl, {
+                method: 'POST',
+                headers,
+                body: bodyStr,
+                ...(signal ? { signal } : {})
+            });
+        }
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
         }
+        const contentType = response.headers?.get?.('content-type') || '';
+        console.log('[Stream] response ok, content-type:', contentType, 'body type:', typeof response.body, 'hasGetReader:', typeof response.body?.getReader);
+
+        const isJsonResponse = contentType.includes('application/json');
+        if (!response.body || typeof response.body.getReader !== 'function' || isJsonResponse) {
+            console.log('[Stream] non-stream response detected, parsing as whole response');
+            const text = await response.text();
+            try {
+                const json = JSON.parse(text);
+                fullContent = parseResponse(provider, json);
+                if (onChunk && fullContent) onChunk(fullContent, fullContent);
+            } catch {
+                fullContent = text;
+                if (onChunk && fullContent) onChunk(fullContent, fullContent);
+            }
+            return fullContent || await callAIWithMessages(config, messages);
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let chunkCount = 0;
         while (true) {
+            if (signal?.aborted) {
+                await reader.cancel();
+                break;
+            }
             const { done, value } = await reader.read();
             if (done) break;
-            buffer += decoder.decode(value, { stream: true });
+            chunkCount++;
+            const text = decoder.decode(value, { stream: true });
+            if (chunkCount <= 3) console.log('[Stream] chunk #' + chunkCount + ', length:', text.length, 'preview:', text.substring(0, 100));
+            buffer += text;
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
             for (const line of lines) {
@@ -935,9 +981,7 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
                         const delta = parseStreamChunk(provider, chunk);
                         if (delta) {
                             fullContent += delta;
-                            if (onChunk) {
-                                onChunk(delta, fullContent);
-                            }
+                            if (onChunk) onChunk(delta, fullContent);
                         }
                     } catch (e) {
                         continue;
@@ -945,12 +989,29 @@ export async function callAIWithMessagesStream(config, messages, onChunk) {
                 }
             }
         }
+        if (buffer.trim()) {
+            const trimmedLine = buffer.trim();
+            if (trimmedLine.startsWith('data: ') && trimmedLine !== 'data: [DONE]') {
+                try {
+                    const chunk = JSON.parse(trimmedLine.slice(6));
+                    const delta = parseStreamChunk(provider, chunk);
+                    if (delta) {
+                        fullContent += delta;
+                        if (onChunk) onChunk(delta, fullContent);
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        }
     } catch (e) {
-        if (fullContent) {
+        if (signal?.aborted) {
+            console.log('[Stream] aborted by user, returning partial content');
             return fullContent;
         }
+        console.warn('[Stream] streaming failed, falling back to non-stream:', e.message || e, e);
+        if (fullContent) return fullContent;
         return await callAIWithMessages(config, messages);
     }
+    console.log('[Stream] completed, fullContent length:', fullContent.length);
     return fullContent || await callAIWithMessages(config, messages);
 }
 
