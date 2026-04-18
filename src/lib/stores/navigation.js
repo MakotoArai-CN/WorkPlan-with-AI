@@ -105,29 +105,35 @@ export async function setupAndroidBackHandler(closeToQuit, callbacks) {
         backListenerCleanup = null;
     }
 
+    let lastHandled = 0;
     const handler = () => {
+        const now = Date.now();
+        if (now - lastHandled < 300) return;
+        lastHandled = now;
         handleBackPress(closeToQuit, {
             ...callbacks,
             forceDoubleBackExit: true
         });
     };
 
+    const cleanups = [];
+
+    window.addEventListener('androidbackbutton', handler);
+    cleanups.push(() => window.removeEventListener('androidbackbutton', handler));
+
     try {
         const { registerBackEvent } = await import(
             '@kingsword/tauri-plugin-mobile-onbackpressed-listener'
         );
         const pluginListener = await registerBackEvent(handler);
-        backListenerCleanup = () => {
-            pluginListener.unregister();
-        };
+        cleanups.push(() => pluginListener.unregister());
     } catch (e) {
-        console.warn('Tauri back-press plugin not available, falling back to DOM event:', e);
-        window.addEventListener('androidbackbutton', handler);
-        backListenerCleanup = () => {
-            window.removeEventListener('androidbackbutton', handler);
-        };
+        console.warn('Tauri back-press plugin not available:', e);
     }
 
+    backListenerCleanup = () => {
+        for (const fn of cleanups) fn();
+    };
     return backListenerCleanup;
 }
 

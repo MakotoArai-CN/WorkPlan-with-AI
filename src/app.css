@@ -98,6 +98,31 @@ body.theme-switching * {
     transition-timing-function: ease;
 }
 
+button,
+[role="button"],
+a,
+select,
+label[for],
+input[type="checkbox"],
+input[type="radio"],
+input[type="submit"],
+input[type="button"],
+input[type="reset"],
+summary,
+.cursor-pointer {
+    cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"],
+input:disabled,
+select:disabled,
+textarea:disabled,
+.disabled,
+[disabled] {
+    cursor: not-allowed;
+}
+
 body {
     background-color: var(--app-bg);
     font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;

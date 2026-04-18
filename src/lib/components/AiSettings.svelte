@@ -234,7 +234,7 @@
             $aiConfig.provider === "lmstudio"
         )
             return false;
-        if (isCustomProvider) return false; // custom provider doesn't require key
+        if (isCustomProvider) return true; // custom provider: show API Key field (optional)
         return currentProvider && currentProvider.authType !== "none";
     })();
     $: displayModels = (() => {
@@ -550,14 +550,14 @@
                             <label
                                 for="ai-api-key"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                                >API Key</label
+                                >API Key {#if isCustomProvider}<span class="text-slate-400 normal-case font-normal">({$_('ai_settings_page.optional')})</span>{/if}</label
                             >
                             <input
                                 id="ai-api-key"
                                 bind:value={$aiConfig.apiKey}
                                 on:blur={handleApiKeyChange}
                                 type="password"
-                                placeholder={$_('ai_settings_page.api_key_ph')}
+                                placeholder={isCustomProvider ? $_('ai_settings_page.api_key_optional_ph') : $_('ai_settings_page.api_key_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
                         </div>
