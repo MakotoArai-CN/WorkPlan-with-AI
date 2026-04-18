@@ -22,7 +22,7 @@ function getInitialSettings() {
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.3.1',
+            appVersion: '0.3.4',
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
             theme: 'auto',
@@ -48,7 +48,7 @@ function getInitialSettings() {
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.3.1',
+                appVersion: '0.3.4',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
                 theme: parsed.theme || 'auto',
@@ -83,7 +83,7 @@ function getDefaultSettings() {
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.3.1',
+        appVersion: '0.3.4',
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         theme: 'auto',
@@ -150,7 +150,7 @@ function createSettingsStore() {
                 forest: '#ecfdf5',
                 sunset: '#fff7ed',
                 rose: '#fff1f2',
-                graphite: '#111827'
+                graphite: '#080b16'
             };
             metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
         }
@@ -220,12 +220,23 @@ function createSettingsStore() {
             }
         });
 
+        let lastSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        setInterval(() => {
+            const state = get({ subscribe });
+            if (state.theme !== 'auto') return;
+            const nowDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (nowDark !== lastSystemDark) {
+                lastSystemDark = nowDark;
+                applyTheme('auto', { animate: true });
+            }
+        }, 5000);
+
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.3.1' }));
+            update(s => ({ ...s, appVersion: '0.3.4' }));
         }
 
         const workspaceRoot = await getWorkspaceRoot();
@@ -390,7 +401,8 @@ function createSettingsStore() {
                 await sendNotification({
                     title: t('settings.notification_test_title') || 'WorkPlan',
                     body: t('settings.notification_test_body') || 'OK',
-                    channelId: channelId || undefined
+                    channelId: channelId || undefined,
+                    sound: 'default'
                 });
             } catch (e) {
                 throw new Error((t('settings.notification_failed') || 'Error: ').replace('{error}', e.message));
@@ -408,7 +420,8 @@ function createSettingsStore() {
                 await sendNotification({
                     title: `${t('settings.today_tasks') || 'Today'} (${tasks.length})`,
                     body: titles + extra,
-                    channelId: channelId || undefined
+                    channelId: channelId || undefined,
+                    sound: 'default'
                 });
             } catch (e) {
                 console.error('Failed to show notification:', e);

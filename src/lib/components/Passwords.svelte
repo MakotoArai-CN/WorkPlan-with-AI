@@ -1688,6 +1688,9 @@ async function handleChangeMasterPassword() {
 {#if showChangeMasterPasswordModal}
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+        on:keydown={(e) => e.key === "Escape" && (showChangeMasterPasswordModal = false)}
+        role="dialog"
+        tabindex="-1"
     >
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <h3
@@ -1706,6 +1709,7 @@ async function handleChangeMasterPassword() {
                         id="password-old-master"
                         type="password"
                         bind:value={oldMasterPassword}
+                        on:keydown={(e) => e.key === "Enter" && handleChangeMasterPassword()}
                         placeholder={$_('passwords.old_password_placeholder')}
                         class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-400"
                     />
@@ -1744,9 +1748,9 @@ async function handleChangeMasterPassword() {
             <div class="flex gap-3 mt-4">
                 <button
                     on:click={() => (showChangeMasterPasswordModal = false)}
-                    class="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
+                    class="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
                 >
-                    {$_('common.cancel')}
+                    {$_('common.back')}
                 </button>
                 <button
                     on:click={handleChangeMasterPassword}

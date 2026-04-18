@@ -5,7 +5,7 @@
     import { showAiPanel, showAiSettings, clearChatHistory } from '$lib/stores/ai.js';
     import ContextMenu from '$lib/components/ContextMenu.svelte';
     import { settingsStore } from '$lib/stores/settings.js';
-    import { pushNavigation, popNavigation, getNavigationDepth, handleBackPress, showExitToast, initializeNavigation } from '$lib/stores/navigation.js';
+    import { pushNavigation, popNavigation, getNavigationDepth, handleBackPress, showExitToast, initializeNavigation, setupAndroidBackHandler } from '$lib/stores/navigation.js';
     import { _ } from 'svelte-i18n';
     import LoginModal from '$lib/components/LoginModal.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
@@ -36,9 +36,41 @@
     $: needsAgreement = !$settingsStore.agreementAccepted;
 
     onMount(async () => {
-        isMobile = window.innerWidth < 768 || 
+        isMobile = window.innerWidth < 768 ||
             /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
         initializeNavigation('dashboard');
+
+        if (isMobile) {
+            setupAndroidBackHandler(
+                get(settingsStore).closeToQuit,
+                {
+                    onPrimaryBack: () => {
+                        if (showModal) { closeModal(); return true; }
+                        if (get(showAiPanel)) { handleAiPanelBack(); return true; }
+                        if (get(activeTask)) { activeTask.set(null); return true; }
+                        if (get(showAiSettings)) { showAiSettings.set(false); return true; }
+                        return false;
+                    },
+                    onSecondaryBack: ({ next }) => {
+                        if (next && next !== get(currentView)) {
+                            currentView.set(next);
+                        }
+                    },
+                    onExit: async () => {
+                        try {
+                            const { exit } = await import('@tauri-apps/plugin-process');
+                            await exit(0);
+                        } catch {}
+                    },
+                    onMinimize: async () => {
+                        try {
+                            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+                            await getCurrentWindow().minimize();
+                        } catch {}
+                    }
+                }
+            );
+        }
     });
 
     $: if ($currentView !== previousView) {
@@ -184,9 +216,14 @@
                     <div class="font-bold text-rose-600 flex items-center gap-1">
                         <i class="ph-fill ph-sparkle"></i> {$_('ai.assistant')}
                     </div>
-                    <button on:click={() => clearChatHistory()} class="text-slate-400" aria-label={$_('ai.clear')}>
-                        <i class="ph ph-trash text-xl"></i>
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <button on:click={() => showAiSettings.set(true)} class="text-rose-400" aria-label={$_('ai_panel.settings')}>
+                            <i class="ph ph-gear text-xl"></i>
+                        </button>
+                        <button on:click={() => clearChatHistory()} class="text-slate-400" aria-label={$_('ai.clear')}>
+                            <i class="ph ph-trash text-xl"></i>
+                        </button>
+                    </div>
                 </div>
                 <AiPanel />
             </div>

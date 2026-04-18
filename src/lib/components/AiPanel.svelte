@@ -596,7 +596,7 @@
 </script>
 
 <div class="flex flex-col h-full bg-rose-50/30" data-ai-shell>
-    <div class="h-16 border-b border-rose-100 flex items-center justify-between px-6 bg-white shrink-0">
+    <div class="h-16 border-b border-rose-100 hidden md:flex items-center justify-between px-6 bg-white shrink-0">
         <h3 class="font-bold text-rose-600 flex items-center gap-2">
             <i class="ph-fill ph-sparkle"></i> {panelMeta.title}
         </h3>

@@ -233,8 +233,18 @@
         }
     }
 
-    function handleRollback(index) {
-        rollbackMessage(index);
+    async function handleRollback(index) {
+        const t = get(_);
+        const confirmed = await showConfirm({
+            title: t("ai_chat.rollback"),
+            message: t("ai_chat.rollback_confirm"),
+            confirmText: t("ai_chat.rollback"),
+            cancelText: t("common.cancel"),
+            variant: "warning",
+        });
+        if (confirmed) {
+            rollbackMessage(index);
+        }
     }
 
     async function handleRetryAssistant(index) {
@@ -306,8 +316,11 @@
     }
 
     function removeChatMessage(index) {
-        aiChatHistory.update((history) => history.filter((_, itemIndex) => itemIndex !== index));
-        saveAiChatHistory();
+        replaceChatMessage(index, {
+            role: "assistant",
+            type: "text",
+            content: get(_)("ai_chat.action_cancelled"),
+        });
     }
 
     function addScopedItem(data, source = "tasks") {

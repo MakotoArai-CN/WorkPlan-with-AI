@@ -141,7 +141,11 @@
     "ai_panel_followup_hint": "追加の質問も、今開いているノート内容を前提に継続して回答します。",
     "ai_panel_quick_summary": "現在のノートを要約して重要ポイントを整理して",
     "ai_panel_quick_polish": "現在のノートをより自然で専門的な表現に整えて",
-    "ai_panel_quick_actions": "現在のノートから次のアクション項目を抽出して"
+    "ai_panel_quick_actions": "現在のノートから次のアクション項目を抽出して",
+    "ai_locked": "AI アクセスを禁止",
+    "ai_unlocked": "AI アクセスを許可",
+    "toggle_ai_lock": "AI アクセス権限の切替",
+    "ai_locked_hint": "このノートは AI アクセスが禁止されています。先にロックを解除してください。"
   },
   "passwords": {
     "title": "パスワードマネージャー",
@@ -347,7 +351,8 @@
     "trusted_directories": "信頼済みディレクトリ",
     "trusted_directories_desc": "追加で許可するフォルダを登録します。AI が書き込み・編集・削除できるのは作業ディレクトリとここで許可した場所のみです。",
     "trusted_directories_placeholder": "絶対パスを入力してください。例: D:\\AI\\trusted",
-    "trusted_directories_empty": "追加の信頼済みディレクトリはまだありません"
+    "trusted_directories_empty": "追加の信頼済みディレクトリはまだありません",
+    "browse": "参照"
   },
   "ai": {
     "loading": "考え中...",
@@ -570,6 +575,7 @@
     "sessions": "セッション",
     "edit_resend": "編集して再送信",
     "rollback": "取り消し",
+    "rollback_confirm": "このメッセージとAIの応答を削除します。よろしいですか？",
     "export": "エクスポート",
     "export_chat": "チャット履歴をエクスポート",
     "export_success": "チャット履歴をエクスポートしました",
@@ -583,7 +589,8 @@
     "tool_step_file_operating": "ファイルを操作中...",
     "tool_step_task_processing": "タスクを処理中...",
     "tool_step_generating": "応答を生成中...",
-    "tool_step_ai_classifying": "AIが意図を判定中..."
+    "tool_step_ai_classifying": "AIが意図を判定中...",
+    "action_cancelled": "操作がキャンセルされました。"
   },
   "ai_settings_page": {
     "title": "AI設定",

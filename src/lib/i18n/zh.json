@@ -141,7 +141,11 @@
     "ai_panel_followup_hint": "需要继续追问时，助手会结合当前笔记内容持续回答。",
     "ai_panel_quick_summary": "请总结当前笔记并提炼重点",
     "ai_panel_quick_polish": "请润色当前笔记，让表达更专业",
-    "ai_panel_quick_actions": "请从当前笔记中拆出后续行动项"
+    "ai_panel_quick_actions": "请从当前笔记中拆出后续行动项",
+    "ai_locked": "禁止 AI 访问",
+    "ai_unlocked": "允许 AI 访问",
+    "toggle_ai_lock": "切换 AI 访问权限",
+    "ai_locked_hint": "此笔记已禁止 AI 访问，请先解锁"
   },
   "passwords": {
     "title": "密码记录本",
@@ -347,7 +351,8 @@
     "trusted_directories": "受信任目录",
     "trusted_directories_desc": "可添加多个额外授权目录。AI 仅可在这些目录和项目工作目录中执行写入、修改、删除。",
     "trusted_directories_placeholder": "输入绝对路径，例如 D:\\AI\\trusted",
-    "trusted_directories_empty": "当前还没有额外受信任目录"
+    "trusted_directories_empty": "当前还没有额外受信任目录",
+    "browse": "浏览"
   },
   "ai": {
     "loading": "思考中...",
@@ -570,6 +575,7 @@
     "sessions": "会话",
     "edit_resend": "编辑重发",
     "rollback": "撤回",
+    "rollback_confirm": "撤回将删除此消息及其对应的 AI 回复，确定要撤回吗？",
     "export": "导出",
     "export_chat": "导出聊天记录",
     "export_success": "聊天记录已导出",
@@ -583,7 +589,8 @@
     "tool_step_file_operating": "正在操作文件...",
     "tool_step_task_processing": "正在处理任务...",
     "tool_step_generating": "正在生成回复...",
-    "tool_step_ai_classifying": "AI 正在判断意图..."
+    "tool_step_ai_classifying": "AI 正在判断意图...",
+    "action_cancelled": "操作已取消。"
   },
   "ai_settings_page": {
     "title": "AI 配置",

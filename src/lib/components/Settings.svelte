@@ -177,6 +177,18 @@
         trustedDirectoryInput = '';
     }
 
+    async function browseTrustedDirectory() {
+        try {
+            const { open } = await import('@tauri-apps/plugin-dialog');
+            const selected = await open({ directory: true, multiple: false });
+            if (selected) {
+                settingsStore.addTrustedDirectory(selected);
+            }
+        } catch (e) {
+            console.warn('Directory picker not available:', e);
+        }
+    }
+
     async function copyDatabaseSql() {
         const t = get(_);
         try {
@@ -197,7 +209,7 @@
         { id: 'forest', label: $_('settings.theme_forest'), icon: 'ph-tree-evergreen', preview: 'bg-gradient-to-br from-emerald-100 to-lime-200 border border-emerald-200', accent: 'text-emerald-600' },
         { id: 'sunset', label: $_('settings.theme_sunset'), icon: 'ph-sun-horizon', preview: 'bg-gradient-to-br from-orange-100 to-rose-200 border border-orange-200', accent: 'text-orange-500' },
         { id: 'rose', label: $_('settings.theme_rose'), icon: 'ph-flower-lotus', preview: 'bg-gradient-to-br from-rose-100 to-pink-200 border border-pink-200', accent: 'text-rose-500' },
-        { id: 'graphite', label: $_('settings.theme_graphite'), icon: 'ph-moon-stars', preview: 'bg-gradient-to-br from-slate-700 to-slate-950 border border-slate-600', accent: 'text-slate-200' },
+        { id: 'graphite', label: $_('settings.theme_graphite'), icon: 'ph-moon-stars', preview: 'bg-gradient-to-br from-[#191e38] to-[#0c0f1a] border border-[rgba(120,140,200,0.2)]', accent: 'text-indigo-300' },
     ];
 </script>
 
@@ -452,6 +464,13 @@
                                         on:keydown={(e) => e.key === 'Enter' && addTrustedDirectory()}
                                         class="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-fuchsia-400 font-mono"
                                     />
+                                    <button
+                                        on:click={browseTrustedDirectory}
+                                        class="h-11 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-bold border border-slate-200"
+                                        title={$_('settings.browse') || 'Browse'}
+                                    >
+                                        <i class="ph ph-folder-open text-lg"></i>
+                                    </button>
                                     <button
                                         on:click={addTrustedDirectory}
                                         class="h-11 px-4 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm font-bold"

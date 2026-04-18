@@ -13,6 +13,7 @@ import {
     fetchWebContent
 } from '../utils/web-search.js';
 import { settingsStore } from './settings.js';
+import { notesStore } from './notes.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
 const AI_CHAT_HISTORY_KEY = 'planpro_ai_chat_history';
@@ -112,6 +113,8 @@ export function stopStreaming() {
         _streamAbortController.abort();
         _streamAbortController = null;
     }
+    isAiLoading.set(false);
+    streamingContent.set('');
 }
 export const pendingTaskOperation = writable(null);
 export const aiChatRuntimeCapabilities = writable({
@@ -1513,6 +1516,13 @@ function formatContextItemsForAI(items = [], context = {}) {
 
 function formatNoteContextForAI(context = {}) {
     if (!context?.activeNoteId) return '';
+
+    const noteState = get(notesStore);
+    const note = (noteState.notes || []).find(n => n.id === context.activeNoteId);
+    if (note?.aiLocked) {
+        return '【当前工作笔记】\n此笔记已被用户设置为禁止 AI 访问，无法读取内容。';
+    }
+
     return [
         '【当前工作笔记】',
         `标题：${context.noteTitle || '未命名笔记'}`,
@@ -3351,7 +3361,6 @@ ${taskList}
 
 async function getProjectContextSummary() {
     const { taskStore } = await import('./tasks.js');
-    const { notesStore } = await import('./notes.js');
 
     const taskState = get(taskStore);
     const noteState = get(notesStore);
@@ -3369,6 +3378,7 @@ async function getProjectContextSummary() {
         .map(task => `- [定时] ${task.title} | ${Array.isArray(task.repeatDays) ? task.repeatDays.join(',') : ''}`)
         .join('\n');
     const noteLines = (noteState.notes || [])
+        .filter(note => !note.aiLocked)
         .slice(-12)
         .map(note => `- [笔记] ${note.title} | ${note.category || '未分类'}`)
         .join('\n');
@@ -3468,6 +3478,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
 
     isAiLoading.set(true);
     streamingContent.set('');
+    _streamAbortController = new AbortController();
 
     try {
         const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
@@ -3494,15 +3505,14 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
 
         if (aiChatToolsEnabled) {
             if (shouldUseAssistantToolsInChat(text)) {
-                // Fast path: keyword match → go straight to tool router (zero delay)
                 useToolRouter = true;
                 updateToolProgress('classifying');
             } else {
-                // AI fallback: keywords missed, let AI classify intent
                 updateToolProgress('ai_classifying');
+                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
                 const aiIntent = await classifyUserIntent(text, currentConfig);
+                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
                 if (aiIntent === null) {
-                    // classifyUserIntent failed (API error), fall back to chat
                     useToolRouter = false;
                 } else if (aiIntent !== 'chat') {
                     useToolRouter = true;
@@ -3512,7 +3522,9 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         }
 
         if (useToolRouter) {
+            if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             const assistantPayload = await buildAiChatAssistantPayload(text);
+            if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             const assistantResult = await resolveAssistantMessage(text, assistantPayload, currentConfig, intentHint, updateToolProgress);
             // If resolveAssistantMessage signals no tool action matched, fall through to streaming chat
             if (!assistantResult?.__useStreamingChat) {
@@ -3558,8 +3570,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             });
         };
 
-        _streamAbortController = new AbortController();
-        const result = await callAIWithMessagesStream(currentConfig, messages, onChunk, { signal: _streamAbortController.signal });
+        const result = await callAIWithMessagesStream(currentConfig, messages, onChunk, { signal: _streamAbortController?.signal });
         _streamAbortController = null;
 
         aiChatHistory.update(h => {
@@ -3583,6 +3594,25 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         saveAiChatHistory();
     } catch (error) {
         _streamAbortController = null;
+        if (error?.name === 'AbortError') {
+            aiChatHistory.update(h => {
+                const newHistory = [...h];
+                if (newHistory[streamingIndex]) {
+                    const content = newHistory[streamingIndex].content;
+                    if (!content) {
+                        newHistory.splice(streamingIndex, 1);
+                    } else {
+                        newHistory[streamingIndex] = {
+                            role: 'assistant', type: 'text', content, isStreaming: false
+                        };
+                    }
+                }
+                return newHistory;
+            });
+            streamingContent.set('');
+            saveAiChatHistory();
+            return;
+        }
         aiChatHistory.update(h => {
             const newHistory = [...h];
             if (newHistory[streamingIndex]) {
@@ -3628,9 +3658,9 @@ export async function retryFromAssistantMessage(assistantIndex) {
     const originalText = history[userIndex].content;
     if (!originalText) return;
 
-    // Remove the assistant message at assistantIndex, replace with loading
+    // Truncate everything after this assistant message, then replace it with loading
     aiChatHistory.update(h => {
-        const newHistory = [...h];
+        const newHistory = h.slice(0, assistantIndex + 1);
         newHistory[assistantIndex] = { role: 'assistant', type: 'loading' };
         return newHistory;
     });
