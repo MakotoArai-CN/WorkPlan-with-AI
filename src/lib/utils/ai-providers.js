@@ -478,6 +478,10 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         }
     }
 
+    if (providerId === 'custom') {
+        return await fetchCustomProviderModels(customEndpoint, apiKey);
+    }
+
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider || !provider.supportsModelList) {
         return provider ? provider.defaultModels : [];
@@ -539,6 +543,62 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
     } catch (e) {
         console.error(`Failed to fetch models for ${providerId}:`, e);
         return provider.defaultModels;
+    }
+}
+
+function deriveCustomModelsEndpoint(customEndpoint) {
+    const raw = String(customEndpoint || '').trim();
+    if (!raw) return '';
+    let url;
+    try {
+        url = new URL(raw);
+    } catch {
+        return '';
+    }
+    let path = url.pathname.replace(/\/+$/, '');
+    path = path.replace(/\/chat\/completions$/i, '');
+    path = path.replace(/\/completions$/i, '');
+    path = path.replace(/\/messages$/i, '');
+    if (!/\/models$/i.test(path)) {
+        path = path + '/models';
+    }
+    url.pathname = path;
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+}
+
+export async function fetchCustomProviderModels(customEndpoint, apiKey = '') {
+    const modelsUrl = deriveCustomModelsEndpoint(customEndpoint);
+    if (!modelsUrl) return [];
+
+    const cacheKey = `custom_${modelsUrl}_${apiKey ? 'auth' : 'noauth'}`;
+    if (modelCache[cacheKey] && modelCache[cacheKey].expireTime > Date.now()) {
+        return modelCache[cacheKey].models;
+    }
+
+    try {
+        const headers = { 'Accept': 'application/json' };
+        if (apiKey) {
+            headers['Authorization'] = 'Bearer ' + apiKey;
+        }
+        const response = await fetchWithTauri(modelsUrl, { method: 'GET', headers });
+        if (!response.ok) return [];
+        const data = await response.json();
+        let fetchedModels = [];
+        if (Array.isArray(data?.data)) {
+            fetchedModels = data.data.map(m => typeof m === 'string' ? m : (m.id || m.name)).filter(Boolean);
+        } else if (Array.isArray(data?.models)) {
+            fetchedModels = data.models.map(m => typeof m === 'string' ? m : (m.id || m.name)).filter(Boolean);
+        } else if (Array.isArray(data)) {
+            fetchedModels = data.map(m => typeof m === 'string' ? m : (m.id || m.name)).filter(Boolean);
+        }
+        if (fetchedModels.length > 0) {
+            modelCache[cacheKey] = { models: fetchedModels, expireTime: Date.now() + 300000 };
+        }
+        return fetchedModels;
+    } catch (e) {
+        return [];
     }
 }
 

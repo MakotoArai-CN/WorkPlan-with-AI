@@ -8,6 +8,32 @@ const NOTIFICATION_CHANNEL_ID = 'workplan-important';
 let themeTransitionTimer = null;
 let notificationChannelPromise = null;
 
+function isMobilePlatform() {
+    if (typeof window === 'undefined') return false;
+    return /Android|iPhone|iPad|iPod/i.test(window.navigator?.userAgent || '');
+}
+
+async function dispatchNotification({ title, body, channelId }) {
+    const payload = {
+        title,
+        body,
+        channelId: channelId || undefined
+    };
+    if (isMobilePlatform()) {
+        try {
+            const { sendNotification } = await import('@tauri-apps/plugin-notification');
+            sendNotification(payload);
+            return;
+        } catch (err) {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('plugin:notification|notify', { options: payload });
+            return;
+        }
+    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('plugin:notification|notify', { options: payload });
+}
+
 function getInitialSettings() {
     if (typeof window === 'undefined') {
         return {
@@ -22,7 +48,7 @@ function getInitialSettings() {
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.3.4',
+            appVersion: '0.3.5',
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
             theme: 'auto',
@@ -48,7 +74,7 @@ function getInitialSettings() {
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.3.4',
+                appVersion: '0.3.5',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
                 theme: parsed.theme || 'auto',
@@ -83,7 +109,7 @@ function getDefaultSettings() {
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.3.4',
+        appVersion: '0.3.5',
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         theme: 'auto',
@@ -236,7 +262,7 @@ function createSettingsStore() {
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.3.4' }));
+            update(s => ({ ...s, appVersion: '0.3.5' }));
         }
 
         const workspaceRoot = await getWorkspaceRoot();
@@ -395,17 +421,13 @@ function createSettingsStore() {
             if (!state.notificationAvailable) {
                 throw new Error(t('settings.notification_permission') || '通知权限未授予');
             }
+            const title = t('settings.notification_test_title') || 'WorkPlan';
+            const body = t('settings.notification_test_body') || 'OK';
+            const channelId = await ensureNotificationChannel();
             try {
-                const { sendNotification } = await import('@tauri-apps/plugin-notification');
-                const channelId = await ensureNotificationChannel();
-                await sendNotification({
-                    title: t('settings.notification_test_title') || 'WorkPlan',
-                    body: t('settings.notification_test_body') || 'OK',
-                    channelId: channelId || undefined,
-                    sound: 'default'
-                });
+                await dispatchNotification({ title, body, channelId });
             } catch (e) {
-                throw new Error((t('settings.notification_failed') || 'Error: ').replace('{error}', e.message));
+                throw new Error((t('settings.notification_failed') || 'Error: ').replace('{error}', e.message || String(e)));
             }
         },
         showTaskNotification: async (tasks) => {
@@ -413,15 +435,13 @@ function createSettingsStore() {
             if (!state.enableNotification || !state.notificationAvailable || !tasks?.length) return;
             try {
                 const t = get(i18n);
-                const { sendNotification } = await import('@tauri-apps/plugin-notification');
                 const channelId = await ensureNotificationChannel();
                 const titles = tasks.slice(0, 5).map(t2 => t2.title).join('、');
                 const extra = tasks.length > 5 ? ` +${tasks.length}` : '';
-                await sendNotification({
+                await dispatchNotification({
                     title: `${t('settings.today_tasks') || 'Today'} (${tasks.length})`,
                     body: titles + extra,
-                    channelId: channelId || undefined,
-                    sound: 'default'
+                    channelId
                 });
             } catch (e) {
                 console.error('Failed to show notification:', e);

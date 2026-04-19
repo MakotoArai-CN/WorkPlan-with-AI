@@ -39,6 +39,8 @@
     let weeklyPrompt = "";
     let profileNameDraft = "";
     let lastProfileId = "";
+    let autoFetchTimer = null;
+    let lastAutoFetchKey = "";
 
     const defaultDailyPrompt = t('ai_settings_page.default_daily_prompt');
 
@@ -50,15 +52,29 @@
 
     async function loadCurrentProviderModels() {
         const providerId = $aiConfig.provider;
+        const apiKey = $aiConfig.apiKey || "";
+        const endpoint = $aiConfig.customEndpoint || "";
+
         if (providerId === "custom") {
-            currentModels = [];
+            if (!endpoint) {
+                currentModels = [];
+                return;
+            }
+            const models = await loadModelsForProvider(providerId, apiKey, endpoint);
+            currentModels = models || [];
+            if (currentModels.length > 0) {
+                const savedModel = $aiConfig.customModel;
+                if (!savedModel || !currentModels.includes(savedModel)) {
+                    updateAiConfig({ customModel: currentModels[0] });
+                }
+            }
             return;
         }
-        const apiKey = $aiConfig.apiKey || "";
+
         const models = await loadModelsForProvider(
             providerId,
             apiKey,
-            $aiConfig.customEndpoint || "",
+            endpoint,
         );
         currentModels = models || [];
 
@@ -227,6 +243,29 @@
         lastProfileId = $aiConfig.activeProfileId || "";
         profileNameDraft = $aiConfig.activeProfileName || "";
     }
+
+    $: scheduleAutoFetchModels(
+        $aiConfig.provider,
+        $aiConfig.apiKey,
+        $aiConfig.customEndpoint,
+    );
+
+    function scheduleAutoFetchModels(providerId, apiKey, customEndpoint) {
+        if (!$showAiSettings) return;
+        const key = `${providerId}|${apiKey || ""}|${customEndpoint || ""}`;
+        if (key === lastAutoFetchKey) return;
+        lastAutoFetchKey = key;
+        if (autoFetchTimer) clearTimeout(autoFetchTimer);
+        autoFetchTimer = setTimeout(() => {
+            autoFetchTimer = null;
+            if (providerId === "custom") {
+                if (!customEndpoint) return;
+            } else if (currentProvider && currentProvider.authType !== "none" && !apiKey) {
+                return;
+            }
+            loadCurrentProviderModels().catch(() => {});
+        }, 500);
+    }
     $: needsApiKey = (() => {
         if (isG4FProvider($aiConfig.provider)) return false;
         if (
@@ -238,7 +277,10 @@
         return currentProvider && currentProvider.authType !== "none";
     })();
     $: displayModels = (() => {
-        if (isCustomProvider) return [];
+        if (isCustomProvider) {
+            const models = $providerModels[$aiConfig.provider] || currentModels || [];
+            return [...new Set(models.filter(Boolean))];
+        }
         const models =
             $providerModels[$aiConfig.provider] ||
             currentModels ||
@@ -469,18 +511,42 @@
                             </div>
                         </div>
                         <div>
-                            <label
-                                for="ai-custom-model"
-                                class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                                >{$_('ai_settings_page.custom_model')}</label
-                            >
+                            <div class="flex items-center justify-between mb-2">
+                                <label
+                                    for="ai-custom-model"
+                                    class="text-xs font-bold text-slate-500 uppercase"
+                                    >{$_('ai_settings_page.custom_model')}</label
+                                >
+                                <button
+                                    on:click={handleRefreshModels}
+                                    disabled={$modelsLoading}
+                                    class="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1"
+                                >
+                                    <i
+                                        class="ph ph-arrows-clockwise"
+                                        class:animate-spin={$modelsLoading}
+                                    ></i>
+                                    {$modelsLoading ? $_('ai_settings_page.loading') : $_('ai_settings_page.refresh')}
+                                </button>
+                            </div>
                             <input
                                 id="ai-custom-model"
                                 bind:value={$aiConfig.customModel}
                                 type="text"
+                                list="ai-custom-model-options"
                                 placeholder={$_('ai_settings_page.custom_model_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
+                            {#if displayModels.length > 0}
+                                <datalist id="ai-custom-model-options">
+                                    {#each displayModels as model}
+                                        <option value={model}></option>
+                                    {/each}
+                                </datalist>
+                                <div class="text-[10px] text-slate-400 mt-1">
+                                    {$_('ai_settings_page.models_count', { values: { count: displayModels.length } })}
+                                </div>
+                            {/if}
                         </div>
                     {:else if $aiConfig.provider === "ollama" || $aiConfig.provider === "lmstudio"}
                         <div>
@@ -530,15 +596,19 @@
                                     </button>
                                 {/if}
                             </div>
-                            <select
+                            <input
                                 id="ai-model"
                                 bind:value={$aiConfig.model}
-                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
-                            >
+                                type="text"
+                                list="ai-model-options"
+                                placeholder={$_('ai_settings_page.custom_model_ph')}
+                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
+                            />
+                            <datalist id="ai-model-options">
                                 {#each displayModels as model}
-                                    <option value={model}>{model}</option>
+                                    <option value={model}></option>
                                 {/each}
-                            </select>
+                            </datalist>
                             <div class="text-[10px] text-slate-400 mt-1">
                                 {$_('ai_settings_page.models_count', { values: { count: displayModels.length } })}
                             </div>
