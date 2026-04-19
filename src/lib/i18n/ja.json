@@ -284,6 +284,7 @@
     "system_notification": "システム通知",
     "notification_desc": "起動時に今日のタスクを通知",
     "test_notification": "テスト",
+    "notification_sent": "テスト通知を送信しました",
     "ai_features": "AI機能",
     "ai_report": "AIレポート生成",
     "auto_save_key": "API Keyを自動保存",
@@ -351,6 +352,7 @@
     "trusted_directories": "信頼済みディレクトリ",
     "trusted_directories_desc": "追加で許可するフォルダを登録します。AI が書き込み・編集・削除できるのは作業ディレクトリとここで許可した場所のみです。",
     "trusted_directories_placeholder": "絶対パスを入力してください。例: D:\\AI\\trusted",
+    "trusted_directories_mobile_hint": "モバイルではディレクトリ選択は利用できません。絶対パスを直接貼り付けてください。",
     "trusted_directories_empty": "追加の信頼済みディレクトリはまだありません",
     "browse": "参照"
   },

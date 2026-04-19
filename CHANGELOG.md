@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.5] - 2026-04-20
+
+- 修复 Android targetSdk 36 下返回键完全失效：MainActivity 改用 `OnBackPressedDispatcher`，并补齐 `mobile-onbackpressed-listener` 能力权限
+- 修复 Android「选择受信任目录」点击无反应：`plugin-dialog` 的 `directory: true` 不支持移动端，改为提示手动粘贴路径
+- 修复 Android 通知非重要通知：补齐 `notification:allow-create-channel` / `notification:allow-list-channels` 权限，高重要性通道创建成功
+- 修复 Windows 通知只进通知中心不弹横幅：`sendNotification` 改走 Rust `notify-rust`（`plugin:notification|notify`），经 AUMID 触发 WinRT toast
+- AI 配置自动拉取模型列表：baseUrl + apiKey 填好后 500ms 自动 GET `/models`，成功则自动填第一个；自定义接口也支持，失败静默
+- AI 模型字段改为 `input + datalist`：既能下拉选已拉取的模型，也能自由输入用户自定义或接口未返回的模型名
+- 移除 `sound: 'default'` 无效参数，减少跨平台噪音
+- 桌面能力文件拆分：`capabilities/mobile.json` 专放移动端专属权限并用 `platforms` 限制，避免桌面构建解析失败
+
 ## [0.3.4] - 2026-04-18
 
 - 石墨夜色主题全新设计，采用 iOS 液态玻璃风格：半透明毛玻璃面板、蓝紫色渐变背景、柔和光影层次，与深色模式明显区分

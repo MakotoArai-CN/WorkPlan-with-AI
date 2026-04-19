@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schemas.tauri.app/config/2/capability",
+  "identifier": "mobile",
+  "description": "Mobile-only capability for WorkPlan",
+  "windows": ["main"],
+  "platforms": ["android", "iOS"],
+  "permissions": [
+    "mobile-onbackpressed-listener:default",
+    "mobile-onbackpressed-listener:allow-register-back-event"
+  ]
+}

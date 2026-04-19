@@ -47,6 +47,7 @@
         const t = get(_);
         try {
             await settingsStore.testNotification();
+            showToast({ message: t('settings.notification_sent') || '已发送测试通知', type: 'success', duration: 2000 });
         } catch (error) {
             await showAlert({ title: t('common.error'), message: error.message, variant: "danger" });
         }
@@ -178,6 +179,15 @@
     }
 
     async function browseTrustedDirectory() {
+        const t = get(_);
+        if (isMobile) {
+            await showAlert({
+                title: t('settings.trusted_directories'),
+                message: t('settings.trusted_directories_mobile_hint') || '移动端不支持目录选择，请手动粘贴绝对路径',
+                variant: 'info'
+            });
+            return;
+        }
         try {
             const { open } = await import('@tauri-apps/plugin-dialog');
             const selected = await open({ directory: true, multiple: false });
@@ -186,6 +196,11 @@
             }
         } catch (e) {
             console.warn('Directory picker not available:', e);
+            await showAlert({
+                title: t('common.error'),
+                message: String(e?.message || e),
+                variant: 'danger'
+            });
         }
     }
 

@@ -3,7 +3,14 @@
     "allow": [
       "WebFetch(domain:crates.io)",
       "WebFetch(domain:docs.rs)",
-      "Bash(bun pm *)"
+      "Bash(bun pm *)",
+      "Bash(curl -s https://api.github.com/repos/kingsword09/tauri-plugin-mobile-onbackpressed-listener/contents/permissions)",
+      "Bash(curl -s https://api.github.com/repos/kingsword09/tauri-plugin-mobile-onbackpressed-listener/contents/)",
+      "Bash(curl -s \"https://api.github.com/search/repositories?q=tauri-plugin-mobile-onbackpressed-listener+user:kingsword09\")",
+      "Bash(curl -s \"https://api.github.com/search/repositories?q=tauri-plugin-mobile-onbackpressed-listener\")",
+      "Bash(curl -sL \"https://jsr.io/@kingsword/tauri-plugin-mobile-onbackpressed-listener/meta.json\")",
+      "Bash(curl -sL \"https://static.crates.io/crates/tauri-plugin-mobile-onbackpressed-listener/tauri-plugin-mobile-onbackpressed-listener-2.0.0.crate\" -o /tmp/plugin.crate)",
+      "Bash(tar -xzf plugin.crate -C /tmp/)"
     ]
   }
 }

@@ -284,6 +284,7 @@
     "system_notification": "系统通知",
     "notification_desc": "开机后提醒今日任务",
     "test_notification": "测试通知",
+    "notification_sent": "已发送测试通知",
     "ai_features": "AI 功能",
     "ai_report": "AI 报告生成",
     "auto_save_key": "自动保存 API Key",
@@ -351,6 +352,7 @@
     "trusted_directories": "受信任目录",
     "trusted_directories_desc": "可添加多个额外授权目录。AI 仅可在这些目录和项目工作目录中执行写入、修改、删除。",
     "trusted_directories_placeholder": "输入绝对路径，例如 D:\\AI\\trusted",
+    "trusted_directories_mobile_hint": "移动端不支持目录选择，请手动粘贴绝对路径",
     "trusted_directories_empty": "当前还没有额外受信任目录",
     "browse": "浏览"
   },

@@ -283,6 +283,7 @@
     "system_notification": "System Notifications",
     "notification_desc": "Remind daily tasks on startup",
     "test_notification": "Test",
+    "notification_sent": "Test notification sent",
     "ai_features": "AI Features",
     "ai_report": "AI Report Generation",
     "auto_save_key": "Auto-save API Key",
@@ -351,6 +352,7 @@
     "trusted_directories": "Trusted directories",
     "trusted_directories_desc": "Add extra authorized folders here. AI can only write, edit, or delete inside the workspace and these trusted directories.",
     "trusted_directories_placeholder": "Enter an absolute path, for example D:\\AI\\trusted",
+    "trusted_directories_mobile_hint": "Directory picker is not supported on mobile. Paste the absolute path manually.",
     "trusted_directories_empty": "No extra trusted directories yet",
     "browse": "Browse"
   },
