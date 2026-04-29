@@ -1,7 +1,12 @@
 import { writable, get } from 'svelte/store';
 import { _ as i18n } from 'svelte-i18n';
 import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
-import { getDefaultLocalFileConfig, getWorkspaceRoot } from '../utils/local-file-tools.js';
+import {
+    getDefaultLocalFileConfig,
+    getWorkspaceRoot,
+    isContentUri
+} from '../utils/local-file-tools.js';
+import { isWebDemo } from '../utils/runtime.js';
 
 const DARK_THEMES = new Set(['dark', 'graphite']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
@@ -14,6 +19,7 @@ function isMobilePlatform() {
 }
 
 async function dispatchNotification({ title, body, channelId }) {
+    if (isWebDemo) return;
     const payload = {
         title,
         body,
@@ -44,11 +50,12 @@ function getInitialSettings() {
             enableAiSummary: true,
             enableCharts: true,
             enableAiChatTools: true,
+            enableAiExecutionNotification: true,
             closeToQuit: false,
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.3.5',
+            appVersion: '0.3.6',
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
             theme: 'auto',
@@ -70,11 +77,12 @@ function getInitialSettings() {
                 enableAiSummary: parsed.enableAiSummary ?? true,
                 enableCharts: parsed.enableCharts ?? true,
                 enableAiChatTools: parsed.enableAiChatTools ?? true,
+                enableAiExecutionNotification: parsed.enableAiExecutionNotification ?? true,
                 closeToQuit: parsed.closeToQuit ?? false,
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.3.5',
+                appVersion: '0.3.6',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
                 theme: parsed.theme || 'auto',
@@ -105,11 +113,12 @@ function getDefaultSettings() {
         enableAiSummary: true,
         enableCharts: true,
         enableAiChatTools: true,
+        enableAiExecutionNotification: true,
         closeToQuit: false,
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.3.5',
+        appVersion: '0.3.6',
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         theme: 'auto',
@@ -130,6 +139,7 @@ function createSettingsStore() {
             enableAiSummary: state.enableAiSummary,
             enableCharts: state.enableCharts,
             enableAiChatTools: state.enableAiChatTools,
+            enableAiExecutionNotification: state.enableAiExecutionNotification,
             closeToQuit: state.closeToQuit,
             agreementAccepted: state.agreementAccepted,
             autoSaveApiKey: state.autoSaveApiKey,
@@ -225,6 +235,7 @@ function createSettingsStore() {
     }
 
     async function syncCloseToQuit(value) {
+        if (isWebDemo) return;
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('set_close_to_quit', { value });
@@ -257,12 +268,17 @@ function createSettingsStore() {
             }
         }, 5000);
 
+        if (isWebDemo) {
+            update(s => ({ ...s, appVersion: '0.3.6 (web demo)', notificationAvailable: false, autoStart: false }));
+            return;
+        }
+
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.3.5' }));
+            update(s => ({ ...s, appVersion: '0.3.6' }));
         }
 
         const workspaceRoot = await getWorkspaceRoot();
@@ -321,6 +337,25 @@ function createSettingsStore() {
             save(newState);
             return newState;
         }),
+        toggleAiExecutionNotification: () => update(s => {
+            const newState = { ...s, enableAiExecutionNotification: !s.enableAiExecutionNotification };
+            save(newState);
+            return newState;
+        }),
+        notifyAiExecution: async ({ title, body, success = true }) => {
+            const state = get({ subscribe });
+            if (!state.enableAiExecutionNotification || !state.notificationAvailable) return;
+            try {
+                const channelId = await ensureNotificationChannel();
+                await dispatchNotification({
+                    title: title || (success ? 'AI 执行完成' : 'AI 执行失败'),
+                    body: body || '',
+                    channelId
+                });
+            } catch (e) {
+                console.error('AI execution notification failed:', e);
+            }
+        },
         toggleAutoSaveApiKey: () => update(s => {
             const newState = { ...s, autoSaveApiKey: !s.autoSaveApiKey };
             save(newState);
@@ -387,9 +422,17 @@ function createSettingsStore() {
         addTrustedDirectory: (directory) => update(s => {
             const value = String(directory || '').trim();
             if (!value) return s;
-            const trustedDirectories = Array.from(
-                new Set([...(s.localFileConfig?.trustedDirectories || []), value])
-            );
+            const trustedDirectories = [...(s.localFileConfig?.trustedDirectories || [])];
+            const exists = trustedDirectories.some((item) => {
+                if (item === value) return true;
+                if (isContentUri(item) || isContentUri(value)) {
+                    return item === value;
+                }
+                return item.toLowerCase() === value.toLowerCase();
+            });
+            if (!exists) {
+                trustedDirectories.push(value);
+            }
             const newState = {
                 ...s,
                 localFileConfig: {
@@ -403,7 +446,12 @@ function createSettingsStore() {
         }),
         removeTrustedDirectory: (directory) => update(s => {
             const trustedDirectories = (s.localFileConfig?.trustedDirectories || [])
-                .filter((item) => item !== directory);
+                .filter((item) => {
+                    if (isContentUri(item) || isContentUri(directory)) {
+                        return item !== directory;
+                    }
+                    return item.toLowerCase() !== String(directory || '').toLowerCase();
+                });
             const newState = {
                 ...s,
                 localFileConfig: {

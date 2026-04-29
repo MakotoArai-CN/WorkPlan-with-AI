@@ -44,6 +44,16 @@ export function looksLikeWebSearchIntent(text = '') {
         '百科',
         '怎么回事',
         '什么情况',
+        '访问网站',
+        '打开网站',
+        '打开网页',
+        '看一下',
+        '域名',
+        'whois',
+        '有没有注册',
+        '注册了没',
+        '是否注册',
+        '备案',
         'search web',
         'web search',
         'online search',
@@ -61,10 +71,21 @@ export function looksLikeWebSearchIntent(text = '') {
         return true;
     }
 
+    if (/https?:\/\/\S+/i.test(lowerText)) {
+        return true;
+    }
+
+    // bare domain like ciy.cool, example.com, sub.example.org
+    if (/\b[a-z0-9-]+\.(?:com|cn|net|org|io|cool|app|dev|ai|tech|xyz|info|me|so|gg|cc|tv|us|uk|de|jp|fr|co|club|store|shop|site|online|top|art|live|run)\b/i.test(lowerText)) {
+        return true;
+    }
+
     const searchPatterns = [
         /搜[一]?[搜下]/,
         /查[一]?[查下]/,
         /帮我[搜查找](?!索文件|找文件)/,
+        /(访问|打开|查看|看看)\s*(网站|网页)/,
+        /(域名|whois).*(注册|备案)/,
     ];
     return searchPatterns.some((pattern) => pattern.test(lowerText));
 }

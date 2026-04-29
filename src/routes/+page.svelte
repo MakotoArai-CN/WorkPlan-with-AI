@@ -5,7 +5,7 @@
     import { showAiPanel, showAiSettings, clearChatHistory } from '$lib/stores/ai.js';
     import ContextMenu from '$lib/components/ContextMenu.svelte';
     import { settingsStore } from '$lib/stores/settings.js';
-    import { pushNavigation, popNavigation, getNavigationDepth, handleBackPress, showExitToast, initializeNavigation, setupAndroidBackHandler } from '$lib/stores/navigation.js';
+    import { pushNavigation, popNavigation, peekNavigation, getNavigationDepth, handleBackPress, showExitToast, initializeNavigation, setupAndroidBackHandler } from '$lib/stores/navigation.js';
     import { _ } from 'svelte-i18n';
     import LoginModal from '$lib/components/LoginModal.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
@@ -46,6 +46,7 @@
                 {
                     onPrimaryBack: () => {
                         if (showModal) { closeModal(); return true; }
+                        if (get(currentView) === 'aichat') { handleAiChatBack(); return true; }
                         if (get(showAiPanel)) { handleAiPanelBack(); return true; }
                         if (get(activeTask)) { activeTask.set(null); return true; }
                         if (get(showAiSettings)) { showAiSettings.set(false); return true; }
@@ -127,6 +128,16 @@
         if (depth > 1) {
             popNavigation();
         }
+    }
+
+    function handleAiChatBack() {
+        const depth = getNavigationDepth();
+        if (depth > 1) {
+            popNavigation();
+            currentView.set(peekNavigation() || 'more');
+            return;
+        }
+        currentView.set('more');
     }
 
     function handleTaskDetailBack() {

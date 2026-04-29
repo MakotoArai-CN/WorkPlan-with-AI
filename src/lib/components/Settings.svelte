@@ -7,11 +7,35 @@
     import { _, locale } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { setLocale, supportedLocales } from '../i18n/index.js';
+    import { exportToJSON } from "../utils/export.js";
+    import { pickTrustedDirectory } from "../utils/local-file-tools.js";
     import {
         DATABASE_PROVIDER_CATALOG,
         DATABASE_SETUP_SQL,
         getDatabaseProviderMeta,
     } from "../utils/database-providers.js";
+    import {
+        openclawConfig,
+        openclawStatus,
+        updateOpenClawConfig,
+        testConnection as testOpenClawConnection
+    } from "../stores/openclaw.js";
+    import { isWebDemo } from "../utils/runtime.js";
+
+    let openclawTestLoading = false;
+    let openclawShowAdvanced = false;
+
+    async function handleOpenClawTest() {
+        openclawTestLoading = true;
+        try {
+            await testOpenClawConnection();
+            showToast({ message: get(_)('settings.openclaw_test_ok') || 'OpenClaw 连接成功', variant: 'success' });
+        } catch (e) {
+            showToast({ message: (get(_)('settings.openclaw_test_fail') || 'OpenClaw 连接失败') + ': ' + (e?.message || String(e)), variant: 'error' });
+        } finally {
+            openclawTestLoading = false;
+        }
+    }
 
     let checkingUpdate = false;
     let isMobile = false;
@@ -85,7 +109,7 @@
         settingsStore.showAgreementModal();
     }
 
-    function exportData() {
+    async function exportData() {
         const t = get(_);
         showToast({ message: t('settings.backup'), type: 'info', duration: 1500 });
         const state = { 
@@ -93,14 +117,15 @@
             templates: $taskStore.templates, 
             scheduledTasks: $taskStore.scheduledTasks 
         };
-        const data = JSON.stringify(state, null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `planpro_backup_${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(a.href);
-        showToast({ message: t('settings.backup_success'), type: 'success' });
+        const result = await exportToJSON(
+            state,
+            `planpro_backup_${new Date().toISOString().split('T')[0]}.json`
+        );
+        if (result?.success) {
+            showToast({ message: result.path ? `${t('settings.backup_success')}: ${result.path}` : t('settings.backup_success'), type: 'success' });
+        } else {
+            showToast({ message: String(result?.error || t('common.error')), type: 'error' });
+        }
     }
 
     function handleImport(event) {
@@ -180,19 +205,13 @@
 
     async function browseTrustedDirectory() {
         const t = get(_);
-        if (isMobile) {
-            await showAlert({
-                title: t('settings.trusted_directories'),
-                message: t('settings.trusted_directories_mobile_hint') || '移动端不支持目录选择，请手动粘贴绝对路径',
-                variant: 'info'
-            });
-            return;
-        }
         try {
-            const { open } = await import('@tauri-apps/plugin-dialog');
-            const selected = await open({ directory: true, multiple: false });
+            const selected = await pickTrustedDirectory({
+                defaultPath: trustedDirectoryInput || $settingsStore.workspaceRoot || ''
+            });
             if (selected) {
                 settingsStore.addTrustedDirectory(selected);
+                showToast({ message: t('common.added') || t('common.success') || '已添加', type: 'success', duration: 1500 });
             }
         } catch (e) {
             console.warn('Directory picker not available:', e);
@@ -417,6 +436,129 @@
                         <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
                     </label>
                 </div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">
+                            {$_('settings.ai_execution_notification')}
+                        </div>
+                        <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.ai_execution_notification_desc')}</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={$settingsStore.enableAiExecutionNotification}
+                            on:change={settingsStore.toggleAiExecutionNotification}
+                            class="sr-only peer"
+                        />
+                        <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+                {#if !isWebDemo}
+                <div class="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0 flex-1">
+                            <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base flex items-center gap-2 flex-wrap">
+                                {$_('settings.openclaw')}
+                                <span class="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                                    {$_('settings.experimental')}
+                                </span>
+                                {#if $openclawConfig.enabled}
+                                    {#if $openclawStatus.connected}
+                                        <span class="text-[10px] text-green-600 dark:text-green-400 flex items-center gap-1">
+                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.openclaw_connected')}
+                                        </span>
+                                    {:else}
+                                        <span class="text-[10px] text-rose-500 dark:text-rose-400 flex items-center gap-1">
+                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.openclaw_disconnected')}
+                                        </span>
+                                    {/if}
+                                {/if}
+                            </div>
+                            <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 leading-6">
+                                {$_('settings.openclaw_desc')}
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input
+                                type="checkbox"
+                                checked={$openclawConfig.enabled}
+                                on:change={(e) => updateOpenClawConfig({ enabled: e.target.checked })}
+                                class="sr-only peer"
+                            />
+                            <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                        </label>
+                    </div>
+
+                    {#if $openclawConfig.enabled}
+                        <div>
+                            <label for="openclaw-base-url" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.openclaw_base_url')}</label>
+                            <input
+                                id="openclaw-base-url"
+                                type="url"
+                                value={$openclawConfig.baseUrl}
+                                on:change={(e) => updateOpenClawConfig({ baseUrl: e.target.value })}
+                                placeholder="http://127.0.0.1:18789"
+                                class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
+                            />
+                        </div>
+
+                        <div>
+                            <label for="openclaw-api-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.openclaw_api_key')}</label>
+                            <input
+                                id="openclaw-api-key"
+                                type="password"
+                                value={$openclawConfig.apiKey}
+                                on:change={(e) => updateOpenClawConfig({ apiKey: e.target.value })}
+                                placeholder={$_('settings.openclaw_api_key_ph')}
+                                class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
+                            />
+                        </div>
+
+                        <div>
+                            <label for="openclaw-session-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.openclaw_session_key')}</label>
+                            <input
+                                id="openclaw-session-key"
+                                type="text"
+                                value={$openclawConfig.sessionKey}
+                                on:change={(e) => updateOpenClawConfig({ sessionKey: e.target.value })}
+                                placeholder={$_('settings.openclaw_session_key_ph')}
+                                class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
+                            />
+                        </div>
+
+                        <button
+                            on:click={handleOpenClawTest}
+                            disabled={openclawTestLoading}
+                            class="w-full px-3 py-2 bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800 rounded-lg text-xs font-bold hover:bg-orange-100 dark:hover:bg-orange-900/50 transition disabled:opacity-50"
+                        >
+                            {openclawTestLoading ? $_('settings.openclaw_testing') : $_('settings.openclaw_test_connection')}
+                        </button>
+
+                        <button
+                            on:click={() => openclawShowAdvanced = !openclawShowAdvanced}
+                            class="text-[10px] text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400"
+                        >
+                            <i class="ph ph-caret-{openclawShowAdvanced ? 'down' : 'right'}"></i> {$_('settings.openclaw_advanced')}
+                        </button>
+
+                        {#if openclawShowAdvanced}
+                            <div class="space-y-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3 border border-slate-100 dark:border-slate-700">
+                                <div>
+                                    <label for="openclaw-timeout-ms" class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">{$_('settings.openclaw_timeout_ms')}</label>
+                                    <input id="openclaw-timeout-ms" type="number" min="30000" step="1000" value={$openclawConfig.timeoutMs} on:change={(e) => updateOpenClawConfig({ timeoutMs: Number(e.target.value) || 180000 })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded px-2 py-1 text-xs font-mono" />
+                                </div>
+                            </div>
+                        {/if}
+
+                        {#if $openclawStatus.lastError}
+                            <div class="text-[10px] text-rose-500 dark:text-rose-400 break-words">
+                                <i class="ph ph-warning"></i> {$openclawStatus.lastError}
+                            </div>
+                        {/if}
+                    {/if}
+                </div>
+                {/if}
+                {#if !isWebDemo}
                 <div class="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
                     <div class="flex items-start justify-between gap-4">
                         <div>
@@ -471,28 +613,38 @@
                                 <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
                                     {$_('settings.trusted_directories')}
                                 </div>
-                                <div class="flex gap-2">
-                                    <input
-                                        bind:value={trustedDirectoryInput}
-                                        type="text"
-                                        placeholder={$_('settings.trusted_directories_placeholder')}
-                                        on:keydown={(e) => e.key === 'Enter' && addTrustedDirectory()}
-                                        class="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-fuchsia-400 font-mono"
-                                    />
+                                {#if isMobile}
                                     <button
                                         on:click={browseTrustedDirectory}
-                                        class="h-11 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-bold border border-slate-200"
-                                        title={$_('settings.browse') || 'Browse'}
+                                        class="w-full h-11 px-4 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm font-bold flex items-center justify-center gap-2"
                                     >
                                         <i class="ph ph-folder-open text-lg"></i>
+                                        通过系统授权目录
                                     </button>
-                                    <button
-                                        on:click={addTrustedDirectory}
-                                        class="h-11 px-4 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm font-bold"
-                                    >
-                                        {$_('common.add')}
-                                    </button>
-                                </div>
+                                {:else}
+                                    <div class="flex gap-2">
+                                        <input
+                                            bind:value={trustedDirectoryInput}
+                                            type="text"
+                                            placeholder={$_('settings.trusted_directories_placeholder')}
+                                            on:keydown={(e) => e.key === 'Enter' && addTrustedDirectory()}
+                                            class="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-fuchsia-400 font-mono"
+                                        />
+                                        <button
+                                            on:click={browseTrustedDirectory}
+                                            class="h-11 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-bold border border-slate-200"
+                                            title={$_('settings.browse') || 'Browse'}
+                                        >
+                                            <i class="ph ph-folder-open text-lg"></i>
+                                        </button>
+                                        <button
+                                            on:click={addTrustedDirectory}
+                                            class="h-11 px-4 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm font-bold"
+                                        >
+                                            {$_('common.add')}
+                                        </button>
+                                    </div>
+                                {/if}
                                 <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 leading-6">
                                     {$_('settings.trusted_directories_desc')}
                                 </div>
@@ -520,6 +672,7 @@
                         </div>
                     {/if}
                 </div>
+                {/if}
             </div>
         </div>
 
@@ -746,7 +899,7 @@
             </div>
         </div>
 
-        {#if !isMobile}
+        {#if !isMobile && !isWebDemo}
             <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
                 <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                     <i class="ph ph-power text-lg"></i> {$_('settings.startup')}
@@ -869,11 +1022,13 @@
                         class="flex items-center justify-center gap-2 py-2.5 md:py-3 bg-slate-50 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 rounded-lg text-xs md:text-sm font-bold text-slate-700 dark:text-slate-200 transition">
                         <i class="ph ph-github-logo text-lg"></i> GitHub
                     </button>
+                    {#if !isWebDemo}
                     <button on:click={checkUpdate} disabled={checkingUpdate}
                         class="flex items-center justify-center gap-2 py-2.5 md:py-3 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800 rounded-lg text-xs md:text-sm font-bold text-blue-700 dark:text-blue-400 transition disabled:opacity-50">
                         <i class="ph text-lg" class:ph-spinner={checkingUpdate} class:animate-spin={checkingUpdate} class:ph-download-simple={!checkingUpdate}></i>
                         {checkingUpdate ? ($_('common.loading') || '...') : $_('settings.check_update')}
                     </button>
+                    {/if}
                 </div>
                 <button on:click={showAgreement}
                     class="w-full flex items-center justify-center gap-2 py-2.5 md:py-3 bg-slate-50 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 rounded-lg text-xs md:text-sm font-bold text-slate-600 dark:text-slate-300 transition">
@@ -883,7 +1038,7 @@
         </div>
 
         <div class="text-center text-[10px] md:text-xs text-slate-400 dark:text-slate-500 py-4">
-            Made with ❤️ by MakotoArai-CN
+            Powered by ❤️ MakotoArai-CN
         </div>
     </div>
 </div>

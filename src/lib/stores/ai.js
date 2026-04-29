@@ -5,7 +5,15 @@ import {
     searchLocalFiles,
     readLocalFile,
     writeLocalFile,
-    deleteLocalFile
+    deleteLocalFile,
+    pickLocalTextFiles,
+    readSelectedTextFiles,
+    isContentUri,
+    pickMediaFiles,
+    readSelectedMediaFiles,
+    getMediaType,
+    getFileExtension,
+    SUPPORTED_MEDIA_EXTENSIONS
 } from '../utils/local-file-tools.js';
 import {
     looksLikeWebSearchIntent,
@@ -13,12 +21,36 @@ import {
     fetchWebContent
 } from '../utils/web-search.js';
 import { settingsStore } from './settings.js';
+import { openclawConfig } from './openclaw.js';
 import { notesStore } from './notes.js';
+import { getOpenClawGatewayEndpoint } from '../utils/openclaw-client.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
 const AI_CHAT_HISTORY_KEY = 'planpro_ai_chat_history';
 const AI_CHAT_SESSIONS_KEY = 'planpro_ai_chat_sessions';
 const PROVIDER_CONFIG_FIELDS = ['apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
+const OPTIONAL_API_KEY_PROVIDERS = new Set(['ollama', 'lmstudio', 'custom', 'openclaw']);
+const USER_CHAT_AVATARS = [
+    '/avatars/user-orbit-1.svg',
+    '/avatars/user-orbit-2.svg',
+    '/avatars/user-orbit-3.svg',
+    '/avatars/user-orbit-4.svg'
+];
+const ASSISTANT_CHAT_AVATARS = [
+    '/avatars/assistant-orbit-1.svg',
+    '/avatars/assistant-orbit-2.svg',
+    '/avatars/assistant-orbit-3.svg',
+    '/avatars/assistant-orbit-4.svg'
+];
+
+function getChatAvatarVariant(index = 0) {
+    const safeIndex = Math.abs(Number(index) || 0);
+    return {
+        avatarIndex: safeIndex,
+        userAvatar: USER_CHAT_AVATARS[safeIndex % USER_CHAT_AVATARS.length],
+        assistantAvatar: ASSISTANT_CHAT_AVATARS[safeIndex % ASSISTANT_CHAT_AVATARS.length]
+    };
+}
 
 function createId(prefix = 'id') {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -90,6 +122,31 @@ function getDefaultAiPanelContext() {
     };
 }
 
+function providerNeedsApiKey(providerId) {
+    return !isG4FProvider(providerId) && !OPTIONAL_API_KEY_PROVIDERS.has(providerId);
+}
+
+function applyOpenClawRuntimeConfig(config) {
+    if (config.provider !== 'openclaw') return config;
+    const cfg = get(openclawConfig);
+    if (!cfg.enabled) {
+        return {
+            ...config,
+            apiKey: config.apiKey || '',
+            customEndpoint: ''
+        };
+    }
+    const gatewayEndpoint = getOpenClawGatewayEndpoint(cfg);
+    return {
+        ...config,
+        apiKey: cfg.apiKey || config.apiKey || '',
+        customEndpoint: gatewayEndpoint || config.customEndpoint || '',
+        openclawGatewayUrl: gatewayEndpoint || config.customEndpoint || '',
+        openclawSessionKey: cfg.sessionKey || '',
+        openclawTimeoutMs: cfg.timeoutMs || 180000
+    };
+}
+
 export const aiConfig = writable(getDefaultAiConfigState());
 
 export const chatHistory = writable([]);
@@ -97,6 +154,7 @@ export const aiChatHistory = writable([]);
 export const aiChatSessions = writable([]);
 export const activeAiChatSessionId = writable(null);
 export const aiChatDraft = writable('');
+export const aiChatComposerAttachments = writable([]);
 export const aiChatContext = writable(null);
 export const aiPanelContext = writable(getDefaultAiPanelContext());
 export const isAiLoading = writable(false);
@@ -125,12 +183,11 @@ export const aiChatRuntimeCapabilities = writable({
     toolCallRuntimeAvailable: null
 });
 export const aiChatCapabilities = derived(
-    [settingsStore, aiConfig, aiChatRuntimeCapabilities],
-    ([$settings, $config, $runtime]) => {
-        const needsApiKey = !isG4FProvider($config.provider) &&
-            $config.provider !== 'ollama' &&
-            $config.provider !== 'lmstudio' &&
-            $config.provider !== 'custom';
+    [settingsStore, aiConfig, aiChatRuntimeCapabilities, openclawConfig],
+    ([$settings, $config, $runtime, $openclawConfig]) => {
+        const needsApiKey = providerNeedsApiKey($config.provider);
+        const openclawReady = $config.provider !== 'openclaw' ||
+            ($openclawConfig.enabled && Boolean(getOpenClawGatewayEndpoint($openclawConfig)));
         const toolRouterEnabled = $settings.enableAiChatTools ?? true;
         const localFileEnabled = $settings.localFileConfig?.enabled ?? false;
 
@@ -147,7 +204,7 @@ export const aiChatCapabilities = derived(
 
         return {
             mode: toolRouterEnabled ? 'internal_router' : 'chat_only',
-            connectionReady: !needsApiKey || Boolean($config.apiKey),
+            connectionReady: openclawReady && (!needsApiKey || Boolean($config.apiKey)),
             toolRouterEnabled,
             projectToolsAvailable: toolRouterEnabled && toolCallAvailable,
             localFilesAvailable,
@@ -196,10 +253,7 @@ export async function probeAiCapabilities() {
 
     try {
         const config = getEffectiveConfig();
-        const needsApiKey = !isG4FProvider(config.provider) &&
-            config.provider !== 'ollama' &&
-            config.provider !== 'lmstudio' &&
-            config.provider !== 'custom';
+        const needsApiKey = providerNeedsApiKey(config.provider);
         if (needsApiKey && !config.apiKey) {
             toolCallOk = false;
         } else {
@@ -364,16 +418,25 @@ function syncActiveProfile(state, overrides = {}) {
 function inferChatSessionTitle(history = []) {
     const firstUserMessage = history.find(message => message.role === 'user' && message.type === 'text' && message.content);
     if (!firstUserMessage) return '新对话';
+    if (firstUserMessage.attachments?.length && firstUserMessage.content === '请阅读并分析这些附件。') {
+        const firstAttachment = firstUserMessage.attachments[0];
+        if (firstAttachment?.name) {
+            return firstAttachment.name.length > 24
+                ? `${firstAttachment.name.slice(0, 24)}...`
+                : firstAttachment.name;
+        }
+    }
     const normalized = firstUserMessage.content.replace(/\s+/g, ' ').trim();
     return normalized.length > 24 ? `${normalized.slice(0, 24)}...` : normalized;
 }
 
-function createChatSession(title = '新对话', history = []) {
+function createChatSession(title = '新对话', history = [], avatarIndex = 0) {
     const timestamp = new Date().toISOString();
     return {
         id: createId('chat'),
         title,
         history,
+        ...getChatAvatarVariant(avatarIndex),
         createdAt: timestamp,
         updatedAt: timestamp
     };
@@ -383,10 +446,11 @@ function normalizeChatSessions(rawSessions = [], legacyHistory = []) {
     const normalized = Array.isArray(rawSessions)
         ? rawSessions
             .map((session, index) => ({
-                ...createChatSession(`对话 ${index + 1}`),
+                ...createChatSession(`对话 ${index + 1}`, [], session?.avatarIndex ?? index),
                 ...(session || {}),
                 history: Array.isArray(session?.history) ? session.history : [],
-                title: session?.title || inferChatSessionTitle(session?.history || []) || `对话 ${index + 1}`
+                title: session?.title || inferChatSessionTitle(session?.history || []) || `对话 ${index + 1}`,
+                ...getChatAvatarVariant(session?.avatarIndex ?? index)
             }))
         : [];
 
@@ -395,10 +459,10 @@ function normalizeChatSessions(rawSessions = [], legacyHistory = []) {
     }
 
     if (Array.isArray(legacyHistory) && legacyHistory.length > 0) {
-        return [createChatSession(inferChatSessionTitle(legacyHistory), legacyHistory)];
+        return [createChatSession(inferChatSessionTitle(legacyHistory), legacyHistory, 0)];
     }
 
-    return [createChatSession()];
+    return [createChatSession('新对话', [], 0)];
 }
 
 async function getProviderInfoCached(providerId) {
@@ -582,7 +646,7 @@ export function saveAiConfig() {
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
     aiConfig.set(nextState);
-    saveApiKeyToPasswords(nextState.provider, nextState);
+    saveApiKeyToPasswords(nextState.provider, nextState, nextState.activeProfileName);
 }
 
 export function addConnectionProfile(name = '') {
@@ -636,12 +700,12 @@ export function deleteConnectionProfile(profileId) {
     });
 }
 
-async function saveApiKeyToPasswords(providerId, config) {
+async function saveApiKeyToPasswords(providerId, config, profileName = '') {
     if (typeof window === 'undefined') return;
-    
+
     const settingsStr = localStorage.getItem('planpro_system_settings');
     if (!settingsStr) return;
-    
+
     try {
         const settings = JSON.parse(settingsStr);
         if (!settings.autoSaveApiKey) return;
@@ -655,18 +719,25 @@ async function saveApiKeyToPasswords(providerId, config) {
     try {
         const { passwordsStore, isPasswordsUnlocked } = await import('./passwords.js');
         const { get: storeGet } = await import('svelte/store');
-        
+
         const unlocked = storeGet(isPasswordsUnlocked);
         if (!unlocked) return;
 
         const { getProviderInfo } = await import('../utils/ai-providers.js');
         const providerInfo = getProviderInfo(providerId);
         const providerName = providerInfo?.name || providerId;
+        const cleanProfile = String(profileName || '').trim();
+        const title = cleanProfile && cleanProfile !== '默认连接'
+            ? `${providerName} · ${cleanProfile} API Key`
+            : `${providerName} API Key`;
+        const endpointSuffix = config.customEndpoint ? ` (${config.customEndpoint})` : '';
+        const username = `${providerId}${endpointSuffix}`;
 
         const existingPasswords = storeGet(passwordsStore).passwords;
-        const existingEntry = existingPasswords.find(p => 
-            p.category === 'API密钥' && 
-            p.title === `${providerName} API Key`
+        const existingEntry = existingPasswords.find(p =>
+            p.category === 'API密钥' &&
+            p.title === title &&
+            p.username === username
         );
 
         if (existingEntry) {
@@ -679,12 +750,12 @@ async function saveApiKeyToPasswords(providerId, config) {
             }
         } else {
             passwordsStore.addPassword({
-                title: `${providerName} API Key`,
-                username: providerId,
+                title,
+                username,
                 password: apiKey,
-                url: providerInfo?.apiUrl || '',
+                url: config.customEndpoint || providerInfo?.apiUrl || '',
                 category: 'API密钥',
-                notes: `由 AI 设置自动同步\n创建时间: ${new Date().toLocaleString()}`
+                notes: `由 AI 设置自动同步\n连接：${cleanProfile || '默认'}\n创建时间: ${new Date().toLocaleString()}`
             });
         }
     } catch (e) {
@@ -740,9 +811,81 @@ export function saveAiChatHistory() {
     }));
 }
 
+export async function attachFilesToAiChatComposer() {
+    const selectedPaths = await pickLocalTextFiles();
+    if (!selectedPaths.length) {
+        return [];
+    }
+
+    const files = normalizeChatAttachments(await readSelectedTextFiles({
+        paths: selectedPaths,
+        maxBytes: 96000
+    }));
+
+    aiChatComposerAttachments.update((current) => {
+        const merged = normalizeChatAttachments([...(current || []), ...files]);
+        return merged.slice(0, 8);
+    });
+
+    return files;
+}
+
+export async function attachMediaToAiChatComposer() {
+    const selectedPaths = await pickMediaFiles();
+    if (!selectedPaths.length) {
+        return [];
+    }
+
+    const mediaFiles = await readSelectedMediaFiles({
+        paths: selectedPaths,
+        maxBytes: 10_000_000
+    });
+
+    const files = normalizeChatAttachments(
+        mediaFiles.map((file) => {
+            const ext = getFileExtension(file.name || file.path);
+            const mediaType = getMediaType(ext);
+            let thumbnailUrl = '';
+            if (mediaType === 'image' && file.base64Data) {
+                thumbnailUrl = `data:${file.mimeType};base64,${file.base64Data}`;
+            }
+            return {
+                path: file.path,
+                name: file.name,
+                size: file.size,
+                content: '',
+                truncated: false,
+                mediaType,
+                mimeType: file.mimeType,
+                base64Data: file.base64Data,
+                thumbnailUrl
+            };
+        })
+    );
+
+    aiChatComposerAttachments.update((current) => {
+        const merged = normalizeChatAttachments([...(current || []), ...files]);
+        return merged.slice(0, 8);
+    });
+
+    return files;
+}
+
+export function removeAiChatComposerAttachment(path) {
+    const target = String(path || '');
+    aiChatComposerAttachments.update((current) =>
+        normalizeChatAttachments(current).filter((item) => item.path !== target)
+    );
+}
+
+export function clearAiChatComposerAttachments() {
+    aiChatComposerAttachments.set([]);
+}
+
 export function clearAiChatDraft() {
     aiChatDraft.set('');
     aiChatContext.set(null);
+    clearAiChatComposerAttachments();
 }
 
 export function resetAiPanelContext() {
@@ -767,7 +910,7 @@ export function setAiChatDraft(draft = '', context = null) {
 
 export function createAiChatSession(title = '新对话') {
     const currentSessions = get(aiChatSessions);
-    const newSession = createChatSession(title);
+    const newSession = createChatSession(title, [], currentSessions.length);
     aiChatSessions.set([newSession, ...(currentSessions || [])]);
     activeAiChatSessionId.set(newSession.id);
     aiChatHistory.set([]);
@@ -871,7 +1014,7 @@ export function getModelsForProvider(providerId) {
 export function getEffectiveConfig() {
     const config = get(aiConfig);
     const isCustom = config.provider === 'custom';
-    return {
+    return applyOpenClawRuntimeConfig({
         provider: config.provider,
         apiKey: config.apiKey,
         secretKey: config.secretKey,
@@ -884,7 +1027,7 @@ export function getEffectiveConfig() {
         customHeaders: config.customHeaders,
         dailyReportPrompt: config.dailyReportPrompt,
         weeklyReportPrompt: config.weeklyReportPrompt
-    };
+    });
 }
 
 function getFormattedDateTime() {
@@ -1361,15 +1504,127 @@ function extractQuotedSegment(text = '') {
     return '';
 }
 
+function trimPathLikeValue(value = '') {
+    return String(value || '')
+        .trim()
+        .replace(/^\\\\\?\\/, '')
+        .replace(/[\u3000\s]+$/g, '')
+        .replace(/[，。；、]+$/g, '');
+}
+
+function sanitizeFilename(value = '') {
+    const cleaned = String(value || '')
+        .trim()
+        .replace(/[<>:"/\\|?*\u0000-\u001F：／＼？＊｜]/g, '-')
+        .replace(/[，。；、]+$/g, '')
+        .replace(/^[.\s]+|[.\s]+$/g, '');
+    return cleaned;
+}
+
+function joinDirectoryAndFilename(directory = '', filename = '') {
+    const cleanDirectory = trimPathLikeValue(directory);
+    const cleanFilename = sanitizeFilename(filename);
+    if (!cleanDirectory) {
+        return cleanFilename;
+    }
+    if (!cleanFilename) {
+        return cleanDirectory;
+    }
+    const separator = cleanDirectory.includes('\\') ? '\\' : '/';
+    return `${cleanDirectory.replace(/[\\/]+$/g, '')}${separator}${cleanFilename}`;
+}
+
+function extractLikelyFilename(text = '') {
+    const patterns = [
+        /(?:文件名|命名为|保存为|写入(?:一个)?文件|创建(?:一个)?文件|新建(?:一个)?文件)[：:\s]+([^\\/:*?"<>|,\s，。；、]+?\.(?:md|txt|json|js|ts|tsx|jsx|svelte|rs|html|css|scss|yml|yaml|toml|csv|sql|log|xml))/i,
+        /([^\\/:*?"<>|,\s，。；、]+?\.(?:md|txt|json|js|ts|tsx|jsx|svelte|rs|html|css|scss|yml|yaml|toml|csv|sql|log|xml))(?=$|[\s，。；、,])/i
+    ];
+
+    for (const pattern of patterns) {
+        const match = String(text).match(pattern);
+        if (match?.[1]) {
+            return sanitizeFilename(match[1]);
+        }
+    }
+    return '';
+}
+
+function extractLikelyDirectory(text = '') {
+    const patterns = [
+        /([A-Za-z]:\\[^\n\r"'`]+?)(?=(?:\\)?(?:写入|保存|创建|新建|导出|生成|内容[：:]|文件(?:名)?[：:]|$))/i,
+        /([A-Za-z]:\\[^\n\r"'`]+?)(?=$|[\s，。；、,])/i,
+        /((?:\.\/|\/)[^\n\r"'`]+?)(?=(?:\/)?(?:写入|保存|创建|新建|导出|生成|内容[：:]|文件(?:名)?[：:]|$))/i,
+        /((?:\.\/|\/)[^\n\r"'`]+?)(?=$|[\s，。；、,])/i
+    ];
+
+    for (const pattern of patterns) {
+        const match = String(text).match(pattern);
+        if (match?.[1]) {
+            return trimPathLikeValue(match[1]).replace(/[\\/]+$/g, '');
+        }
+    }
+    return '';
+}
+
+function containsPathNoise(value = '') {
+    return /(内容[：:]|访问网站|访问网址|打开网站|看一下|有没有注册|是否注册|whois|https?:\/\/|写入(?:一个)?文件[：:]?|创建(?:一个)?文件[：:]?|新建(?:一个)?文件[：:]?|保存为[：:]?|文件名[：:]?)/i
+        .test(String(value || ''));
+}
+
+function sanitizePathCandidate(path = '', operation = 'read') {
+    const cleanPath = trimPathLikeValue(path);
+    if (!cleanPath || isContentUri(cleanPath)) {
+        return cleanPath;
+    }
+
+    const separator = cleanPath.includes('\\') ? '\\' : '/';
+    const parts = cleanPath.split(/[\\/]/);
+    if (operation === 'write' && parts.length > 0) {
+        const last = parts.pop() || '';
+        parts.push(sanitizeFilename(last) || last);
+        return parts.join(separator);
+    }
+
+    return cleanPath;
+}
+
+function extractStructuredWriteTarget(text = '') {
+    const explicitFullPath =
+        String(text).match(/[A-Za-z]:\\[^\n\r"'`<>|?*：／＼？＊｜]+?\.(?:md|txt|json|js|ts|tsx|jsx|svelte|rs|html|css|scss|yml|yaml|toml|csv|sql|log|xml)(?=$|[\s，。；、,])/i)?.[0] ||
+        String(text).match(/(?:\.\/|\/)[^\n\r"'`<>|?*：／＼？＊｜]+?\.(?:md|txt|json|js|ts|tsx|jsx|svelte|rs|html|css|scss|yml|yaml|toml|csv|sql|log|xml)(?=$|[\s，。；、,])/i)?.[0] ||
+        '';
+
+    if (explicitFullPath) {
+        return sanitizePathCandidate(explicitFullPath, 'write');
+    }
+
+    const directory = extractLikelyDirectory(text);
+    const filename = extractLikelyFilename(text);
+    if (directory && filename) {
+        return sanitizePathCandidate(joinDirectoryAndFilename(directory, filename), 'write');
+    }
+
+    const quoted = extractQuotedSegment(text);
+    if (quoted && /[\\/]/.test(quoted)) {
+        return sanitizePathCandidate(quoted, 'write');
+    }
+
+    return '';
+}
+
 function extractLikelyPath(text = '') {
     const candidates = [
+        extractStructuredWriteTarget(text),
         extractQuotedSegment(text),
+        String(text).match(/[A-Za-z]:\\[^\n\r"'`<>|?*：／＼？＊｜]+?\.(?:md|txt|json|js|ts|tsx|jsx|svelte|rs|html|css|scss|yml|yaml|toml|csv|sql|log|xml)(?=$|[\s，。；、,])/i)?.[0] || '',
+        extractLikelyDirectory(text),
         String(text).match(/[A-Za-z]:\\[^\n\r"'`]+/)?.[0] || '',
         String(text).match(/(?:^|[\s(])(\.\/[^\s"'`]+|\/[^\s"'`]+)(?=$|[\s)])/i)?.[1] || '',
         String(text).match(/([A-Za-z0-9_.\-\/\\]+\.(?:md|txt|json|js|ts|tsx|jsx|svelte|rs|html|css|scss|yml|yaml|toml|csv|sql|log|xml))/i)?.[1] || ''
     ];
 
-    return candidates.find((candidate) => candidate && /[\\/\.]/.test(candidate)) || '';
+    const candidate = candidates.find((item) => item && /[\\/\.]/.test(item)) || '';
+    return sanitizePathCandidate(candidate);
 }
 
 function extractFencedContent(text = '') {
@@ -1378,8 +1633,69 @@ function extractFencedContent(text = '') {
         return fenced[1].trimEnd();
     }
 
-    const inline = String(text).match(/内容[：:]\s*([\s\S]+)/);
+    const inline = String(text).match(/内容(?:为|是)?[：:]\s*([\s\S]+)/);
     return inline?.[1]?.trim() || '';
+}
+
+function splitExplicitToolSteps(text = '') {
+    const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    const markerRegex = /(^|\n)\s*(\d+)[\.\)、]\s+/g;
+    const markers = [...normalized.matchAll(markerRegex)];
+    if (markers.length < 2) {
+        return [];
+    }
+
+    const steps = markers.map((match, index) => {
+        const start = match.index + match[0].length;
+        const end = index + 1 < markers.length ? markers[index + 1].index : normalized.length;
+        return normalized.slice(start, end).trim();
+    }).filter(Boolean);
+
+    return steps.length > 1 ? steps : [];
+}
+
+function normalizeLocalFilePlan(plan = {}, userText = '') {
+    const operation = String(plan.operation || inferLocalFileOperation(userText) || '').toLowerCase();
+    const nextPlan = {
+        ...plan,
+        operation
+    };
+
+    if (operation === 'write') {
+        const structuredPath = extractStructuredWriteTarget(userText);
+        nextPlan.path = sanitizePathCandidate(
+            structuredPath || (containsPathNoise(nextPlan.path) ? '' : nextPlan.path),
+            'write'
+        );
+        nextPlan.content = typeof nextPlan.content === 'string' && nextPlan.content.trim()
+            ? nextPlan.content
+            : extractFencedContent(userText);
+        return nextPlan;
+    }
+
+    if (operation === 'read' || operation === 'delete') {
+        const fallbackPath = extractLikelyPath(userText);
+        nextPlan.path = sanitizePathCandidate(
+            containsPathNoise(nextPlan.path) ? fallbackPath : (nextPlan.path || fallbackPath),
+            operation
+        );
+        return nextPlan;
+    }
+
+    if (operation === 'search') {
+        const fallbackRoot = extractLikelyDirectory(userText);
+        nextPlan.root = sanitizePathCandidate(
+            containsPathNoise(nextPlan.root) ? fallbackRoot : (nextPlan.root || fallbackRoot),
+            'search'
+        );
+        return nextPlan;
+    }
+
+    return nextPlan;
 }
 
 function inferLocalFileOperation(text = '') {
@@ -1405,7 +1721,10 @@ function buildFallbackLocalFileIntent(userText, settings = get(settingsStore)) {
     }
 
     const operation = inferLocalFileOperation(userText) || 'search';
-    const path = extractLikelyPath(userText);
+    const path = operation === 'write'
+        ? (extractStructuredWriteTarget(userText) || extractLikelyPath(userText))
+        : extractLikelyPath(userText);
+    const extractedContent = extractFencedContent(userText);
     const cleanedQuery = String(userText)
         .replace(/请|帮我|麻烦|一下|在项目里|在工作目录里|工作目录|workspace|目录里|文件夹里/gi, ' ')
         .replace(/(读取|打开|查看|扫描|列出|搜索|查找|找|写入|保存|创建|新建|修改|删除)(文件|目录|文件夹)?/gi, ' ')
@@ -1426,7 +1745,7 @@ function buildFallbackLocalFileIntent(userText, settings = get(settingsStore)) {
             mode: 'file',
             operation,
             path,
-            content: extractFencedContent(userText),
+            content: extractedContent,
             response_goal: '说明文件已写入的位置；如果用户给了内容，概括写入结果。',
             message: '已按本地文件兼容模式解析为写入操作。'
         };
@@ -1467,15 +1786,19 @@ function buildFallbackWebSearchIntent(userText = '') {
         return null;
     }
 
+    const explicitUrl = String(userText).match(/https?:\/\/[^\s<>"'`，。；、]+/i)?.[0] || '';
+
     const query = String(userText)
         .replace(/请|帮我|麻烦|一下/gi, ' ')
         .replace(/(联网|网页|网上|在线|online|web)\s*(搜索|查找|查询)/gi, ' ')
         .replace(/搜索一下|查一下|搜一下|帮我搜索|web search|online search/gi, ' ')
+        .replace(/(访问|打开|查看|看看)\s*(网站|网页)/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 
     return {
         mode: 'web',
+        url: explicitUrl,
         query: query || userText,
         response_goal: '根据搜索结果回答用户，并保留关键链接与来源。',
         message: '已按网页搜索兼容模式执行检索。'
@@ -1532,6 +1855,207 @@ function formatNoteContextForAI(context = {}) {
     ].join('\n');
 }
 
+function normalizeChatAttachment(attachment = {}) {
+    return {
+        path: String(attachment.path || ''),
+        name: String(attachment.name || attachment.path || '未命名附件'),
+        content: String(attachment.content || ''),
+        size: Number(attachment.size || 0),
+        truncated: Boolean(attachment.truncated),
+        mediaType: attachment.mediaType || null,
+        mimeType: String(attachment.mimeType || ''),
+        base64Data: String(attachment.base64Data || ''),
+        thumbnailUrl: String(attachment.thumbnailUrl || '')
+    };
+}
+
+function normalizeChatAttachments(attachments = []) {
+    if (!Array.isArray(attachments)) {
+        return [];
+    }
+    const seen = new Set();
+    return attachments
+        .map(normalizeChatAttachment)
+        .filter((item) => {
+            const key = item.path || item.name;
+            if (!key || seen.has(key)) {
+                return false;
+            }
+            seen.add(key);
+            return true;
+        });
+}
+
+function formatFileSize(size = 0) {
+    const value = Number(size || 0);
+    if (!Number.isFinite(value) || value <= 0) return '0 B';
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function buildAttachmentContext(attachments = []) {
+    const items = normalizeChatAttachments(attachments);
+    const textItems = items.filter((item) => !item.mediaType || item.mediaType === 'text');
+    if (textItems.length === 0) {
+        return '';
+    }
+    return [
+        '【用户附加文件】',
+        ...textItems.map((item, index) => [
+            `附件 ${index + 1}: ${item.name}`,
+            `路径: ${item.path}`,
+            `大小: ${formatFileSize(item.size)}`,
+            item.truncated ? '说明: 文件内容已截断' : '',
+            '内容：',
+            item.content || '（空文件）'
+        ].filter(Boolean).join('\n'))
+    ].join('\n\n');
+}
+
+function hasMediaAttachments(attachments = []) {
+    return normalizeChatAttachments(attachments).some(
+        (item) => item.mediaType && item.mediaType !== 'text' && item.base64Data
+    );
+}
+
+function buildUserMessageContentForAI(message = {}, bodyFormat = 'openai') {
+    const baseContent = String(message?.content || '').trim();
+    const attachments = normalizeChatAttachments(message?.attachments || []);
+    const textContext = buildAttachmentContext(attachments);
+    const mediaItems = attachments.filter(
+        (item) => item.mediaType && item.mediaType !== 'text' && item.base64Data
+    );
+
+    if (mediaItems.length === 0) {
+        if (!textContext) return baseContent;
+        return [baseContent || '请结合以下附件继续处理。', textContext].filter(Boolean).join('\n\n');
+    }
+
+    const textPart = [baseContent, textContext].filter(Boolean).join('\n\n') || '请分析以下内容。';
+
+    if (bodyFormat === 'anthropic') {
+        const parts = [{ type: 'text', text: textPart }];
+        for (const item of mediaItems) {
+            if (item.mediaType === 'image') {
+                parts.push({
+                    type: 'image',
+                    source: {
+                        type: 'base64',
+                        media_type: item.mimeType,
+                        data: item.base64Data
+                    }
+                });
+            }
+        }
+        return parts;
+    }
+
+    if (bodyFormat === 'google') {
+        const parts = [{ text: textPart }];
+        for (const item of mediaItems) {
+            parts.push({
+                inlineData: {
+                    mimeType: item.mimeType,
+                    data: item.base64Data
+                }
+            });
+        }
+        return parts;
+    }
+
+    const parts = [{ type: 'text', text: textPart }];
+    for (const item of mediaItems) {
+        if (item.mediaType === 'image') {
+            parts.push({
+                type: 'image_url',
+                image_url: {
+                    url: `data:${item.mimeType};base64,${item.base64Data}`
+                }
+            });
+        }
+    }
+    return parts;
+}
+
+function normalizeComparablePath(path = '') {
+    const raw = String(path || '').trim();
+    if (!raw) return '';
+    if (isContentUri(raw)) {
+        return raw;
+    }
+    return raw
+        .replace(/\\/g, '/')
+        .replace(/\/+$/, '')
+        .toLowerCase();
+}
+
+function looksLikeExplicitPath(value = '') {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    return isContentUri(text) ||
+        /^[a-z]:[\\/]/i.test(text) ||
+        /^\.{1,2}[\\/]/.test(text) ||
+        /^\/[^/\s]/.test(text) ||
+        /[\\/]/.test(text);
+}
+
+function getDirectoryFromPath(path = '') {
+    const value = String(path || '').trim();
+    if (!value) return '';
+    if (isContentUri(value)) {
+        return value;
+    }
+    const normalized = value.replace(/[\\/]+$/, '');
+    const index = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
+    if (index <= 0) {
+        return normalized;
+    }
+    return normalized.slice(0, index);
+}
+
+function isPathInside(candidate = '', root = '') {
+    const normalizedCandidate = normalizeComparablePath(candidate);
+    const normalizedRoot = normalizeComparablePath(root);
+    if (!normalizedCandidate || !normalizedRoot) {
+        return false;
+    }
+    if (normalizedCandidate === normalizedRoot) {
+        return true;
+    }
+    if (isContentUri(normalizedCandidate) || isContentUri(normalizedRoot)) {
+        return normalizedCandidate.startsWith(`${normalizedRoot}/`) ||
+            normalizedCandidate.startsWith(`${normalizedRoot}%2F`) ||
+            normalizedCandidate.startsWith(`${normalizedRoot}%2f`);
+    }
+    return normalizedCandidate.startsWith(`${normalizedRoot}/`);
+}
+
+function getPlanAuthorizationDirectory(plan = {}) {
+    const operation = String(plan.operation || '').toLowerCase();
+    const candidates = [];
+    if ((operation === 'search' || operation === 'read') && looksLikeExplicitPath(plan.root)) {
+        candidates.push(plan.root);
+    }
+    if (looksLikeExplicitPath(plan.path)) {
+        candidates.push(operation === 'search' ? plan.path : getDirectoryFromPath(plan.path));
+    }
+    return candidates.map((value) => String(value || '').trim()).find(Boolean) || '';
+}
+
+function resolveUnauthorizedDirectory(plan = {}, settings = get(settingsStore)) {
+    const requestedDirectory = getPlanAuthorizationDirectory(plan);
+    if (!requestedDirectory) {
+        return '';
+    }
+
+    const workspaceRoot = settings.workspaceRoot || '';
+    const trustedDirectories = settings.localFileConfig?.trustedDirectories || [];
+    const authorizedRoots = [workspaceRoot, ...trustedDirectories].filter(Boolean);
+    const isAuthorized = authorizedRoots.some((root) => isPathInside(requestedDirectory, root));
+    return isAuthorized ? '' : requestedDirectory;
+}
+
 async function buildContextualAssistantResponse(userText, assistantContext, config, options = {}) {
     const { callAIWithMessages } = await import('../utils/ai-providers.js');
     const nowStr = getFormattedDateTime();
@@ -1584,7 +2108,7 @@ function formatLocalFileSearchResult(entries = []) {
     ].join('\n');
 }
 
-const VALID_INTENTS = new Set(['chat', 'web_search', 'file', 'task']);
+const VALID_INTENTS = new Set(['chat', 'web_search', 'file', 'task', 'image_generation', 'audio_generation']);
 
 async function classifyUserIntent(text, config) {
     const systemPrompt = `You are a strict intent classifier. Classify the user message into exactly one category. Return ONLY valid JSON, no explanation.
@@ -1594,8 +2118,10 @@ Categories:
 - "web_search": requires real-time or online information (weather, news, stock/gold/oil prices, exchange rates, search the web, latest version of something, current events, official websites)
 - "file": involves local file operations (read, write, delete, scan, search files/directories, check file contents, file paths mentioned)
 - "task": involves tasks/todos/templates/scheduled tasks — adding, deleting, modifying, querying, completing, or listing tasks
+- "image_generation": user explicitly asks to generate/create/draw an image, picture, illustration, or artwork (e.g. "画一张", "生成图片", "generate an image", "draw me a")
+- "audio_generation": user explicitly asks for text-to-speech, voice synthesis, or audio generation (e.g. "朗读", "语音合成", "TTS", "read aloud", "generate speech")
 
-Output: {"intent": "chat"}  or  {"intent": "web_search"}  or  {"intent": "file"}  or  {"intent": "task"}`;
+Output: {"intent": "chat"}  or  {"intent": "web_search"}  or  {"intent": "file"}  or  {"intent": "task"}  or  {"intent": "image_generation"}  or  {"intent": "audio_generation"}`;
 
     try {
         const { callAI } = await import('../utils/ai-providers.js');
@@ -1652,12 +2178,12 @@ ${trustedDirectories.length > 0 ? trustedDirectories.map((item) => `- ${item}`).
 
     try {
         const aiResponse = await callAI(config, userText, systemPrompt);
-        if (!aiResponse) return fallbackPlan;
+        if (!aiResponse) return normalizeLocalFilePlan(fallbackPlan, userText);
         const parsed = extractJsonPayload(aiResponse);
         if (parsed.mode !== 'file' || !parsed.operation) {
-            return fallbackPlan;
+            return normalizeLocalFilePlan(fallbackPlan, userText);
         }
-        return {
+        return normalizeLocalFilePlan({
             ...fallbackPlan,
             ...parsed,
             path: parsed.path || fallbackPlan?.path || '',
@@ -1666,10 +2192,10 @@ ${trustedDirectories.length > 0 ? trustedDirectories.map((item) => `- ${item}`).
             content: parsed.content ?? fallbackPlan?.content ?? '',
             response_goal: parsed.response_goal || fallbackPlan?.response_goal,
             message: parsed.message || fallbackPlan?.message
-        };
+        }, userText);
     } catch (error) {
         console.error('Failed to parse local file intent:', error);
-        return fallbackPlan;
+        return normalizeLocalFilePlan(fallbackPlan, userText);
     }
 }
 
@@ -1714,6 +2240,7 @@ async function analyzeWebSearchIntent(userText, config, callAI, intentHint = nul
 只返回 JSON：
 {
   "mode": "reply|web",
+  "url": "用户明确给出的网页 URL，可选",
   "query": "精简后的搜索关键词",
   "response_goal": "基于搜索结果应如何回答用户",
   "message": "给用户的简短提示"
@@ -1729,6 +2256,7 @@ async function analyzeWebSearchIntent(userText, config, callAI, intentHint = nul
         return {
             ...fallbackPlan,
             ...parsed,
+            url: parsed.url || fallbackPlan?.url || '',
             query: parsed.query || fallbackPlan?.query || userText,
             response_goal: parsed.response_goal || fallbackPlan?.response_goal,
             message: parsed.message || fallbackPlan?.message
@@ -1769,6 +2297,20 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
     const settings = get(settingsStore);
     const trustedDirectories = settings.localFileConfig?.trustedDirectories || [];
     const operation = String(plan.operation || '').toLowerCase();
+    const authorizationDirectory = resolveUnauthorizedDirectory(plan, settings);
+
+    if (authorizationDirectory) {
+        return {
+            role: 'assistant',
+            type: 'file_confirm',
+            operation: {
+                ...plan,
+                trustedDirectories,
+                authorizationDirectory
+            },
+            message: `需要先授权目录后才能继续此操作：${authorizationDirectory}`
+        };
+    }
 
     if (operation === 'write' || operation === 'delete') {
         if (requireConfirmation) {
@@ -1849,6 +2391,30 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
 }
 
 async function runWebSearchPlan(plan, userText, config, onProgress = null) {
+    const explicitUrl = String(plan?.url || '').trim();
+    if (explicitUrl) {
+        if (onProgress) onProgress('fetching');
+        const pageContent = await fetchWebContent(explicitUrl, 5000);
+        if (onProgress) onProgress('generating');
+        const summarized = await finalizeToolAnswer(
+            userText,
+            {
+                operation: 'web_fetch',
+                response_goal: plan.response_goal || '根据网页内容直接回答用户，并明确引用访问的网址。'
+            },
+            `网页地址：${explicitUrl}\n网页内容：\n${pageContent}`,
+            config
+        );
+        return {
+            role: 'assistant',
+            type: 'web_search_result',
+            query: plan.query || explicitUrl,
+            summary: summarized || `已访问网页：${explicitUrl}`,
+            entries: [{ title: explicitUrl, url: explicitUrl, snippet: '', source: 'Direct URL' }],
+            message: plan.message || '已完成网页访问。'
+        };
+    }
+
     const results = await searchWeb({
         query: plan.query || userText,
         maxResults: plan.maxResults || 6
@@ -1932,9 +2498,116 @@ function normalizeAssistantResult(result, assistantContext) {
     };
 }
 
-async function resolveAssistantMessage(text, existingTasks = [], currentConfig = getEffectiveConfig(), intentHint = null, onProgress = null) {
+function looksLikeImageGenerationIntent(text = '') {
+    const lower = String(text).toLowerCase();
+    const patterns = [
+        /画[一个张幅]/, /生成[一张个幅]?图/, /生成图片/, /生成图像/, /生成插画/, /生成海报/,
+        /画个/, /画一/, /帮我画/, /请画/, /给我画/,
+        /generate\s+(an?\s+)?image/i, /draw\s+(me\s+)?/i, /create\s+(an?\s+)?image/i,
+        /create\s+(an?\s+)?picture/i, /make\s+(an?\s+)?image/i,
+        /生成一张/, /做一张图/, /做张图/, /出一张图/
+    ];
+    return patterns.some(p => p.test(lower));
+}
+
+function looksLikeAudioGenerationIntent(text = '') {
+    const lower = String(text).toLowerCase();
+    const patterns = [
+        /朗读/, /语音合成/, /文字转语音/, /念出来/, /读出来/, /帮我念/, /帮我读/,
+        /tts/i, /text.?to.?speech/i, /read\s+aloud/i, /speak\s+this/i,
+        /generate\s+(audio|speech|voice)/i, /生成语音/, /生成音频/, /转成语音/
+    ];
+    return patterns.some(p => p.test(lower));
+}
+
+async function handleImageGeneration(text, config) {
+    try {
+        const { generateImage, supportsImageGeneration } = await import('../utils/ai-media-generation.js');
+        if (!supportsImageGeneration(config.provider)) {
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: `当前提供商 (${config.provider}) 不支持图片生成。请切换到支持图片生成的提供商（如 OpenAI）。`
+            };
+        }
+
+        const { callAI } = await import('../utils/ai-providers.js');
+        const promptResponse = await callAI(config, text,
+            'Extract the image generation prompt from the user message. Return ONLY the image description/prompt in English, optimized for DALL-E. No explanation, no JSON, just the prompt text.');
+        const imagePrompt = promptResponse?.trim() || text;
+
+        const result = await generateImage({
+            provider: config.provider,
+            apiKey: config.apiKey,
+            prompt: imagePrompt,
+            customEndpoint: config.customEndpoint
+        });
+
+        return {
+            role: 'assistant',
+            type: 'generated_image',
+            content: result.revisedPrompt || imagePrompt,
+            base64Data: result.base64Data,
+            url: result.url,
+            mimeType: result.mimeType,
+            prompt: imagePrompt,
+            provider: config.provider
+        };
+    } catch (error) {
+        return {
+            role: 'assistant',
+            type: 'error',
+            content: `图片生成失败: ${error.message || error}`
+        };
+    }
+}
+
+async function handleAudioGeneration(text, config) {
+    try {
+        const { generateAudio, supportsTTS } = await import('../utils/ai-media-generation.js');
+        if (!supportsTTS(config.provider)) {
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: `当前提供商 (${config.provider}) 不支持语音合成。请切换到支持 TTS 的提供商（如 OpenAI）。`
+            };
+        }
+
+        const { callAI } = await import('../utils/ai-providers.js');
+        const ttsTextResponse = await callAI(config, text,
+            'The user wants text-to-speech. Extract the text they want spoken. Return ONLY the text to be spoken, nothing else. If the user says "read this aloud: hello world", return "hello world".');
+        const ttsText = ttsTextResponse?.trim() || text;
+
+        const result = await generateAudio({
+            provider: config.provider,
+            apiKey: config.apiKey,
+            text: ttsText,
+            customEndpoint: config.customEndpoint
+        });
+
+        return {
+            role: 'assistant',
+            type: 'generated_audio',
+            content: `语音已生成: "${ttsText.slice(0, 100)}${ttsText.length > 100 ? '...' : ''}"`,
+            base64Data: result.base64Data,
+            mimeType: result.mimeType,
+            text: ttsText,
+            voice: result.voice,
+            provider: config.provider
+        };
+    } catch (error) {
+        return {
+            role: 'assistant',
+            type: 'error',
+            content: `语音生成失败: ${error.message || error}`
+        };
+    }
+}
+
+async function resolveAssistantMessage(text, existingTasks = [], currentConfig = getEffectiveConfig(), intentHint = null, onProgress = null, options = {}) {
     const progress = (step) => { if (onProgress) onProgress(step); };
     const assistantContext = normalizeAssistantPayload(existingTasks);
+    const allowBatchExecution = options.allowBatchExecution ?? true;
     const scopedItems = assistantContext.items || [];
     const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
     const subtaskOperation = detectSubtaskOperation(text);
@@ -1958,6 +2631,42 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         );
     }
 
+    if (allowBatchExecution) {
+        const explicitSteps = splitExplicitToolSteps(text);
+        if (explicitSteps.length > 1) {
+            const batchResults = [];
+            for (const stepText of explicitSteps) {
+                const stepResult = await resolveAssistantMessage(
+                    stepText,
+                    assistantContext,
+                    currentConfig,
+                    null,
+                    onProgress,
+                    { allowBatchExecution: false }
+                );
+
+                if (stepResult?.__useStreamingChat) {
+                    batchResults.push(
+                        normalizeAssistantResult(
+                            await buildContextualAssistantResponse(stepText, assistantContext, currentConfig),
+                            assistantContext
+                        )
+                    );
+                    continue;
+                }
+
+                if (stepResult?.__batchResults?.length) {
+                    batchResults.push(...stepResult.__batchResults);
+                    continue;
+                }
+
+                batchResults.push(stepResult);
+            }
+
+            return { __batchResults: batchResults };
+        }
+    }
+
     progress('classifying');
     const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI, intentHint);
     const localFilePlan = await analyzeLocalFileIntent(text, currentConfig, callAI, intentHint);
@@ -1968,7 +2677,21 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         assistantContext.source === 'scheduled';
 
     let result;
-    if (localFilePlan) {
+
+    if (intentHint === 'image_generation' || (!intentHint && looksLikeImageGenerationIntent(text))) {
+        progress('generating');
+        result = await handleImageGeneration(text, currentConfig);
+    } else if (intentHint === 'audio_generation' || (!intentHint && looksLikeAudioGenerationIntent(text))) {
+        progress('generating');
+        result = await handleAudioGeneration(text, currentConfig);
+    } else {
+    const userMentionsUrl = /https?:\/\/\S+/i.test(text)
+        || /\b[a-z0-9-]+\.(?:com|cn|net|org|io|cool|app|dev|ai|tech|xyz|info|me|so|gg|cc|tv|us|uk|de|jp|fr|co|club|store|shop|site|online|top|art|live|run)\b/i.test(text)
+        || /访问网站|打开网站|访问网址|whois|有没有注册|是否注册|备案/i.test(text);
+    if (webSearchPlan && (userMentionsUrl || !localFilePlan)) {
+        progress('web_searching');
+        result = await runWebSearchPlan(webSearchPlan, text, currentConfig, progress);
+    } else if (localFilePlan) {
         progress('file_operating');
         result = await runLocalFilePlan(localFilePlan, text, currentConfig, requireFileConfirmation);
     } else if (webSearchPlan) {
@@ -2029,6 +2752,7 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         progress('task_processing');
         result = await analyzeCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     }
+    }
 
     return normalizeAssistantResult(result, assistantContext);
 }
@@ -2038,10 +2762,7 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
 
     const currentConfig = getEffectiveConfig();
 
-    const needsApiKey = !isG4FProvider(currentConfig.provider) &&
-        currentConfig.provider !== 'ollama' &&
-        currentConfig.provider !== 'lmstudio' &&
-        currentConfig.provider !== 'custom';
+    const needsApiKey = providerNeedsApiKey(currentConfig.provider);
 
     if (needsApiKey && !currentConfig.apiKey) {
         showAiSettings.set(true);
@@ -2078,7 +2799,11 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
             const newHistory = [...h];
             const loadingIndex = newHistory.findIndex(m => m.type === 'loading');
             if (loadingIndex !== -1) {
-                newHistory[loadingIndex] = result;
+                if (result?.__batchResults?.length) {
+                    newHistory.splice(loadingIndex, 1, ...result.__batchResults);
+                } else {
+                    newHistory[loadingIndex] = result;
+                }
             }
             return newHistory;
         });
@@ -2164,6 +2889,9 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
     saveAiChatHistory();
 
     try {
+        if (operation?.authorizationDirectory) {
+            settingsStore.addTrustedDirectory(operation.authorizationDirectory);
+        }
         const result = await runLocalFilePlan(operation, operation.message || '', currentConfig, false);
         aiChatHistory.update(history => {
             const nextHistory = [...history];
@@ -2741,7 +3469,43 @@ ${templateList}
     }
 }
 
-async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, callAI) {
+function normalizeCreatedTask(task = {}, fallbackDate = '', index = 0) {
+    return {
+        id: task.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 7)}`,
+        title: task.title || '未命名任务',
+        date: task.date || fallbackDate,
+        deadline: task.deadline || '',
+        status: 'todo',
+        priority: task.priority || 'normal',
+        subtasks: (task.subtasks || []).map(s => ({
+            title: typeof s === 'string' ? s : (s.title || ''),
+            status: 'todo'
+        })),
+        note: task.note || ''
+    };
+}
+
+function splitCreateIntentSegments(userText = '') {
+    const rawText = String(userText || '').trim();
+    if (!rawText) {
+        return [];
+    }
+
+    const separatorNormalized = rawText
+        .replace(/\r\n/g, '\n')
+        .replace(/[；;]+/g, '\n')
+        .replace(/\n{2,}/g, '\n')
+        .replace(/(?<=[^，。,])，(?=(今天|明天|后天|今晚|上午|中午|下午|傍晚|晚上|本周|下周|下个月|周[一二三四五六日天]|\d{1,2}[:点]))/g, '\n')
+        .replace(/(?:然后|接着|随后|并且|再)(?=(今天|明天|后天|今晚|上午|中午|下午|傍晚|晚上|本周|下周|下个月|周[一二三四五六日天]|\d{1,2}[:点]))/g, '\n');
+
+    return separatorNormalized
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .filter((item, index, arr) => arr.indexOf(item) === index);
+}
+
+async function analyzeCreateIntentWithAI(userText, dateInfo, config, callAI) {
     const nowStr = getFormattedDateTime();
     const todayStr = formatDateForAI(dateInfo.today);
     const tomorrowStr = formatDateForAI(dateInfo.tomorrow);
@@ -2784,7 +3548,7 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
 - critical: 用户强调"特急"、"非常紧急"、"最优先"`;
 
     const aiResponse = await callAI(config, userText, systemPrompt);
-    if (!aiResponse) return null;
+    if (!aiResponse) return [];
 
     try {
         const cleanJsonStr = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -2792,42 +3556,47 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
         const jsonStr = jsonMatch ? jsonMatch[0] : cleanJsonStr;
         const parsed = JSON.parse(jsonStr);
 
-        const today = formatDateForAI(dateInfo.today);
+        const fallbackDate = `${formatDateForAI(dateInfo.today)}T09:00`;
 
         if (parsed.tasks && Array.isArray(parsed.tasks)) {
-            const tasks = parsed.tasks.map((t, idx) => ({
-                id: (Date.now() + idx).toString() + Math.random().toString(36).substr(2, 5),
-                title: t.title || '未命名任务',
-                date: t.date || today + 'T09:00',
-                deadline: t.deadline || '',
-                status: 'todo',
-                priority: t.priority || 'normal',
-                subtasks: (t.subtasks || []).map(s => ({
-                    title: typeof s === 'string' ? s : (s.title || ''),
-                    status: 'todo'
-                })),
-                note: t.note || ''
-            }));
-            return { tasks };
+            return parsed.tasks.map((task, index) => normalizeCreatedTask(task, fallbackDate, index));
         }
 
-        return {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-            title: parsed.title || '未命名任务',
-            date: parsed.date || today + 'T09:00',
-            deadline: parsed.deadline || '',
-            status: 'todo',
-            priority: parsed.priority || 'normal',
-            subtasks: (parsed.subtasks || []).map(s => ({
-                title: typeof s === 'string' ? s : (s.title || ''),
-                status: 'todo'
-            })),
-            note: parsed.note || ''
-        };
+        return [normalizeCreatedTask(parsed, fallbackDate, 0)];
     } catch (e) {
         console.error('Failed to parse AI response:', e, aiResponse);
-        return null;
+        return [];
     }
+}
+
+async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, callAI) {
+    const tasksFromAI = await analyzeCreateIntentWithAI(userText, dateInfo, config, callAI);
+    const segments = splitCreateIntentSegments(userText);
+
+    if (tasksFromAI.length > 1 || segments.length <= 1) {
+        return tasksFromAI.length > 1 ? { tasks: tasksFromAI } : (tasksFromAI[0] || null);
+    }
+
+    const segmentTasks = [];
+    for (const segment of segments) {
+        const parsedTasks = await analyzeCreateIntentWithAI(segment, dateInfo, config, callAI);
+        if (parsedTasks.length > 0) {
+            segmentTasks.push(...parsedTasks);
+        }
+    }
+
+    const uniqueTasks = segmentTasks.filter((task, index, arr) => {
+        const signature = `${task.title}|${task.date}|${task.deadline}|${task.note}`;
+        return index === arr.findIndex((candidate) =>
+            `${candidate.title}|${candidate.date}|${candidate.deadline}|${candidate.note}` === signature
+        );
+    });
+
+    if (uniqueTasks.length > 1) {
+        return { tasks: uniqueTasks };
+    }
+
+    return tasksFromAI[0] || uniqueTasks[0] || null;
 }
 
 async function analyzeSubtaskIntent(userText, allTasks, dateInfo, config, callAI) {
@@ -3392,7 +4161,7 @@ async function getProjectContextSummary() {
     ].join('\n');
 }
 
-async function buildContextMessages(history, chatStyle) {
+async function buildContextMessages(history, chatStyle, bodyFormat = 'openai') {
     const nowStr = getFormattedDateTime();
     const projectContext = await getProjectContextSummary();
     const stylePrompts = {
@@ -3406,7 +4175,7 @@ async function buildContextMessages(history, chatStyle) {
     const systemPrompt = stylePrompts[chatStyle] || stylePrompts.default;
     const messages = [{ role: 'system', content: systemPrompt }];
     const validHistory = history.filter(msg => {
-        if (!msg.content && !msg.summary && !msg.data) return false;
+        if (!msg.content && !msg.summary && !msg.data && !msg.plan && !msg.attachments?.length) return false;
         if (msg.role !== 'user' && msg.role !== 'assistant') return false;
         // Skip transient types that don't carry meaningful content
         if (msg.type === 'loading' || msg.type === 'streaming' || msg.type === 'tool_progress') return false;
@@ -3415,7 +4184,12 @@ async function buildContextMessages(history, chatStyle) {
     const recentHistory = validHistory.slice(-20);
     for (const msg of recentHistory) {
         if (msg.role === 'user') {
-            messages.push({ role: 'user', content: msg.content });
+            const content = buildUserMessageContentForAI(msg, bodyFormat);
+            if (bodyFormat === 'google' && Array.isArray(content)) {
+                messages.push({ role: 'user', parts: content });
+            } else {
+                messages.push({ role: 'user', content });
+            }
         } else {
             // Flatten non-text assistant message types into text for context
             let content = msg.content || '';
@@ -3426,6 +4200,13 @@ async function buildContextMessages(history, chatStyle) {
                 content = `[任务] ${msg.data.title || ''}${msg.data.date ? ' (' + msg.data.date + ')' : ''}${msg.data.note ? ' - ' + msg.data.note : ''}`;
             } else if (msg.type === 'file_confirm' && msg.operation) {
                 content = `[文件操作待确认] ${msg.message || ''} - ${msg.operation.path || ''}`;
+            } else if (msg.type === 'generated_image') {
+                content = `[已生成图片] ${msg.content || msg.prompt || ''}`;
+            } else if (msg.type === 'generated_audio') {
+                content = `[已生成语音] ${msg.content || msg.text || ''}`;
+            } else if (msg.type === 'ai_execution_plan' && msg.plan) {
+                const stepsSummary = msg.plan.steps.map(s => `${s.status === 'done' ? '✅' : s.status === 'failed' ? '❌' : '⏳'} ${s.title}`).join('\n');
+                content = `[执行计划: ${msg.plan.title}]\n${stepsSummary}${msg.summary ? '\n\n' + msg.summary : ''}`;
             } else if (msg.type === 'error') {
                 content = `[错误] ${msg.content || ''}`;
             }
@@ -3437,14 +4218,19 @@ async function buildContextMessages(history, chatStyle) {
     return messages;
 }
 
-export async function sendChatMessage(text, chatStyle = 'default', retryIndex = null) {
-    if (!text.trim()) return;
+export async function sendChatMessage(text, chatStyle = 'default', retryIndex = null, options = {}) {
+    const requestedText = String(text || '').trim();
+    const selectedAttachments = normalizeChatAttachments(
+        retryIndex === null
+            ? (options.attachments ?? get(aiChatComposerAttachments))
+            : (options.attachments ?? [])
+    );
+    if (!requestedText && selectedAttachments.length === 0) return;
+
+    const effectiveText = requestedText || '请阅读并分析这些附件。';
 
     const currentConfig = getEffectiveConfig();
-    const needsApiKey = !isG4FProvider(currentConfig.provider) &&
-        currentConfig.provider !== 'ollama' &&
-        currentConfig.provider !== 'lmstudio' &&
-        currentConfig.provider !== 'custom';
+    const needsApiKey = providerNeedsApiKey(currentConfig.provider);
 
     if (needsApiKey && !currentConfig.apiKey) {
         showAiSettings.set(true);
@@ -3463,12 +4249,18 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             return newHistory;
         });
     } else {
-        aiChatHistory.update(h => [...h, { role: 'user', type: 'text', content: text }]);
+        aiChatHistory.update(h => [...h, {
+            role: 'user',
+            type: 'text',
+            content: effectiveText,
+            attachments: selectedAttachments
+        }]);
         aiChatHistory.update(h => {
             const newHistory = [...h, { role: 'assistant', type: 'loading' }];
             streamingIndex = newHistory.length - 1;
             return newHistory;
         });
+        clearAiChatComposerAttachments();
     }
 
     if (streamingIndex === -1) {
@@ -3504,13 +4296,13 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         let intentHint = null;
 
         if (aiChatToolsEnabled) {
-            if (shouldUseAssistantToolsInChat(text)) {
+            if (shouldUseAssistantToolsInChat(effectiveText)) {
                 useToolRouter = true;
                 updateToolProgress('classifying');
             } else {
                 updateToolProgress('ai_classifying');
                 if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-                const aiIntent = await classifyUserIntent(text, currentConfig);
+                const aiIntent = await classifyUserIntent(effectiveText, currentConfig);
                 if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
                 if (aiIntent === null) {
                     useToolRouter = false;
@@ -3521,12 +4313,141 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             }
         }
 
+        // Check if this is a complex multi-step request that should be decomposed
+        if (aiChatToolsEnabled) {
+            const { shouldDecompose, decomposeIntoSteps, executePlan, formatPlanSummary, cancelPlan, getTaskCreateResults } = await import('../utils/ai-execution-engine.js');
+            if (shouldDecompose(effectiveText)) {
+                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                updateToolProgress('decomposing');
+                const plan = await decomposeIntoSteps(effectiveText, currentConfig);
+                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+                const planMessage = {
+                    role: 'assistant',
+                    type: 'ai_execution_plan',
+                    plan: { ...plan },
+                    isExecuting: true,
+                    summary: ''
+                };
+                aiChatHistory.update(h => {
+                    const nh = [...h];
+                    nh[streamingIndex] = planMessage;
+                    return nh;
+                });
+
+                const abortHandler = () => cancelPlan(plan.id);
+                _streamAbortController?.signal.addEventListener('abort', abortHandler);
+
+                await executePlan(plan, {
+                    getConfig: () => currentConfig,
+                    userMessage: effectiveText,
+                    onStepStart: (step) => {
+                        aiChatHistory.update(h => {
+                            const nh = [...h];
+                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
+                                nh[streamingIndex] = { ...nh[streamingIndex], plan: { ...plan }, isExecuting: true };
+                            }
+                            return nh;
+                        });
+                    },
+                    onStepComplete: (step) => {
+                        aiChatHistory.update(h => {
+                            const nh = [...h];
+                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
+                                nh[streamingIndex] = { ...nh[streamingIndex], plan: { ...plan }, isExecuting: true };
+                            }
+                            return nh;
+                        });
+                    },
+                    onStepFail: (step) => {
+                        aiChatHistory.update(h => {
+                            const nh = [...h];
+                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
+                                nh[streamingIndex] = { ...nh[streamingIndex], plan: { ...plan }, isExecuting: true };
+                            }
+                            return nh;
+                        });
+                    },
+                    onPlanComplete: (completedPlan, results) => {
+                        const summary = formatPlanSummary(completedPlan, results);
+                        const taskResults = getTaskCreateResults(completedPlan);
+                        const failedSteps = completedPlan.steps.filter(s => s.status === 'failed');
+                        const success = completedPlan.status === 'done';
+
+                        try {
+                            settingsStore.notifyAiExecution?.({
+                                title: success ? `✅ ${completedPlan.title}` : `⚠️ ${completedPlan.title}`,
+                                body: success
+                                    ? `已完成 ${completedPlan.steps.length} 个步骤`
+                                    : `${failedSteps.length} 个步骤失败 / 共 ${completedPlan.steps.length}`,
+                                success
+                            });
+                        } catch (e) {
+                            console.warn('Notify failed:', e);
+                        }
+                        aiChatHistory.update(h => {
+                            const nh = [...h];
+                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
+                                nh[streamingIndex] = {
+                                    ...nh[streamingIndex],
+                                    plan: { ...completedPlan },
+                                    isExecuting: false,
+                                    summary
+                                };
+                            }
+                            if (taskResults.length > 0) {
+                                const dateInfo = getDateInfo();
+                                const fallbackDate = `${formatDateForAI(dateInfo.today)}T09:00`;
+                                const normalizedTasks = taskResults.map((t, i) => normalizeCreatedTask({
+                                    title: t.title,
+                                    priority: t.priority === 'high' ? 'high' : t.priority === 'low' ? 'low' : 'normal',
+                                    note: t.note || '',
+                                    date: fallbackDate
+                                }, fallbackDate, i));
+                                if (normalizedTasks.length === 1) {
+                                    nh.push({
+                                        role: 'assistant',
+                                        type: 'task_card',
+                                        data: normalizedTasks[0],
+                                        confirmed: false
+                                    });
+                                } else {
+                                    nh.push({
+                                        role: 'assistant',
+                                        type: 'multi_task_card',
+                                        tasks: normalizedTasks,
+                                        confirmedIndexes: []
+                                    });
+                                }
+                            }
+                            return nh;
+                        });
+                    }
+                });
+
+                _streamAbortController?.signal.removeEventListener('abort', abortHandler);
+                saveAiChatHistory();
+                return;
+            }
+        }
+
         if (useToolRouter) {
             if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            const assistantPayload = await buildAiChatAssistantPayload(text);
+            const assistantPayload = await buildAiChatAssistantPayload(effectiveText);
             if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            const assistantResult = await resolveAssistantMessage(text, assistantPayload, currentConfig, intentHint, updateToolProgress);
+            const assistantResult = await resolveAssistantMessage(effectiveText, assistantPayload, currentConfig, intentHint, updateToolProgress);
             // If resolveAssistantMessage signals no tool action matched, fall through to streaming chat
+            if (assistantResult?.__batchResults?.length) {
+                aiChatHistory.update(h => {
+                    const newHistory = [...h];
+                    if (newHistory[streamingIndex]) {
+                        newHistory.splice(streamingIndex, 1, ...assistantResult.__batchResults);
+                    }
+                    return newHistory;
+                });
+                saveAiChatHistory();
+                return;
+            }
             if (!assistantResult?.__useStreamingChat) {
                 aiChatHistory.update(h => {
                     const newHistory = [...h];
@@ -3541,10 +4462,11 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         }
 
         console.log('[Chat] Entering streaming path');
-        const { callAIWithMessagesStream } = await import('../utils/ai-providers.js');
+        const { callAIWithMessagesStream, getProviderBodyFormat } = await import('../utils/ai-providers.js');
+        const bodyFormat = getProviderBodyFormat(currentConfig.provider);
         const currentHistory = get(aiChatHistory);
         const historyWithoutStreaming = currentHistory.filter(m => m.type !== 'streaming' && m.type !== 'loading' && m.type !== 'tool_progress');
-        const messages = await buildContextMessages(historyWithoutStreaming, chatStyle);
+        const messages = await buildContextMessages(historyWithoutStreaming, chatStyle, bodyFormat);
 
         aiChatHistory.update(h => {
             const newHistory = [...h];
@@ -3616,15 +4538,16 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         aiChatHistory.update(h => {
             const newHistory = [...h];
             if (newHistory[streamingIndex]) {
-                newHistory[streamingIndex] = {
-                    role: 'assistant',
-                    type: 'error',
-                    content: error.message,
-                    originalText: text,
-                    chatStyle: chatStyle
-                };
-            }
-            return newHistory;
+                    newHistory[streamingIndex] = {
+                        role: 'assistant',
+                        type: 'error',
+                        content: error.message,
+                        originalText: effectiveText,
+                        originalAttachments: selectedAttachments,
+                        chatStyle: chatStyle
+                    };
+                }
+                return newHistory;
         });
         saveAiChatHistory();
     } finally {
@@ -3636,9 +4559,10 @@ export async function retryChatMessage(index) {
     const history = get(aiChatHistory);
     if (history[index] && history[index].type === 'error') {
         const originalText = history[index].originalText;
+        const originalAttachments = history[index].originalAttachments || [];
         const chatStyle = history[index].chatStyle || 'default';
         if (originalText) {
-            await sendChatMessage(originalText, chatStyle, index);
+            await sendChatMessage(originalText, chatStyle, index, { attachments: originalAttachments });
         }
     }
 }
@@ -3656,6 +4580,7 @@ export async function retryFromAssistantMessage(assistantIndex) {
     if (userIndex === -1) return;
 
     const originalText = history[userIndex].content;
+    const originalAttachments = history[userIndex].attachments || [];
     if (!originalText) return;
 
     // Truncate everything after this assistant message, then replace it with loading
@@ -3665,7 +4590,7 @@ export async function retryFromAssistantMessage(assistantIndex) {
         return newHistory;
     });
 
-    await sendChatMessage(originalText, 'default', assistantIndex);
+    await sendChatMessage(originalText, 'default', assistantIndex, { attachments: originalAttachments });
 }
 
 export function editAndResend(messageIndex) {
@@ -3674,6 +4599,7 @@ export function editAndResend(messageIndex) {
     if (!msg || msg.role !== 'user') return null;
 
     const content = msg.content;
+    aiChatComposerAttachments.set(normalizeChatAttachments(msg.attachments || []));
     // Remove this message and everything after it
     aiChatHistory.update(h => h.slice(0, messageIndex));
     saveAiChatHistory();
@@ -3703,6 +4629,13 @@ export function exportChatToMarkdown() {
     for (const msg of history) {
         if (msg.role === 'user') {
             lines.push(`**You:**\n> ${msg.content.replace(/\n/g, '\n> ')}\n`);
+            if (msg.attachments?.length) {
+                lines.push('**Attachments:**');
+                for (const attachment of msg.attachments) {
+                    lines.push(`- ${attachment.name} (${attachment.path})${attachment.truncated ? ' [truncated]' : ''}`);
+                }
+                lines.push('');
+            }
         } else if (msg.type === 'text' || msg.type === 'streaming') {
             lines.push(`**AI:**\n${msg.content || ''}\n`);
         } else if (msg.type === 'web_search_result') {
@@ -3811,6 +4744,7 @@ export function clearChatHistory() {
 
 export function clearAiChatHistory() {
     aiChatHistory.set([]);
+    clearAiChatComposerAttachments();
     saveAiChatHistory();
 }
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.6] - 2026-04-29
+
+- 版本号同步到 `0.3.6`，覆盖前端包、Tauri 配置、Rust package 与相关锁文件
+- AI Chat 新增 OpenClaw Gateway 提供商：系统设置启用后可在 AI 设置中选择 OpenClaw，并通过 Gateway WebSocket `chat.send` / `chat` 事件直接对接 OpenClaw
+- 重构 OpenClaw 配置入口：保留 Gateway 地址、Token、会话 Key、超时与连接测试，移除旧 webhook / Telegram 桥接式配置
+- Web demo 新增独立 `build:web` 输出，纯 Web 版隐藏本地文件、系统通知、OpenClaw 等不支持入口，并移除顶部预览提示
+- AI Chat 增强附件与媒体能力：支持附加文件、图片、音频等上下文，展示附件预览，并支持保存生成的图片 / 音频
+- 新增 AI 多步骤执行计划与后台执行完成 / 失败通知开关，便于跟踪长任务执行状态
+- 优化 AI Chat 移动端高度、安全区、会话头像与消息展示，减少移动端布局遮挡和操作冲突
+
 ## [0.3.5] - 2026-04-20
 
 - 修复 Android targetSdk 36 下返回键完全失效：MainActivity 改用 `OnBackPressedDispatcher`，并补齐 `mobile-onbackpressed-listener` 能力权限
