@@ -9,6 +9,8 @@
     import { loadAiConfig, showAiPanel, showAiSettings } from '$lib/stores/ai.js';
     import { notesStore } from '$lib/stores/notes.js';
     import { passwordsStore } from '$lib/stores/passwords.js';
+    import { initOpenClaw } from '$lib/stores/openclaw.js';
+    import { isWebDemo } from '$lib/utils/runtime.js';
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { setupAndroidBackHandler, showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
@@ -32,6 +34,13 @@
         loadAiConfig();
         notesStore.load();
         passwordsStore.load();
+        if (!isWebDemo) {
+            initOpenClaw();
+        }
+
+        if (isWebDemo) {
+            return () => {};
+        }
 
         const currentSettings = get(settingsStore);
         if (currentSettings.closeToQuit) {

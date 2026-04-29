@@ -3,16 +3,50 @@ import html2canvas from 'html2canvas';
 import CryptoJS from 'crypto-js';
 import { invoke } from "@tauri-apps/api/core";
 
+function sanitizeDownloadFilename(filename = 'export') {
+    const value = String(filename || 'export').trim();
+    const lastDot = value.lastIndexOf('.');
+    const hasExtension = lastDot > 0 && lastDot < value.length - 1;
+    const basename = hasExtension ? value.slice(0, lastDot) : value;
+    const extension = hasExtension ? value.slice(lastDot) : '';
+
+    const cleanBase = basename
+        .replace(/[<>:"/\\|?*\u0000-\u001F：／＼？＊｜]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .replace(/[. ]+$/g, '')
+        .trim()
+        .slice(0, 120) || 'export';
+
+    const cleanExtension = extension
+        .replace(/[^.\w-]/g, '')
+        .slice(0, 16);
+
+    return `${cleanBase}${cleanExtension}`;
+}
+
 /**
  * Platform-aware file download helper.
- * Prefers Tauri backend (save_file_to_downloads) for desktop + Android.
+ * Prefers Tauri backend (save_file_to_downloads / save_file_via_dialog).
  * Falls back to browser <a download>.click() for pure web environments.
  * @returns {{ success: boolean, path?: string }}
  */
-async function downloadFile(content, filename) {
+async function downloadFile(content, filename, options = {}) {
+    const {
+        useSaveDialog = false,
+        filters = []
+    } = options;
+    const safeFilename = sanitizeDownloadFilename(filename);
+
     try {
         if (window.__TAURI__) {
-            const savedPath = await invoke('save_file_to_downloads', { filename, content });
+            if (useSaveDialog) {
+                const savedPath = await invoke('save_file_via_dialog', { filename: safeFilename, content, filters });
+                if (savedPath) {
+                    return { success: true, path: savedPath };
+                }
+            }
+
+            const savedPath = await invoke('save_file_to_downloads', { filename: safeFilename, content });
             return { success: true, path: savedPath };
         }
     } catch (e) {
@@ -24,7 +58,7 @@ async function downloadFile(content, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    a.download = safeFilename;
     a.click();
     URL.revokeObjectURL(url);
     return { success: true };
@@ -130,7 +164,7 @@ export async function exportToPDF(element, filename = 'export.pdf', options = {}
 
         // PDF uses binary output — jsPDF.save() works on desktop but may not on Android WebView
         // For now, use jsPDF.save() which handles blob download internally
-        pdf.save(filename);
+        pdf.save(sanitizeDownloadFilename(filename));
 
         if (showToast) showToast({ message: 'PDF导出成功', type: 'success' });
         return { success: true };
@@ -147,7 +181,10 @@ export async function exportToMarkdown(content, filename = 'export.md', options 
     try {
         if (showToast) showToast({ message: '正在导出Markdown...', type: 'info', duration: 1500 });
 
-        const result = await downloadFile(content, filename);
+        const result = await downloadFile(content, filename, {
+            useSaveDialog: Boolean(window.__TAURI__),
+            filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }]
+        });
 
         if (showToast) showToast({ message: 'Markdown导出成功', type: 'success' });
         return result;
@@ -182,7 +219,10 @@ export async function exportToHTML(content, filename = 'export.html', title = 'E
 </head>
 <body>${content}</body>
 </html>`;
-        const result = await downloadFile(html, filename);
+        const result = await downloadFile(html, filename, {
+            useSaveDialog: Boolean(window.__TAURI__),
+            filters: [{ name: 'HTML', extensions: ['html', 'htm'] }]
+        });
 
         if (showToast) showToast({ message: 'HTML导出成功', type: 'success' });
         return result;
@@ -216,7 +256,10 @@ export async function exportToCSV(data, filename = 'export.csv', options = {}) {
         ].join('\n');
 
         const BOM = '\uFEFF';
-        const result = await downloadFile(BOM + csvContent, filename);
+        const result = await downloadFile(BOM + csvContent, filename, {
+            useSaveDialog: Boolean(window.__TAURI__),
+            filters: [{ name: 'CSV', extensions: ['csv'] }]
+        });
 
         if (showToast) showToast({ message: 'CSV导出成功', type: 'success' });
         return result;
@@ -247,7 +290,10 @@ export async function exportToEncryptedJSON(data, filename = 'export.json', pass
             content = JSON.stringify(data, null, 2);
         }
 
-        const result = await downloadFile(content, filename);
+        const result = await downloadFile(content, filename, {
+            useSaveDialog: Boolean(window.__TAURI__),
+            filters: [{ name: 'JSON', extensions: ['json'] }]
+        });
 
         if (showToast) showToast({ message: '数据导出成功' + (password ? '（已加密）' : ''), type: 'success' });
         return result;
@@ -265,7 +311,10 @@ export async function exportToJSON(data, filename = 'export.json', options = {})
         if (showToast) showToast({ message: '正在导出数据...', type: 'info', duration: 1500 });
 
         const content = JSON.stringify(data, null, 2);
-        const result = await downloadFile(content, filename);
+        const result = await downloadFile(content, filename, {
+            useSaveDialog: Boolean(window.__TAURI__),
+            filters: [{ name: 'JSON', extensions: ['json'] }]
+        });
 
         if (showToast) showToast({ message: '数据导出成功', type: 'success' });
         return result;

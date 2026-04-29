@@ -9,11 +9,15 @@ use tauri::Manager;
 use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 use walkdir::WalkDir;
+use base64::Engine;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod autostart;
@@ -43,6 +47,26 @@ struct LocalFileReadResult {
 struct LocalFileMutationResult {
     path: String,
     action: String,
+    size: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalTextFilePayload {
+    path: String,
+    name: String,
+    content: String,
+    size: usize,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaFilePayload {
+    path: String,
+    name: String,
+    mime_type: String,
+    base64_data: String,
     size: usize,
 }
 
@@ -370,7 +394,7 @@ async fn search_web(
 
     let limit = max_results.unwrap_or(6).clamp(1, 10);
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.3; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
+        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.6; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -446,7 +470,7 @@ async fn fetch_web_content(
 
     let limit = max_chars.unwrap_or(4000).clamp(200, 12000);
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.3; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
+        .user_agent("Mozilla/5.0 (compatible; WorkPlan/0.3.6; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)")
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
@@ -607,6 +631,211 @@ async fn save_file_to_downloads(
 }
 
 #[tauri::command]
+async fn save_file_via_dialog(
+    app: tauri::AppHandle,
+    filename: String,
+    content: String,
+    filters: Option<Vec<serde_json::Value>>,
+) -> Result<String, String> {
+    let filename = filename.trim().to_string();
+    if filename.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+
+    let mut dialog_builder = app.dialog().file().set_file_name(&filename);
+
+    if let Some(items) = filters {
+        for item in items {
+            let name = item
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Files")
+                .to_string();
+            let extensions = item
+                .get("extensions")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            if !extensions.is_empty() {
+                let ext_refs = extensions.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+                dialog_builder = dialog_builder.add_filter(&name, &ext_refs);
+            }
+        }
+    }
+
+    let Some(file_path) = dialog_builder.blocking_save_file() else {
+        return Err("用户取消了保存".to_string());
+    };
+    let target_label = file_path.to_string();
+
+    match file_path.clone() {
+        FilePath::Url(_) => {
+            let mut options = OpenOptions::default();
+            options.write(true).create(true).truncate(true);
+            let mut file = app
+                .fs()
+                .open(file_path, options)
+                .map_err(|e| format!("写入文件失败: {}", e))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| format!("写入文件失败: {}", e))?;
+        }
+        FilePath::Path(target) => {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            }
+            fs::write(&target, content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+        }
+    }
+
+    Ok(target_label)
+}
+
+#[tauri::command]
+fn read_selected_text_files(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    max_bytes: Option<usize>,
+) -> Result<Vec<LocalTextFilePayload>, String> {
+    let limit = max_bytes.unwrap_or(128_000).clamp(1_024, 512_000);
+    let mut items = Vec::new();
+
+    for raw_path in paths {
+        let file_path = raw_path
+            .parse::<FilePath>()
+            .unwrap_or_else(|_| FilePath::Path(PathBuf::from(&raw_path)));
+        let label = file_path.to_string();
+
+        let bytes = match &file_path {
+            FilePath::Url(_) => app
+                .fs()
+                .read(file_path.clone())
+                .map_err(|e| format!("读取文件失败 {}: {}", label, e))?,
+            FilePath::Path(path) => {
+                let normalized = normalize_pathbuf(path.clone())?;
+                let metadata = fs::metadata(&normalized)
+                    .map_err(|e| format!("读取文件元数据失败 {}: {}", normalized.to_string_lossy(), e))?;
+                if metadata.is_dir() {
+                    continue;
+                }
+                fs::read(&normalized)
+                    .map_err(|e| format!("读取文件失败 {}: {}", normalized.to_string_lossy(), e))?
+            }
+        };
+        let truncated = bytes.len() > limit;
+        let slice = if truncated { &bytes[..limit] } else { bytes.as_slice() };
+        let content = String::from_utf8_lossy(slice).to_string();
+        items.push(LocalTextFilePayload {
+            path: label.clone(),
+            name: extract_file_name(&label),
+            content,
+            size: bytes.len(),
+            truncated,
+        });
+    }
+
+    Ok(items)
+}
+
+fn extract_file_name(path: &str) -> String {
+    if let Some(name) = path.rsplit('/').next().filter(|value| !value.is_empty()) {
+        return name.to_string();
+    }
+    if let Some(name) = path.rsplit('\\').next().filter(|value| !value.is_empty()) {
+        return name.to_string();
+    }
+    path.to_string()
+}
+
+fn mime_from_extension(path: &str) -> String {
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "flac" => "audio/flac",
+        "aac" => "audio/aac",
+        "m4a" => "audio/mp4",
+        "wma" => "audio/x-ms-wma",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "avi" => "video/x-msvideo",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+#[tauri::command]
+fn read_binary_files(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    max_bytes: Option<usize>,
+) -> Result<Vec<MediaFilePayload>, String> {
+    let limit = max_bytes.unwrap_or(10_000_000).clamp(1_024, 50_000_000);
+    let mut items = Vec::new();
+
+    for raw_path in paths {
+        let file_path = raw_path
+            .parse::<FilePath>()
+            .unwrap_or_else(|_| FilePath::Path(PathBuf::from(&raw_path)));
+        let label = file_path.to_string();
+
+        let bytes = match &file_path {
+            FilePath::Url(_) => app
+                .fs()
+                .read(file_path.clone())
+                .map_err(|e| format!("读取文件失败 {}: {}", label, e))?,
+            FilePath::Path(path) => {
+                let normalized = normalize_pathbuf(path.clone())?;
+                let metadata = fs::metadata(&normalized)
+                    .map_err(|e| format!("读取文件元数据失败 {}: {}", normalized.to_string_lossy(), e))?;
+                if metadata.is_dir() {
+                    continue;
+                }
+                if metadata.len() as usize > limit {
+                    return Err(format!(
+                        "文件过大 {}: {} 字节（上限 {} 字节）",
+                        normalized.to_string_lossy(),
+                        metadata.len(),
+                        limit
+                    ));
+                }
+                fs::read(&normalized)
+                    .map_err(|e| format!("读取文件失败 {}: {}", normalized.to_string_lossy(), e))?
+            }
+        };
+
+        let name = extract_file_name(&label);
+        let mime_type = mime_from_extension(&name);
+        let base64_data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+        items.push(MediaFilePayload {
+            path: label,
+            name,
+            mime_type,
+            base64_data,
+            size: bytes.len(),
+        });
+    }
+
+    Ok(items)
+}
+
+#[tauri::command]
 async fn open_github(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url(
@@ -649,6 +878,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             check_update,
             set_autostart,
@@ -662,6 +892,9 @@ pub fn run() {
             search_web,
             fetch_web_content,
             save_file_to_downloads,
+            save_file_via_dialog,
+            read_selected_text_files,
+            read_binary_files,
             open_github,
             open_releases,
             set_close_to_quit,

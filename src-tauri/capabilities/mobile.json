@@ -5,7 +5,19 @@
   "windows": ["main"],
   "platforms": ["android", "iOS"],
   "permissions": [
+    "core:default",
     "mobile-onbackpressed-listener:default",
-    "mobile-onbackpressed-listener:allow-register-back-event"
+    "mobile-onbackpressed-listener:allow-register-back-event",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "notification:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    "notification:allow-create-channel",
+    "notification:allow-list-channels",
+    "opener:default",
+    "store:default"
   ]
 }

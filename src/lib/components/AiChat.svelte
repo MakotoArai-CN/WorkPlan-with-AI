@@ -5,6 +5,7 @@
         aiChatSessions,
         activeAiChatSessionId,
         aiChatDraft,
+        aiChatComposerAttachments,
         aiChatContext,
         aiChatCapabilities,
         isAiLoading,
@@ -20,6 +21,9 @@
         createAiChatSession,
         selectAiChatSession,
         deleteAiChatSession,
+        attachFilesToAiChatComposer,
+        attachMediaToAiChatComposer,
+        removeAiChatComposerAttachment,
         clearAiChatDraft,
         saveAiChatHistory,
         probeAiCapabilities,
@@ -51,7 +55,6 @@
         $aiChatSessions.find((session) => session.id === $activeAiChatSessionId) ||
         $aiChatSessions[0] ||
         null;
-
     $: if ($aiChatDraft && !inputText) {
         inputText = $aiChatDraft;
     }
@@ -153,12 +156,93 @@
         }
     }
 
+    function formatAttachmentSize(size = 0) {
+        if (!size) return "0 B";
+        if (size < 1024) return `${size} B`;
+        if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+        return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    async function handleAttachFiles() {
+        if ($isAiLoading) return;
+        try {
+            const files = await attachFilesToAiChatComposer();
+            if (files.length > 0) {
+                showToast({
+                    message: `已附加 ${files.length} 个文件`,
+                    type: "success",
+                    duration: 1600,
+                });
+            }
+        } catch (error) {
+            console.error("Attach failed:", error);
+            showToast({
+                message: String(error?.message || error || "文件附加失败"),
+                type: "error",
+            });
+        }
+    }
+
+    let lightboxUrl = null;
+
+    async function handleAttachMedia() {
+        if ($isAiLoading) return;
+        try {
+            const files = await attachMediaToAiChatComposer();
+            if (files.length > 0) {
+                showToast({
+                    message: `已附加 ${files.length} 个媒体文件`,
+                    type: "success",
+                    duration: 1600,
+                });
+            }
+        } catch (error) {
+            console.error("Attach media failed:", error);
+            showToast({
+                message: String(error?.message || error || "媒体文件附加失败"),
+                type: "error",
+            });
+        }
+    }
+
+    async function handleSaveGeneratedMedia(msg) {
+        try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            const ext = msg.type === "generated_image" ? "png" : "mp3";
+            const mimeType = msg.mimeType || (msg.type === "generated_image" ? "image/png" : "audio/mpeg");
+            const filename = `generated_${Date.now()}.${ext}`;
+
+            const binary = atob(msg.base64Data);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+
+            const path = await invoke("save_file_to_downloads", {
+                filename,
+                content: msg.base64Data,
+            });
+            showToast({
+                message: `已保存到: ${path}`,
+                type: "success",
+                duration: 3000,
+            });
+        } catch (error) {
+            console.error("Save failed:", error);
+            showToast({
+                message: String(error?.message || error || "保存失败"),
+                type: "error",
+            });
+        }
+    }
+
     async function handleSend() {
-        if (!inputText.trim() || $isAiLoading) return;
-        const text = inputText;
+        if ((!inputText.trim() && !$aiChatComposerAttachments.length) || $isAiLoading) return;
+        const text = inputText.trim() || "请阅读并分析这些附件。";
+        const attachments = $aiChatComposerAttachments;
         inputText = "";
         try {
-            await sendChatMessage(text, chatStyle);
+            await sendChatMessage(text, chatStyle, null, { attachments });
             clearAiChatDraft();
             scrollToBottom();
         } catch (error) {
@@ -294,6 +378,9 @@
         if (!lastMessage) return t("ai_chat.no_messages");
         if (lastMessage.type === "web_search_result") {
             return t("ai_chat.search_prefix", { values: { query: lastMessage.query || t("ai_chat.capability_web_search") } });
+        }
+        if (lastMessage.type === "ai_execution_plan") {
+            return `📋 ${lastMessage.plan?.title || '执行计划'}`;
         }
         if (typeof lastMessage.content === "string" && lastMessage.content.trim()) {
             return lastMessage.content.replace(/\s+/g, " ").trim().slice(0, 40);
@@ -661,7 +748,7 @@
     }
 </script>
 
-<div class="flex h-screen md:h-full overflow-hidden bg-slate-50 dark:bg-slate-900" data-ai-shell>
+<div class="flex h-[100dvh] md:h-full overflow-hidden bg-slate-50 dark:bg-slate-900" data-ai-shell>
     {#if showSessionDrawer}
         <div
             class="md:hidden fixed inset-0 z-40 bg-slate-950/30 dark:bg-slate-950/60 backdrop-blur-sm"
@@ -680,7 +767,7 @@
         class:translate-x-0={!showSessionDrawer}
         class:-translate-x-full={!showSessionDrawer}
     >
-        <div class="h-16 px-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0">
+        <div class="min-h-16 px-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0 safe-top-panel">
             <div>
                 <div class="text-sm font-black text-slate-800 dark:text-slate-100">{$_("ai_chat.session_history")}</div>
                 <div class="text-[11px] text-slate-400 dark:text-slate-500">
@@ -707,20 +794,29 @@
                         : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 border-l-transparent hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-l-slate-300'}"
                 >
                     <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0 flex-1">
-                            <div class="font-bold text-sm text-slate-700 dark:text-slate-200 truncate">
-                                {session.title || $_("ai_chat.new_session")}
+                        <div class="min-w-0 flex-1 flex items-start gap-3">
+                            <div class="w-9 h-9 rounded-xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700">
+                                <img
+                                    src={session.assistantAvatar}
+                                    alt={session.title || $_("ai_chat.title")}
+                                    class="w-full h-full object-cover"
+                                />
                             </div>
-                            <div class="text-xs text-slate-400 dark:text-slate-500 truncate mt-1">
-                                {getSessionPreview(session)}
-                            </div>
-                            <div class="text-[10px] text-slate-300 dark:text-slate-600 mt-2">
-                                {formatSessionTime(session.updatedAt)}
+                            <div class="min-w-0 flex-1">
+                                <div class="font-bold text-sm text-slate-700 dark:text-slate-200 truncate">
+                                    {session.title || $_("ai_chat.new_session")}
+                                </div>
+                                <div class="text-xs text-slate-400 dark:text-slate-500 truncate mt-1">
+                                    {getSessionPreview(session)}
+                                </div>
+                                <div class="text-[10px] text-slate-300 dark:text-slate-600 mt-2">
+                                    {formatSessionTime(session.updatedAt)}
+                                </div>
                             </div>
                         </div>
                         <button
                             on:click|stopPropagation={() => handleDeleteSession(session.id)}
-                            class="p-1.5 rounded-lg text-slate-300 dark:text-slate-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 opacity-0 group-hover:opacity-100 transition"
+                            class="p-1.5 rounded-lg text-slate-400 dark:text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition"
                             title={$_("ai_chat.delete_session")}
                         >
                             <i class="ph ph-trash"></i>
@@ -733,7 +829,7 @@
 
     <div class="flex-1 min-w-0 flex flex-col bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-850 overflow-hidden">
         <header
-            class="h-14 md:h-16 bg-white/90 dark:bg-slate-800/90 backdrop-blur px-3 md:px-6 flex justify-between items-center z-10 border-b border-slate-200 dark:border-slate-700 shrink-0"
+            class="min-h-14 md:min-h-16 bg-white/90 dark:bg-slate-800/90 backdrop-blur px-3 md:px-6 flex justify-between items-center z-10 border-b border-slate-200 dark:border-slate-700 shrink-0 safe-top"
         >
             <div class="flex items-center gap-2 md:gap-3 min-w-0">
                 <button
@@ -751,9 +847,13 @@
                     <i class="ph ph-list text-lg"></i>
                 </button>
                 <div
-                    class="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg shrink-0"
+                    class="w-8 h-8 md:w-10 md:h-10 rounded-xl overflow-hidden shadow-lg shrink-0 border border-indigo-100/70 dark:border-indigo-900/70 bg-white/80 dark:bg-slate-700/80"
                 >
-                    <i class="ph-fill ph-robot text-lg md:text-xl"></i>
+                    <img
+                        src={currentSession?.assistantAvatar || "/avatars/assistant-orbit-1.svg"}
+                        alt={$_("ai_chat.title")}
+                        class="w-full h-full object-cover"
+                    />
                 </div>
                 <div class="min-w-0">
                     <h2 class="text-base md:text-lg font-bold text-slate-800 dark:text-slate-100 truncate">
@@ -964,31 +1064,98 @@
             {:else}
                 {#each $aiChatHistory as msg, index}
                     <div
-                        class="flex gap-2 md:gap-3"
+                        class="flex gap-2 md:gap-3 min-w-0"
                         class:flex-row-reverse={msg.role === "user"}
                     >
                         {#if msg.role === "user"}
                             <div
-                                class="w-8 h-8 md:w-9 md:h-9 rounded-xl shrink-0 flex items-center justify-center shadow-sm bg-blue-600 text-white"
+                                class="w-8 h-8 md:w-9 md:h-9 rounded-xl shrink-0 overflow-hidden shadow-sm border border-blue-200/70 bg-blue-50"
                             >
-                                <i class="ph-fill ph-user text-sm md:text-base"></i>
+                                <img
+                                    src={currentSession?.userAvatar || "/avatars/user-orbit-1.svg"}
+                                    alt="User avatar"
+                                    class="w-full h-full object-cover"
+                                />
                             </div>
                         {:else}
                             <div
-                                class="w-8 h-8 md:w-9 md:h-9 rounded-xl shrink-0 flex items-center justify-center shadow-sm bg-gradient-to-br from-indigo-500 to-purple-600 text-white"
+                                class="w-8 h-8 md:w-9 md:h-9 rounded-xl shrink-0 overflow-hidden shadow-sm border border-indigo-200/70 bg-indigo-50"
                             >
-                                <i class="ph-fill ph-robot text-sm md:text-base"></i>
+                                <img
+                                    src={currentSession?.assistantAvatar || "/avatars/assistant-orbit-1.svg"}
+                                    alt="Assistant avatar"
+                                    class="w-full h-full object-cover"
+                                />
                             </div>
                         {/if}
-                        <div class="max-w-[85%] md:max-w-[80%] group">
+                        <div class="min-w-0 max-w-[85%] md:max-w-[80%] group">
                             {#if msg.role === "user"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-blue-600 text-white rounded-tr-none markdown-message user-markdown"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-blue-600 text-white rounded-tr-none markdown-message user-markdown break-words overflow-hidden"
                                 >
                                     <MarkdownRenderer content={msg.content} />
+                                    {#if msg.attachments?.length}
+                                        <div class="mt-3 space-y-2">
+                                            {#each msg.attachments as attachment}
+                                                {#if attachment.mediaType === 'image' && attachment.thumbnailUrl}
+                                                    <div class="rounded-xl overflow-hidden border border-white/15">
+                                                        <button
+                                                            on:click={() => lightboxUrl = attachment.thumbnailUrl}
+                                                            class="block w-full"
+                                                        >
+                                                            <img
+                                                                src={attachment.thumbnailUrl}
+                                                                alt={attachment.name}
+                                                                class="max-w-full max-h-60 rounded-xl object-contain cursor-pointer hover:opacity-90 transition"
+                                                            />
+                                                        </button>
+                                                        <div class="px-3 py-1.5 text-[10px] text-blue-100/80">
+                                                            {attachment.name} · {formatAttachmentSize(attachment.size)}
+                                                        </div>
+                                                    </div>
+                                                {:else if attachment.mediaType === 'audio' && attachment.base64Data}
+                                                    <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2">
+                                                        <div class="flex items-center gap-2 mb-2">
+                                                            <i class="ph ph-music-note text-sm"></i>
+                                                            <span class="text-xs font-bold">{attachment.name}</span>
+                                                            <span class="text-[10px] text-blue-100/80">{formatAttachmentSize(attachment.size)}</span>
+                                                        </div>
+                                                        <audio controls class="w-full h-8" preload="none">
+                                                            <source src="data:{attachment.mimeType};base64,{attachment.base64Data}" type={attachment.mimeType} />
+                                                        </audio>
+                                                    </div>
+                                                {:else if attachment.mediaType === 'video'}
+                                                    <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2">
+                                                        <div class="flex items-center gap-2">
+                                                            <i class="ph ph-video-camera text-sm"></i>
+                                                            <span class="text-xs font-bold">{attachment.name}</span>
+                                                            <span class="text-[10px] text-blue-100/80">{formatAttachmentSize(attachment.size)}</span>
+                                                        </div>
+                                                    </div>
+                                                {:else}
+                                                    <div class="rounded-xl border border-white/15 bg-white/10 px-3 py-2">
+                                                        <div class="flex items-start justify-between gap-3">
+                                                            <div class="min-w-0 flex-1">
+                                                                <div class="text-xs font-bold break-words">{attachment.name}</div>
+                                                                <div class="mt-1 text-[11px] text-blue-100/90 break-all">{attachment.path}</div>
+                                                            </div>
+                                                            <div class="text-[10px] font-semibold text-blue-100/90 shrink-0">
+                                                                {formatAttachmentSize(attachment.size)}
+                                                            </div>
+                                                        </div>
+                                                        {#if attachment.truncated}
+                                                            <div class="mt-2 text-[10px] text-blue-100/80">
+                                                                内容已截断
+                                                            </div>
+                                                        {/if}
+                                                    </div>
+                                                {/if}
+                                            {/each}
+                                        </div>
+                                    {/if}
                                 </div>
                                 <div
-                                    class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end"
+                                    class="mt-1 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity justify-end"
                                 >
                                     <button
                                         on:click={() => copyMessage(msg.content)}
@@ -1014,12 +1181,12 @@
                                 </div>
                             {:else if msg.type === "text"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none markdown-message"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none markdown-message break-words overflow-hidden"
                                 >
                                     <MarkdownRenderer content={msg.content} />
                                 </div>
                                 <div
-                                    class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    class="mt-1 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                                 >
                                     <button
                                         on:click={() => copyMessage(msg.content)}
@@ -1038,7 +1205,7 @@
                                 </div>
                             {:else if msg.type === "streaming"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none relative overflow-hidden markdown-message"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none relative overflow-hidden markdown-message break-words"
                                 >
                                     <MarkdownRenderer content={msg.content || ""} />
                                     {#if msg.isStreaming}
@@ -1114,6 +1281,16 @@
                                     <div class="mt-3 text-xs font-mono break-all text-slate-600 dark:text-slate-300">
                                         {msg.operation.path}
                                     </div>
+                                    {#if msg.operation.authorizationDirectory}
+                                        <div class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-fuchsia-100 dark:border-fuchsia-900/50 p-3 text-xs text-slate-600 dark:text-slate-300">
+                                            <div class="font-bold text-fuchsia-700 dark:text-fuchsia-400">
+                                                将授权目录
+                                            </div>
+                                            <div class="mt-1 font-mono break-all">
+                                                {msg.operation.authorizationDirectory}
+                                            </div>
+                                        </div>
+                                    {/if}
                                     {#if msg.operation.content}
                                         <pre class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-fuchsia-100 dark:border-fuchsia-900/50 p-3 overflow-x-auto text-[11px] leading-6 text-slate-600 dark:text-slate-300"><code>{msg.operation.content.slice(0, 400)}{msg.operation.content.length > 400 ? '\n...' : ''}</code></pre>
                                     {/if}
@@ -1124,6 +1301,12 @@
                                         >
                                             <i class="ph ph-check"></i>
                                             {$_("common.confirm")}
+                                        </button>
+                                        <button
+                                            on:click={() => removeChatMessage(index)}
+                                            class="px-3 py-1.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 rounded-lg text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-600 transition"
+                                        >
+                                            {$_("common.cancel")}
                                         </button>
                                     </div>
                                 </div>
@@ -1529,6 +1712,161 @@
                                         </button>
                                     </div>
                                 </div>
+                            {:else if msg.type === "generated_image"}
+                                <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-tl-none max-w-sm">
+                                    {#if msg.base64Data}
+                                        <button
+                                            on:click={() => lightboxUrl = `data:${msg.mimeType || 'image/png'};base64,${msg.base64Data}`}
+                                            class="block w-full"
+                                        >
+                                            <img
+                                                src="data:{msg.mimeType || 'image/png'};base64,{msg.base64Data}"
+                                                alt={msg.prompt || 'Generated image'}
+                                                class="w-full rounded-xl cursor-pointer hover:opacity-90 transition"
+                                            />
+                                        </button>
+                                    {:else if msg.url}
+                                        <button
+                                            on:click={() => lightboxUrl = msg.url}
+                                            class="block w-full"
+                                        >
+                                            <img
+                                                src={msg.url}
+                                                alt={msg.prompt || 'Generated image'}
+                                                class="w-full rounded-xl cursor-pointer hover:opacity-90 transition"
+                                            />
+                                        </button>
+                                    {/if}
+                                    {#if msg.content}
+                                        <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 italic">
+                                            {msg.content}
+                                        </div>
+                                    {/if}
+                                    <div class="mt-2 flex gap-2">
+                                        <button
+                                            on:click={() => handleSaveGeneratedMedia(msg)}
+                                            class="px-2.5 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition"
+                                        >
+                                            <i class="ph ph-download-simple mr-1"></i>保存
+                                        </button>
+                                    </div>
+                                </div>
+                            {:else if msg.type === "generated_audio"}
+                                <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-tl-none">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <i class="ph ph-speaker-high text-purple-500"></i>
+                                        <span class="text-xs font-bold text-slate-700 dark:text-slate-200">语音生成</span>
+                                        {#if msg.voice}
+                                            <span class="text-[10px] text-slate-400 dark:text-slate-500">({msg.voice})</span>
+                                        {/if}
+                                    </div>
+                                    {#if msg.base64Data}
+                                        <audio controls class="w-full" preload="none">
+                                            <source src="data:{msg.mimeType || 'audio/mpeg'};base64,{msg.base64Data}" type={msg.mimeType || 'audio/mpeg'} />
+                                        </audio>
+                                    {/if}
+                                    {#if msg.content}
+                                        <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                            {msg.content}
+                                        </div>
+                                    {/if}
+                                    <div class="mt-2 flex gap-2">
+                                        <button
+                                            on:click={() => handleSaveGeneratedMedia(msg)}
+                                            class="px-2.5 py-1 text-xs bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 transition"
+                                        >
+                                            <i class="ph ph-download-simple mr-1"></i>保存
+                                        </button>
+                                    </div>
+                                </div>
+                            {:else if msg.type === "ai_execution_plan"}
+                                <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-tl-none">
+                                    <div class="flex items-center gap-2 mb-2.5">
+                                        <i class="ph ph-list-checks text-blue-500 text-base"></i>
+                                        <span class="text-xs font-bold text-slate-700 dark:text-slate-200">{msg.plan?.title || '执行计划'}</span>
+                                        {#if msg.isExecuting}
+                                            <span class="ml-auto text-[10px] text-blue-500 dark:text-blue-400 animate-pulse">执行中...</span>
+                                        {:else if msg.plan?.status === 'done'}
+                                            <span class="ml-auto text-[10px] text-green-500 dark:text-green-400">已完成</span>
+                                        {:else if msg.plan?.status === 'cancelled'}
+                                            <span class="ml-auto text-[10px] text-slate-400 dark:text-slate-500">已取消</span>
+                                        {:else if msg.plan?.status === 'partial'}
+                                            <span class="ml-auto text-[10px] text-amber-500 dark:text-amber-400">部分完成</span>
+                                        {/if}
+                                    </div>
+                                    <div class="space-y-1.5">
+                                        {#each msg.plan?.steps || [] as step, si}
+                                            <div class="flex items-start gap-2 px-2 py-1.5 rounded-lg {step.status === 'running' ? 'bg-blue-50 dark:bg-blue-900/20' : step.status === 'done' ? 'bg-green-50/50 dark:bg-green-900/10' : step.status === 'failed' ? 'bg-red-50/50 dark:bg-red-900/10' : 'bg-slate-50 dark:bg-slate-600/30'}">
+                                                <span class="shrink-0 mt-0.5">
+                                                    {#if step.status === 'done'}
+                                                        <i class="ph-fill ph-check-circle text-green-500 text-sm"></i>
+                                                    {:else if step.status === 'running'}
+                                                        <i class="ph ph-circle-notch text-blue-500 text-sm animate-spin"></i>
+                                                    {:else if step.status === 'failed'}
+                                                        <i class="ph-fill ph-x-circle text-red-500 text-sm"></i>
+                                                    {:else if step.status === 'skipped'}
+                                                        <i class="ph ph-minus-circle text-slate-400 text-sm"></i>
+                                                    {:else}
+                                                        <i class="ph ph-circle text-slate-300 dark:text-slate-500 text-sm"></i>
+                                                    {/if}
+                                                </span>
+                                                <div class="min-w-0 flex-1">
+                                                    <span class="text-xs {step.status === 'done' ? 'text-green-700 dark:text-green-300' : step.status === 'running' ? 'text-blue-700 dark:text-blue-300 font-medium' : step.status === 'failed' ? 'text-red-700 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}">
+                                                        {step.title}
+                                                    </span>
+                                                    {#if step.status === 'failed' && step.error}
+                                                        <div class="text-[10px] text-red-500 dark:text-red-400 mt-0.5">{step.error}</div>
+                                                    {/if}
+                                                    {#if step.status === 'done' && step.result}
+                                                        <button
+                                                            class="text-[10px] text-blue-500 dark:text-blue-400 hover:underline mt-0.5 block"
+                                                            on:click={() => {
+                                                                const el = document.getElementById(`step-detail-${index}-${si}`);
+                                                                if (el) el.classList.toggle('hidden');
+                                                            }}
+                                                        >
+                                                            查看详情
+                                                        </button>
+                                                        <div id="step-detail-{index}-{si}" class="hidden mt-1 text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-600/50 rounded p-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words">
+                                                            {#if step.result.type === 'web_search'}
+                                                                搜索: {step.result.query}
+                                                                {#each (step.result.entries || []).slice(0, 3) as entry}
+                                                                    {'\n'}• {entry.title}
+                                                                {/each}
+                                                            {:else if step.result.type === 'content_generation' || step.result.type === 'summarize'}
+                                                                {(step.result.content || '').slice(0, 500)}
+                                                            {:else if step.result.type === 'file_read'}
+                                                                {(step.result.files || []).map(f => f.name).join(', ')}
+                                                            {:else if step.result.type === 'task_create'}
+                                                                任务: {step.result.task?.title || ''}
+                                                            {:else}
+                                                                {JSON.stringify(step.result).slice(0, 300)}
+                                                            {/if}
+                                                        </div>
+                                                    {/if}
+                                                </div>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                    {#if msg.plan?.steps?.length}
+                                        <div class="mt-2 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
+                                            <span>进度: {msg.plan.steps.filter(s => s.status === 'done').length}/{msg.plan.steps.length}</span>
+                                            {#if msg.isExecuting}
+                                                <button
+                                                    on:click={stopStreaming}
+                                                    class="px-2 py-0.5 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition text-[10px]"
+                                                >
+                                                    <i class="ph ph-stop mr-0.5"></i>取消
+                                                </button>
+                                            {/if}
+                                        </div>
+                                    {/if}
+                                    {#if msg.summary && !msg.isExecuting}
+                                        <div class="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-600">
+                                            <MarkdownRenderer content={msg.summary} />
+                                        </div>
+                                    {/if}
+                                </div>
                             {:else if msg.type === "error"}
                                 <div
                                     class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-tl-none"
@@ -1557,9 +1895,72 @@
         <div
             class="p-3 md:p-4 pb-5 md:pb-4 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shrink-0 safe-bottom"
         >
+            {#if $aiChatComposerAttachments.length}
+                <div class="mb-3 flex flex-wrap gap-2">
+                    {#each $aiChatComposerAttachments as attachment}
+                        <div class="max-w-full flex items-start gap-2 rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/70 px-3 py-2">
+                            {#if attachment.thumbnailUrl}
+                                <img
+                                    src={attachment.thumbnailUrl}
+                                    alt={attachment.name}
+                                    class="w-10 h-10 rounded-lg object-cover shrink-0"
+                                />
+                            {:else if attachment.mediaType === 'audio'}
+                                <div class="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center shrink-0">
+                                    <i class="ph ph-music-note text-purple-600 dark:text-purple-300 text-lg"></i>
+                                </div>
+                            {:else if attachment.mediaType === 'video'}
+                                <div class="w-10 h-10 rounded-lg bg-rose-100 dark:bg-rose-900/40 flex items-center justify-center shrink-0">
+                                    <i class="ph ph-video-camera text-rose-600 dark:text-rose-300 text-lg"></i>
+                                </div>
+                            {/if}
+                            <div class="min-w-0">
+                                <div class="text-xs font-bold text-slate-700 dark:text-slate-200 break-words">
+                                    {attachment.name}
+                                </div>
+                                <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 break-all">
+                                    {formatAttachmentSize(attachment.size)}
+                                    {#if attachment.truncated}
+                                        · 已截断
+                                    {/if}
+                                    {#if attachment.mediaType && attachment.mediaType !== 'text'}
+                                        · {attachment.mediaType}
+                                    {/if}
+                                </div>
+                            </div>
+                            <button
+                                on:click={() => removeAiChatComposerAttachment(attachment.path)}
+                                class="shrink-0 text-slate-400 hover:text-red-500 transition"
+                                aria-label="移除附件"
+                                title="移除附件"
+                            >
+                                <i class="ph ph-x text-sm"></i>
+                            </button>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
             <div
                 class="flex gap-2 items-end bg-slate-50 dark:bg-slate-700 p-2 rounded-2xl border border-slate-200 dark:border-slate-600 focus-within:border-indigo-400 dark:focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-50 dark:focus-within:ring-indigo-900/30 transition-all"
             >
+                <button
+                    on:click={handleAttachFiles}
+                    class="p-2 md:p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-300 hover:border-indigo-300 transition disabled:opacity-50"
+                    disabled={$isAiLoading || !$aiChatCapabilities.localFilesAvailable}
+                    aria-label="附加文件"
+                    title={$aiChatCapabilities.localFilesAvailable ? "附加文本文件" : "当前环境不可用"}
+                >
+                    <i class="ph ph-paperclip text-base md:text-lg"></i>
+                </button>
+                <button
+                    on:click={handleAttachMedia}
+                    class="p-2 md:p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-300 hover:border-purple-300 transition disabled:opacity-50"
+                    disabled={$isAiLoading || !$aiChatCapabilities.localFilesAvailable}
+                    aria-label="附加媒体"
+                    title={$aiChatCapabilities.localFilesAvailable ? "附加图片/音频/视频" : "当前环境不可用"}
+                >
+                    <i class="ph ph-image text-base md:text-lg"></i>
+                </button>
                 <textarea
                     bind:this={composerTextarea}
                     bind:value={inputText}
@@ -1585,7 +1986,7 @@
                     <button
                         on:click={handleSend}
                         class="p-2 md:p-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-indigo-200"
-                        disabled={!inputText.trim()}
+                        disabled={!inputText.trim() && !$aiChatComposerAttachments.length}
                         aria-label={$_("common.send")}
                     >
                         <i class="ph-bold ph-paper-plane-right text-base md:text-lg"></i>
@@ -1605,12 +2006,41 @@
     </div>
 </div>
 
+{#if lightboxUrl}
+    <button
+        class="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 cursor-zoom-out"
+        on:click={() => lightboxUrl = null}
+        on:keydown={(e) => e.key === 'Escape' && (lightboxUrl = null)}
+    >
+        <img
+            src={lightboxUrl}
+            alt="Preview"
+            class="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+        />
+    </button>
+{/if}
+
 <style>
+    .safe-top {
+        padding-top: max(0.4rem, env(safe-area-inset-top));
+    }
+
+    .safe-top-panel {
+        padding-top: max(0.85rem, env(safe-area-inset-top) + 0.35rem);
+        padding-bottom: 0.85rem;
+    }
+
     .safe-bottom {
         padding-bottom: max(5.25rem, env(safe-area-inset-bottom) + 0.5rem);
     }
 
     @media (min-width: 768px) {
+        .safe-top,
+        .safe-top-panel {
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+
         .safe-bottom {
             padding-bottom: max(1rem, env(safe-area-inset-bottom));
         }
@@ -1618,6 +2048,34 @@
 
     .markdown-message :global(.markdown-content) {
         font-size: 0.875rem;
+        max-width: 100%;
+    }
+
+    .markdown-message :global(.markdown-content),
+    .markdown-message :global(.markdown-content p),
+    .markdown-message :global(.markdown-content li),
+    .markdown-message :global(.markdown-content blockquote),
+    .markdown-message :global(.markdown-content td),
+    .markdown-message :global(.markdown-content th),
+    .markdown-message :global(.markdown-content strong),
+    .markdown-message :global(.markdown-content em) {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .markdown-message :global(.markdown-content a),
+    .markdown-message :global(.markdown-content code:not(pre code)) {
+        overflow-wrap: anywhere;
+        word-break: break-all;
+    }
+
+    .markdown-message :global(.markdown-content pre) {
+        max-width: 100%;
+    }
+
+    .markdown-message :global(.markdown-content pre code) {
+        overflow-wrap: normal;
+        word-break: normal;
     }
 
     .user-markdown :global(.markdown-content a) {

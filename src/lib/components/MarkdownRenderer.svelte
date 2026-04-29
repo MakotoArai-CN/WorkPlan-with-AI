@@ -69,9 +69,9 @@
 
 {#if isPlainText}
     {#if inline}
-        <span class="whitespace-pre-wrap">{content}</span>
+        <span class="whitespace-pre-wrap break-words">{content}</span>
     {:else}
-        <div class="whitespace-pre-wrap">{content}</div>
+        <div class="whitespace-pre-wrap break-words">{content}</div>
     {/if}
 {:else}
     {#if inline}
@@ -122,6 +122,8 @@
     :global(.markdown-content) {
         line-height: 1.6;
         color: #1e293b;
+        max-width: 100%;
+        overflow-wrap: anywhere;
     }
     :global(.markdown-content h1) {
         font-size: 2em;
@@ -188,6 +190,8 @@
         border-radius: 0.25em;
         font-size: 0.9em;
         font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
     :global(.markdown-content pre) {
         background: #1e293b;

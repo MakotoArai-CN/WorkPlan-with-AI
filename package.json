@@ -1,11 +1,12 @@
 {
   "name": "workplan",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "build:web": "node scripts/build-web.mjs",
     "preview": "vite preview",
     "check": "bun node_modules/@sveltejs/kit/svelte-kit.js sync && bun node_modules/svelte-check/bin/svelte-check --tsconfig ./jsconfig.json",
     "check:watch": "bun node_modules/@sveltejs/kit/svelte-kit.js sync && bun node_modules/svelte-check/bin/svelte-check --tsconfig ./jsconfig.json --watch",

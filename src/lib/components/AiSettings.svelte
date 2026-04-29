@@ -18,6 +18,7 @@
         hydrateCurrentProviderConfigWithDefaults,
     } from "../stores/ai.js";
     import { settingsStore } from "../stores/settings.js";
+    import { openclawConfig } from "../stores/openclaw.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { onMount } from "svelte";
     import { _ } from 'svelte-i18n';
@@ -27,6 +28,8 @@
         getValidatedExternalUrl,
         openExternalUrl,
     } from "../utils/open-external.js";
+    import { getOpenClawGatewayEndpoint, getOpenClawWebSocketUrl } from "../utils/openclaw-client.js";
+    import { isWebDemo } from "../utils/runtime.js";
 
     function t(key, opts) { return get(_)(key, opts); }
 
@@ -52,8 +55,12 @@
 
     async function loadCurrentProviderModels() {
         const providerId = $aiConfig.provider;
-        const apiKey = $aiConfig.apiKey || "";
-        const endpoint = $aiConfig.customEndpoint || "";
+        const apiKey = providerId === "openclaw"
+            ? ($openclawConfig.apiKey || $aiConfig.apiKey || "")
+            : ($aiConfig.apiKey || "");
+        const endpoint = providerId === "openclaw"
+            ? (getOpenClawGatewayEndpoint($openclawConfig) || $aiConfig.customEndpoint || "")
+            : ($aiConfig.customEndpoint || "");
 
         if (providerId === "custom") {
             if (!endpoint) {
@@ -94,6 +101,9 @@
     onMount(async () => {
         providers = await getAiProviders();
         await hydrateCurrentProviderConfigWithDefaults();
+        if (isWebDemo && $aiConfig.provider === "openclaw") {
+            await switchProvider("g4f-default");
+        }
         await loadCurrentProviderInfo();
         await loadCurrentProviderModels();
         dailyPrompt = $settingsStore.dailyReportPrompt || "";
@@ -104,6 +114,9 @@
     $: if ($showAiSettings) {
         (async () => {
             await hydrateCurrentProviderConfigWithDefaults();
+            if (isWebDemo && $aiConfig.provider === "openclaw") {
+                await switchProvider("g4f-default");
+            }
             await loadCurrentProviderInfo();
             await loadCurrentProviderModels();
         })();
@@ -246,8 +259,8 @@
 
     $: scheduleAutoFetchModels(
         $aiConfig.provider,
-        $aiConfig.apiKey,
-        $aiConfig.customEndpoint,
+        $aiConfig.provider === "openclaw" ? ($openclawConfig.apiKey || $aiConfig.apiKey) : $aiConfig.apiKey,
+        $aiConfig.provider === "openclaw" ? openclawGatewayEndpoint : $aiConfig.customEndpoint,
     );
 
     function scheduleAutoFetchModels(providerId, apiKey, customEndpoint) {
@@ -260,7 +273,7 @@
             autoFetchTimer = null;
             if (providerId === "custom") {
                 if (!customEndpoint) return;
-            } else if (currentProvider && currentProvider.authType !== "none" && !apiKey) {
+            } else if (providerId !== "openclaw" && currentProvider && currentProvider.authType !== "none" && !apiKey) {
                 return;
             }
             loadCurrentProviderModels().catch(() => {});
@@ -270,7 +283,8 @@
         if (isG4FProvider($aiConfig.provider)) return false;
         if (
             $aiConfig.provider === "ollama" ||
-            $aiConfig.provider === "lmstudio"
+            $aiConfig.provider === "lmstudio" ||
+            $aiConfig.provider === "openclaw"
         )
             return false;
         if (isCustomProvider) return true; // custom provider: show API Key field (optional)
@@ -293,6 +307,20 @@
     })();
     $: currentProviderDocUrl = getValidatedExternalUrl(currentProvider?.docUrl || "");
     $: currentProviderApiUrl = getValidatedExternalUrl(currentProvider?.apiUrl || "");
+    $: openclawGatewayEndpoint = getOpenClawGatewayEndpoint($openclawConfig);
+    $: openclawWebSocketEndpoint = (() => {
+        try {
+            return getOpenClawWebSocketUrl($openclawConfig);
+        } catch {
+            return "";
+        }
+    })();
+    $: localProviderIds = [
+        "ollama",
+        "lmstudio",
+        "custom",
+        ...(!isWebDemo && ($openclawConfig.enabled || $aiConfig.provider === "openclaw") ? ["openclaw"] : []),
+    ];
 </script>
 
 {#if $showAiSettings}
@@ -457,7 +485,7 @@
                                 {/each}
                             </optgroup>
                             <optgroup label={$_('ai_settings_page.group_local')}>
-                                {#each providers.filter( (p) => ["ollama", "lmstudio", "custom"].includes(p.id), ) as provider}
+                                {#each providers.filter((p) => localProviderIds.includes(p.id)) as provider}
                                     <option value={provider.id}
                                         >{provider.name}</option
                                     >
@@ -547,6 +575,26 @@
                                     {$_('ai_settings_page.models_count', { values: { count: displayModels.length } })}
                                 </div>
                             {/if}
+                        </div>
+                    {:else if $aiConfig.provider === "openclaw"}
+                        <div>
+                            <label
+                                for="ai-openclaw-endpoint"
+                                class="text-xs font-bold text-slate-500 uppercase mb-2 block"
+                            >
+                                {$_('ai_settings_page.local_addr')}
+                            </label>
+                            <input
+                                id="ai-openclaw-endpoint"
+                                value={openclawWebSocketEndpoint || openclawGatewayEndpoint}
+                                readonly
+                                type="url"
+                                placeholder="ws://127.0.0.1:18789"
+                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 font-mono"
+                            />
+                            <div class="text-[10px] text-slate-400 mt-1">
+                                {$_('ai_settings_page.local_hint_openclaw')}
+                            </div>
                         </div>
                     {:else if $aiConfig.provider === "ollama" || $aiConfig.provider === "lmstudio"}
                         <div>

@@ -6,6 +6,11 @@ import {
     isG4FProvider,
     streamChatWithG4F
 } from './g4f-client.js';
+import {
+    chatWithOpenClawGateway,
+    fetchOpenClawGatewayModels
+} from './openclaw-client.js';
+import { isTauriRuntime } from './runtime.js';
 
 const PROVIDER_CONFIGS = {
     openai: {
@@ -360,6 +365,19 @@ const PROVIDER_CONFIGS = {
         docUrl: 'https://lmstudio.ai/',
         apiUrl: ''
     },
+    openclaw: {
+        name: 'OpenClaw',
+        endpoint: 'http://127.0.0.1:18789',
+        modelsEndpoint: '',
+        defaultModels: ['openclaw/default'],
+        defaultModel: 'openclaw/default',
+        authType: 'bearer',
+        bodyFormat: 'openai',
+        supportsModelList: true,
+        supportsCustomEndpoint: true,
+        docUrl: '',
+        apiUrl: ''
+    },
     custom: {
         name: '自定义接口',
         endpoint: '',
@@ -397,31 +415,34 @@ function normalizeHttpEndpoint(url) {
 }
 
 async function fetchWithTauri(url, options = {}) {
-    if (typeof window === 'undefined') {
-        throw new Error('Not in browser environment');
-    }
     const safeUrl = normalizeHttpEndpoint(url);
+    const headers = {};
+    if (options.headers) {
+        for (const [key, value] of Object.entries(options.headers)) {
+            if (value !== undefined && value !== null) {
+                headers[key] = String(value);
+            }
+        }
+    }
+    const fetchOptions = {
+        method: options.method || 'GET',
+        headers
+    };
+    if (options.body) {
+        fetchOptions.body = typeof options.body === 'string'
+            ? options.body
+            : JSON.stringify(options.body);
+    }
+
+    if (!isTauriRuntime) {
+        if (typeof fetch !== 'function') {
+            throw new Error('当前环境不支持 HTTP 请求');
+        }
+        return await fetch(safeUrl, fetchOptions);
+    }
+
     try {
         const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-        const headers = {};
-        if (options.headers) {
-            for (const [key, value] of Object.entries(options.headers)) {
-                if (value !== undefined && value !== null) {
-                    headers[key] = String(value);
-                }
-            }
-        }
-        const fetchOptions = {
-            method: options.method || 'GET',
-            headers: headers
-        };
-        if (options.body) {
-            if (typeof options.body === 'string') {
-                fetchOptions.body = options.body;
-            } else {
-                fetchOptions.body = JSON.stringify(options.body);
-            }
-        }
         const response = await tauriFetch(safeUrl, fetchOptions);
         return {
             ok: response.ok,
@@ -482,6 +503,21 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         return await fetchCustomProviderModels(customEndpoint, apiKey);
     }
 
+    if (providerId === 'openclaw') {
+        try {
+            const models = await fetchOpenClawGatewayModels({
+                baseUrl: customEndpoint || PROVIDER_CONFIGS.openclaw.endpoint,
+                apiKey
+            });
+            const mergedModels = [...new Set([...(models || []), ...PROVIDER_CONFIGS.openclaw.defaultModels])];
+            modelCache[cacheKey] = { models: mergedModels, expireTime: Date.now() + 300000 };
+            return mergedModels;
+        } catch (e) {
+            console.error('Failed to fetch OpenClaw models:', e);
+            return PROVIDER_CONFIGS.openclaw.defaultModels;
+        }
+    }
+
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider || !provider.supportsModelList) {
         return provider ? provider.defaultModels : [];
@@ -493,6 +529,11 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
             modelsEndpoint = customEndpoint.replace('/api/chat', '/api/tags');
         } else if (providerId === 'lmstudio') {
             modelsEndpoint = customEndpoint.replace('/v1/chat/completions', '/v1/models');
+        } else if (providerId === 'openclaw') {
+            const derived = customEndpoint.replace(/\/(chat\/completions|responses|messages)\/?$/i, '/models');
+            modelsEndpoint = derived === customEndpoint
+                ? customEndpoint.replace(/\/+$/, '') + '/models'
+                : derived;
         }
     }
 
@@ -650,7 +691,10 @@ function buildRequestBody(provider, model, messages, options) {
         case 'anthropic':
             return {
                 model,
-                messages: messages.filter(m => m.role !== 'system'),
+                messages: messages.filter(m => m.role !== 'system').map(m => ({
+                    role: m.role,
+                    content: Array.isArray(m.content) ? m.content : m.content
+                })),
                 system: messages.find(m => m.role === 'system')?.content,
                 max_tokens: maxTokens,
                 temperature,
@@ -666,7 +710,7 @@ function buildRequestBody(provider, model, messages, options) {
             return {
                 contents: messages.filter(m => m.role !== 'system').map(m => ({
                     role: m.role === 'assistant' ? 'model' : 'user',
-                    parts: [{ text: m.content }]
+                    parts: m.parts || [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
                 })),
                 systemInstruction: messages.find(m => m.role === 'system') ? {
                     parts: [{ text: messages.find(m => m.role === 'system').content }]
@@ -727,7 +771,7 @@ function parseStreamChunk(provider, chunk) {
 }
 
 function isLocalProvider(providerId) {
-    return providerId === 'ollama' || providerId === 'lmstudio';
+    return providerId === 'ollama' || providerId === 'lmstudio' || providerId === 'openclaw';
 }
 
 function getEffectiveEndpoint(provider, providerId, config) {
@@ -750,6 +794,13 @@ export async function callAI(config, userMessage, systemPrompt) {
             temperature: config.temperature,
             maxTokens: config.maxTokens
         });
+    }
+
+    if (providerId === 'openclaw') {
+        const messages = [];
+        if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+        messages.push({ role: 'user', content: userMessage });
+        return await chatWithOpenClawGateway(config, messages);
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
@@ -829,6 +880,10 @@ export async function callAIWithMessages(config, messages) {
             temperature: config.temperature,
             maxTokens: config.maxTokens
         });
+    }
+
+    if (providerId === 'openclaw') {
+        return await chatWithOpenClawGateway(config, messages);
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
@@ -913,6 +968,10 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
         );
     }
 
+    if (providerId === 'openclaw') {
+        return await chatWithOpenClawGateway(config, messages, onChunk, { signal });
+    }
+
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
     const isCustomProvider = providerId === 'custom';
@@ -968,11 +1027,11 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
     let fullContent = '';
     const safeUrl = normalizeHttpEndpoint(finalEndpoint);
     const bodyStr = JSON.stringify(requestBody);
-    console.log('[Stream] callAIWithMessagesStream called, url:', safeUrl, 'stream:', requestBody.stream, 'TAURI:', !!window.__TAURI__);
+    console.log('[Stream] callAIWithMessagesStream called, url:', safeUrl, 'stream:', requestBody.stream, 'TAURI:', isTauriRuntime);
 
     try {
         let response;
-        if (window.__TAURI__) {
+        if (isTauriRuntime) {
             const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
             const tauriHeaders = {};
             for (const [k, v] of Object.entries(headers)) {
@@ -1137,6 +1196,11 @@ export function getProviderInfo(providerId) {
 
 export function clearModelCache() {
     modelCache = {};
+}
+
+export function getProviderBodyFormat(providerId) {
+    const config = PROVIDER_CONFIGS[providerId];
+    return config?.bodyFormat || 'openai';
 }
 
 export { PROVIDER_CONFIGS };

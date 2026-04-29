@@ -3,6 +3,7 @@
     import { showConfirm, showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { exportToJSON } from '../utils/export.js';
 
     const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
 
@@ -110,17 +111,18 @@
         return 'bg-slate-50 text-slate-400 border-slate-200';
     }
 
-    function exportData() {
+    async function exportData() {
         const t = get(_);
         showToast({ message: t('settings.backup'), type: 'info', duration: 1500 });
-        const data = taskStore.exportData($taskStore);
-        const blob = new Blob([data], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `planpro_backup_${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(a.href);
-        showToast({ message: t('settings.backup_success'), type: 'success' });
+        const result = await exportToJSON(
+            JSON.parse(taskStore.exportData($taskStore)),
+            `planpro_backup_${new Date().toISOString().split('T')[0]}.json`
+        );
+        if (result?.success) {
+            showToast({ message: result.path ? `${t('settings.backup_success')}: ${result.path}` : t('settings.backup_success'), type: 'success' });
+        } else {
+            showToast({ message: String(result?.error || t('common.error')), type: 'error' });
+        }
     }
 
     function handleImport(event) {
