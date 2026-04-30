@@ -94,6 +94,10 @@ export function handleBackPress(closeToQuit, callbacks = {}) {
     }
 }
 
+function resolveCloseToQuit(value) {
+    return typeof value === 'function' ? Boolean(value()) : Boolean(value);
+}
+
 export async function setupAndroidBackHandler(closeToQuit, callbacks) {
     if (typeof window === 'undefined') return () => {};
 
@@ -110,16 +114,33 @@ export async function setupAndroidBackHandler(closeToQuit, callbacks) {
         const now = Date.now();
         if (now - lastHandled < 300) return;
         lastHandled = now;
-        handleBackPress(closeToQuit, {
-            ...callbacks,
-            forceDoubleBackExit: true
-        });
+        handleBackPress(resolveCloseToQuit(closeToQuit), callbacks);
     };
 
     const cleanups = [];
+    window.__workplanAndroidBack = handler;
+    cleanups.push(() => {
+        if (window.__workplanAndroidBack === handler) {
+            delete window.__workplanAndroidBack;
+        }
+    });
 
-    window.addEventListener('androidbackbutton', handler);
-    cleanups.push(() => window.removeEventListener('androidbackbutton', handler));
+    const eventHandler = (event) => {
+        event?.preventDefault?.();
+        handler();
+    };
+
+    window.addEventListener('workplan-android-back', eventHandler);
+    cleanups.push(() => window.removeEventListener('workplan-android-back', eventHandler));
+
+    window.addEventListener('androidbackbutton', eventHandler);
+    cleanups.push(() => window.removeEventListener('androidbackbutton', eventHandler));
+
+    const pendingBacks = Number(window.__workplanPendingAndroidBack || 0);
+    window.__workplanPendingAndroidBack = 0;
+    for (let index = 0; index < Math.min(pendingBacks, 3); index += 1) {
+        setTimeout(handler, index * 50);
+    }
 
     try {
         const { registerBackEvent } = await import(
@@ -131,9 +152,17 @@ export async function setupAndroidBackHandler(closeToQuit, callbacks) {
         console.warn('Tauri back-press plugin not available:', e);
     }
 
-    backListenerCleanup = () => {
+    let disposed = false;
+    const cleanup = () => {
+        if (disposed) return;
+        disposed = true;
         for (const fn of cleanups) fn();
+        if (backListenerCleanup === cleanup) {
+            backListenerCleanup = null;
+        }
     };
+
+    backListenerCleanup = cleanup;
     return backListenerCleanup;
 }
 

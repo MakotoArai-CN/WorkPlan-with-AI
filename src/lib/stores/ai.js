@@ -13,7 +13,8 @@ import {
     readSelectedMediaFiles,
     getMediaType,
     getFileExtension,
-    SUPPORTED_MEDIA_EXTENSIONS
+    SUPPORTED_MEDIA_EXTENSIONS,
+    isPathCoveredByContentTree
 } from '../utils/local-file-tools.js';
 import {
     looksLikeWebSearchIntent,
@@ -175,13 +176,22 @@ export function stopStreaming() {
     streamingContent.set('');
 }
 export const pendingTaskOperation = writable(null);
-export const aiChatRuntimeCapabilities = writable({
-    probed: false,
-    probing: false,
-    localFilesRuntimeAvailable: null,
-    webSearchRuntimeAvailable: null,
-    toolCallRuntimeAvailable: null
-});
+function getDefaultAiChatRuntimeCapabilities() {
+    return {
+        probed: false,
+        probing: false,
+        localFilesRuntimeAvailable: null,
+        webSearchRuntimeAvailable: null,
+        toolCallRuntimeAvailable: null,
+        nativeToolCallRuntimeAvailable: null
+    };
+}
+
+export const aiChatRuntimeCapabilities = writable(getDefaultAiChatRuntimeCapabilities());
+
+function resetAiChatRuntimeCapabilities() {
+    aiChatRuntimeCapabilities.set(getDefaultAiChatRuntimeCapabilities());
+}
 export const aiChatCapabilities = derived(
     [settingsStore, aiConfig, aiChatRuntimeCapabilities, openclawConfig],
     ([$settings, $config, $runtime, $openclawConfig]) => {
@@ -201,17 +211,22 @@ export const aiChatCapabilities = derived(
         const toolCallAvailable = $runtime.probed
             ? ($runtime.toolCallRuntimeAvailable !== false)
             : true;
+        const nativeToolCallAvailable = $runtime.nativeToolCallRuntimeAvailable === true
+            ? true
+            : ($runtime.probed ? false : null);
 
         return {
             mode: toolRouterEnabled ? 'internal_router' : 'chat_only',
             connectionReady: openclawReady && (!needsApiKey || Boolean($config.apiKey)),
             toolRouterEnabled,
             projectToolsAvailable: toolRouterEnabled && toolCallAvailable,
+            nativeToolCallAvailable: toolRouterEnabled && nativeToolCallAvailable === true,
             localFilesAvailable,
             localFilesRequireConfirmation: localFilesAvailable &&
                 ($settings.localFileConfig?.requireConfirmation ?? true),
             webSearchAvailable,
             toolCallRuntimeAvailable: toolCallAvailable,
+            nativeToolCallRuntimeAvailable: nativeToolCallAvailable,
             workspaceRoot: $settings.workspaceRoot || '',
             probed: $runtime.probed,
             probing: $runtime.probing
@@ -228,6 +243,7 @@ export async function probeAiCapabilities() {
     let localFilesOk = null;
     let webSearchOk = null;
     let toolCallOk = null;
+    let nativeToolCallOk = null;
 
     try {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -256,6 +272,7 @@ export async function probeAiCapabilities() {
         const needsApiKey = providerNeedsApiKey(config.provider);
         if (needsApiKey && !config.apiKey) {
             toolCallOk = false;
+            nativeToolCallOk = false;
         } else {
             const { callAI } = await import('../utils/ai-providers.js');
             const probe = await callAI(config, 'respond with only the word OK', 'You are a test probe. Respond with only the word OK.');
@@ -266,18 +283,73 @@ export async function probeAiCapabilities() {
         toolCallOk = false;
     }
 
+    if (toolCallOk) {
+        try {
+            const config = getEffectiveConfig();
+            const { canProviderUseNativeTools, callAIWithMessagesAndTools } = await import('../utils/ai-providers.js');
+            if (!canProviderUseNativeTools(config.provider)) {
+                nativeToolCallOk = false;
+            } else {
+                const probeTools = [{
+                    type: 'function',
+                    function: {
+                        name: 'workplan_probe_tool',
+                        description: '用于检测当前模型是否支持原生 function/tool calling。',
+                        parameters: {
+                            type: 'object',
+                            properties: {
+                                value: {
+                                    type: 'string',
+                                    description: '固定返回 ok'
+                                }
+                            },
+                            required: ['value'],
+                            additionalProperties: false
+                        }
+                    }
+                }];
+                const probe = await callAIWithMessagesAndTools(
+                    config,
+                    [
+                        {
+                            role: 'system',
+                            content: '你是能力检测助手。必须调用指定工具，不要直接回答文本。'
+                        },
+                        {
+                            role: 'user',
+                            content: '请调用 workplan_probe_tool，参数 value 设置为 ok。'
+                        }
+                    ],
+                    probeTools,
+                    {
+                        maxTokens: 256,
+                        toolChoice: { type: 'function', function: { name: 'workplan_probe_tool' } }
+                    }
+                );
+                nativeToolCallOk = (probe.toolCalls || []).some(call => call.name === 'workplan_probe_tool');
+            }
+        } catch (e) {
+            console.warn('[Probe] native tool call probe failed:', e?.message || e);
+            nativeToolCallOk = false;
+        }
+    } else if (nativeToolCallOk === null) {
+        nativeToolCallOk = false;
+    }
+
     aiChatRuntimeCapabilities.set({
         probed: true,
         probing: false,
         localFilesRuntimeAvailable: localFilesOk,
         webSearchRuntimeAvailable: webSearchOk,
-        toolCallRuntimeAvailable: toolCallOk
+        toolCallRuntimeAvailable: toolCallOk,
+        nativeToolCallRuntimeAvailable: nativeToolCallOk
     });
 
     return {
         localFilesRuntimeAvailable: localFilesOk,
         webSearchRuntimeAvailable: webSearchOk,
-        toolCallRuntimeAvailable: toolCallOk
+        toolCallRuntimeAvailable: toolCallOk,
+        nativeToolCallRuntimeAvailable: nativeToolCallOk
     };
 }
 
@@ -526,6 +598,7 @@ export async function hydrateCurrentProviderConfigWithDefaults() {
 }
 
 export async function switchProvider(newProviderId) {
+    resetAiChatRuntimeCapabilities();
     const current = get(aiConfig);
     const prevProviderId = current.provider || 'g4f-default';
 
@@ -665,6 +738,7 @@ export function addConnectionProfile(name = '') {
 }
 
 export function selectConnectionProfile(profileId) {
+    resetAiChatRuntimeCapabilities();
     aiConfig.update(current => applyProfileToState(current, profileId));
 }
 
@@ -970,6 +1044,10 @@ export function openAiChatWorkspace({
 }
 
 export function updateAiConfig(updates) {
+    const capabilityKeys = ['provider', 'apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
+    if (capabilityKeys.some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
+        resetAiChatRuntimeCapabilities();
+    }
     aiConfig.update(c => {
         const nextState = { ...c, ...updates };
         return { ...nextState, ...syncActiveProfile(nextState) };
@@ -2051,8 +2129,20 @@ function resolveUnauthorizedDirectory(plan = {}, settings = get(settingsStore)) 
 
     const workspaceRoot = settings.workspaceRoot || '';
     const trustedDirectories = settings.localFileConfig?.trustedDirectories || [];
+    if (
+        trustedDirectories.some(isContentUri) &&
+        !isContentUri(requestedDirectory) &&
+        !/^[a-z]:[\\/]/i.test(requestedDirectory) &&
+        !/^\/[^/\s]/.test(requestedDirectory)
+    ) {
+        return '';
+    }
+
     const authorizedRoots = [workspaceRoot, ...trustedDirectories].filter(Boolean);
-    const isAuthorized = authorizedRoots.some((root) => isPathInside(requestedDirectory, root));
+    const isAuthorized = authorizedRoots.some((root) => (
+        isPathInside(requestedDirectory, root) ||
+        isPathCoveredByContentTree(requestedDirectory, root)
+    ));
     return isAuthorized ? '' : requestedDirectory;
 }
 
@@ -2350,7 +2440,10 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
     }
 
     if (operation === 'read') {
-        const result = await readLocalFile({ path: plan.path });
+        const result = await readLocalFile({
+            path: plan.path,
+            trustedDirectories
+        });
         const fallback = [
             `已读取文件：${result.path}`,
             '',
@@ -2374,7 +2467,8 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
     const results = await searchLocalFiles({
         root: plan.root || '',
         query: plan.query || plan.path || '',
-        maxResults: 40
+        maxResults: 40,
+        trustedDirectories
     });
     const fallback = formatLocalFileSearchResult(results);
     const summarized = await finalizeToolAnswer(
@@ -2454,6 +2548,629 @@ async function runWebSearchPlan(plan, userText, config, onProgress = null) {
         entries: results,
         message: plan.message || '已完成网页搜索。'
     };
+}
+
+function parseNativeToolArguments(value = '') {
+    if (value && typeof value === 'object') {
+        return value;
+    }
+
+    const raw = String(value || '').trim();
+    if (!raw) return {};
+
+    try {
+        return JSON.parse(raw);
+    } catch {
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) return {};
+        try {
+            return JSON.parse(match[0]);
+        } catch {
+            return {};
+        }
+    }
+}
+
+function isNativeToolUnsupportedError(error) {
+    if (error?.nativeToolUnsupported) return true;
+    return /tool|function|tool_choice|unsupported|not support|不支持/i.test(String(error?.message || error || ''));
+}
+
+function markNativeToolCapability(value) {
+    aiChatRuntimeCapabilities.update(runtime => ({
+        ...runtime,
+        nativeToolCallRuntimeAvailable: Boolean(value)
+    }));
+}
+
+async function shouldAttemptNativeToolCalling(config) {
+    const { canProviderUseNativeTools } = await import('../utils/ai-providers.js');
+    if (!canProviderUseNativeTools(config.provider)) {
+        return false;
+    }
+
+    const runtime = get(aiChatRuntimeCapabilities);
+    if (runtime.nativeToolCallRuntimeAvailable === false) {
+        return false;
+    }
+
+    return true;
+}
+
+function buildNativeToolDefinitions() {
+    const settings = get(settingsStore);
+    const tools = [
+        {
+            type: 'function',
+            function: {
+                name: 'workplan_project_action',
+                description: '创建、查询、修改或删除 WorkPlan 中的任务、任务模板或定时任务。需要确认的修改/删除会由应用弹出确认卡片。',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        source: {
+                            type: 'string',
+                            enum: ['tasks', 'templates', 'scheduled'],
+                            description: '要操作的数据类型。普通任务用 tasks，任务模板用 templates，定时/周期任务用 scheduled。'
+                        },
+                        operation: {
+                            type: 'string',
+                            enum: ['create', 'query', 'update', 'delete', 'mixed', 'subtask'],
+                            description: '要执行的项目操作。'
+                        },
+                        tasks: {
+                            type: 'array',
+                            description: 'create 时要新增的任务列表。',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    title: { type: 'string' },
+                                    date: { type: 'string', description: '普通任务时间，格式 YYYY-MM-DDTHH:mm。模板通常留空。' },
+                                    deadline: { type: 'string', description: '截止时间，格式 YYYY-MM-DDTHH:mm。' },
+                                    priority: { type: 'string', enum: ['normal', 'urgent', 'critical'] },
+                                    status: { type: 'string', enum: ['todo', 'doing', 'done'] },
+                                    note: { type: 'string' },
+                                    repeatDays: {
+                                        type: 'array',
+                                        description: '定时任务重复星期，周日为 0，周一到周六为 1-6。',
+                                        items: { type: 'integer', minimum: 0, maximum: 6 }
+                                    },
+                                    enabled: { type: 'boolean' },
+                                    subtasks: {
+                                        type: 'array',
+                                        items: {
+                                            type: 'object',
+                                            properties: {
+                                                title: { type: 'string' },
+                                                status: { type: 'string', enum: ['todo', 'done'] }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        task_id: { type: 'string', description: '单个目标 ID。' },
+                        task_ids: {
+                            type: 'array',
+                            description: 'query/delete 时匹配到的完整 ID 列表。',
+                            items: { type: 'string' }
+                        },
+                        delete_task_ids: {
+                            type: 'array',
+                            description: 'delete/mixed 时要删除的完整 ID 列表。',
+                            items: { type: 'string' }
+                        },
+                        updates: {
+                            type: 'object',
+                            description: '单个 update 的字段。允许 title/date/deadline/priority/status/note/repeatDays/enabled/subtasks。'
+                        },
+                        operations: {
+                            type: 'array',
+                            description: '批量 update 的操作列表。',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    task_id: { type: 'string' },
+                                    updates: { type: 'object' }
+                                }
+                            }
+                        },
+                        subtask_changes: {
+                            type: 'array',
+                            description: 'subtask 操作的子任务变更列表。',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    action: { type: 'string', enum: ['add', 'delete', 'update', 'toggle'] },
+                                    index: { type: 'integer' },
+                                    old_title: { type: 'string' },
+                                    new_title: { type: 'string' },
+                                    status: { type: 'string', enum: ['todo', 'done'] }
+                                }
+                            }
+                        },
+                        message: { type: 'string' },
+                        summary: { type: 'string' },
+                        reason: { type: 'string' },
+                        filter_description: { type: 'string' }
+                    },
+                    required: ['source', 'operation']
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'workplan_web_search',
+                description: '搜索网页或访问用户给出的 URL，用于实时信息、官网资料、在线搜索和网页内容总结。',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        query: { type: 'string', description: '搜索关键词。访问 URL 时也要给一个简短主题。' },
+                        url: { type: 'string', description: '用户明确给出的 URL，可选。' },
+                        maxResults: { type: 'integer', minimum: 1, maximum: 8 },
+                        response_goal: { type: 'string', description: '搜索后应该如何回答用户。' },
+                        message: { type: 'string' }
+                    },
+                    required: ['query']
+                }
+            }
+        }
+    ];
+
+    if (settings.localFileConfig?.enabled) {
+        tools.push({
+            type: 'function',
+            function: {
+                name: 'workplan_local_file',
+                description: '搜索、读取、写入或删除本地文件。写入和删除可能需要用户确认，未授权目录会触发授权确认。',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        operation: {
+                            type: 'string',
+                            enum: ['search', 'read', 'write', 'delete']
+                        },
+                        path: { type: 'string', description: '目标文件路径。read/write/delete 使用。' },
+                        root: { type: 'string', description: '搜索根目录，可选。' },
+                        query: { type: 'string', description: '搜索关键词。' },
+                        content: { type: 'string', description: 'write 时写入的完整内容。' },
+                        response_goal: { type: 'string' },
+                        message: { type: 'string' }
+                    },
+                    required: ['operation']
+                }
+            }
+        });
+    }
+
+    return tools;
+}
+
+function normalizeNativeProjectSource(source = '', fallback = 'tasks') {
+    const value = String(source || fallback || 'tasks').toLowerCase();
+    if (value === 'template' || value === 'templates') return 'templates';
+    if (value === 'scheduled' || value === 'schedule' || value === 'recurring') return 'scheduled';
+    return 'tasks';
+}
+
+function formatNativeProjectItemsForAI(assistantContext = {}) {
+    const source = normalizeNativeProjectSource(assistantContext.source, 'tasks');
+    const items = Array.isArray(assistantContext.items) ? assistantContext.items : [];
+    if (!items.length) {
+        return `【可操作数据】\n- 当前 ${source} 为空`;
+    }
+
+    const formatter = source === 'templates' ? formatTemplateForAI : formatFullTaskForAI;
+    return [
+        `【可操作数据 source=${source}】`,
+        ...items.slice(0, 50).map(item => formatter(item))
+    ].join('\n');
+}
+
+function buildNativeToolMessages(userText, assistantContext = {}, intentHint = null) {
+    const settings = get(settingsStore);
+    const nowStr = getFormattedDateTime();
+    const dateInfo = getDateInfo();
+    const localFileConfig = settings.localFileConfig || {};
+    const trustedDirectories = localFileConfig.trustedDirectories || [];
+
+    const hintText = intentHint
+        ? `\n【已知意图】${intentHint}`
+        : '';
+
+    return [
+        {
+            role: 'system',
+            content: `你是 WorkPlan 的工具调用路由器。当前时间：${nowStr}。
+今天：${formatDateForAI(dateInfo.today)}，明天：${formatDateForAI(dateInfo.tomorrow)}，后天：${formatDateForAI(dateInfo.dayAfterTomorrow)}。
+你可以调用 WorkPlan 提供的工具完成项目、本地文件和网页搜索操作。
+
+规则：
+1. 用户要求项目任务、模板、定时任务的新增/查询/修改/删除时，调用 workplan_project_action。
+2. 用户要求搜索网页、访问 URL、查询实时/最新信息时，调用 workplan_web_search。
+3. 用户要求本地文件搜索/读取/写入/删除时，调用 workplan_local_file。
+4. 普通闲聊、解释、写作、翻译、不需要项目工具的问题，不要调用工具，直接回答文本。
+5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。
+6. 普通任务时间使用 YYYY-MM-DDTHH:mm；定时任务 repeatDays 中周日=0，周一至周六=1-6。
+${hintText}
+
+【当前页面】
+- scope: ${assistantContext.scope || 'dashboard'}
+- source: ${assistantContext.source || 'tasks'}
+- 标题: ${assistantContext.title || 'AI 助手'}
+
+${formatNativeProjectItemsForAI(assistantContext)}
+
+【本地文件权限】
+- 本地文件工具: ${localFileConfig.enabled ? '已开启' : '未开启'}
+- 工作目录: ${settings.workspaceRoot || '未设置'}
+- 受信任目录: ${trustedDirectories.length ? trustedDirectories.join(' | ') : '无'}`
+        },
+        {
+            role: 'user',
+            content: userText
+        }
+    ];
+}
+
+function normalizePriority(value = 'normal') {
+    const map = {
+        '普通': 'normal',
+        '紧急': 'urgent',
+        '重要': 'urgent',
+        '特急': 'critical',
+        normal: 'normal',
+        urgent: 'urgent',
+        critical: 'critical'
+    };
+    return map[String(value || '').toLowerCase()] || map[value] || 'normal';
+}
+
+function normalizeStatus(value = 'todo') {
+    const map = {
+        '未开始': 'todo',
+        '待办': 'todo',
+        '进行中': 'doing',
+        '已完成': 'done',
+        '完成': 'done',
+        todo: 'todo',
+        doing: 'doing',
+        done: 'done'
+    };
+    return map[String(value || '').toLowerCase()] || map[value] || 'todo';
+}
+
+function normalizeNativeSubtasks(subtasks = []) {
+    if (!Array.isArray(subtasks)) return [];
+    return subtasks
+        .map(item => ({
+            title: typeof item === 'string' ? item : String(item?.title || '').trim(),
+            status: normalizeStatus(typeof item === 'string' ? 'todo' : (item?.status || 'todo')) === 'done' ? 'done' : 'todo'
+        }))
+        .filter(item => item.title);
+}
+
+function normalizeScheduledEntity(task = {}, index = 0) {
+    return {
+        id: task.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 6)}`,
+        title: task.title || '未命名定时任务',
+        status: normalizeStatus(task.status || 'todo'),
+        priority: normalizePriority(task.priority || 'normal'),
+        date: task.date || '',
+        deadline: task.deadline || '',
+        note: task.note || '',
+        repeatDays: normalizeRepeatDays(task.repeatDays || []),
+        enabled: task.enabled !== false,
+        subtasks: normalizeNativeSubtasks(task.subtasks || [])
+    };
+}
+
+function cleanNativeUpdates(updates = {}, source = 'tasks', task = {}) {
+    const cleanUpdates = {};
+    if (typeof updates.title === 'string' && updates.title.trim()) cleanUpdates.title = updates.title.trim();
+    if (updates.note !== undefined) cleanUpdates.note = String(updates.note || '');
+
+    if (updates.priority) {
+        cleanUpdates.priority = normalizePriority(updates.priority);
+    }
+
+    if (updates.status) {
+        const status = normalizeStatus(updates.status);
+        cleanUpdates.status = status;
+        if (source !== 'templates') {
+            if (status === 'done') {
+                cleanUpdates.completedDate = new Date().toISOString().slice(0, 16);
+            } else if (status === 'doing' && !task.startTime) {
+                cleanUpdates.startTime = new Date().toISOString().slice(0, 16);
+            }
+        }
+    }
+
+    if (source === 'tasks') {
+        if (updates.date) cleanUpdates.date = String(updates.date);
+        if (updates.deadline !== undefined) cleanUpdates.deadline = String(updates.deadline || '');
+    }
+
+    if (source === 'scheduled') {
+        if (updates.date !== undefined) cleanUpdates.date = String(updates.date || '');
+        if (updates.deadline !== undefined) cleanUpdates.deadline = String(updates.deadline || '');
+        if (updates.repeatDays !== undefined) cleanUpdates.repeatDays = normalizeRepeatDays(updates.repeatDays || []);
+        if (typeof updates.enabled === 'boolean') cleanUpdates.enabled = updates.enabled;
+    }
+
+    if (Array.isArray(updates.subtasks)) {
+        cleanUpdates.subtasks = normalizeNativeSubtasks(updates.subtasks);
+    }
+
+    return cleanUpdates;
+}
+
+async function getNativeProjectItems(source, assistantContext = {}) {
+    const normalizedSource = normalizeNativeProjectSource(source, assistantContext.source);
+    if (normalizeNativeProjectSource(assistantContext.source, 'tasks') === normalizedSource &&
+        Array.isArray(assistantContext.items)) {
+        return assistantContext.items;
+    }
+
+    const { taskStore } = await import('./tasks.js');
+    const taskState = get(taskStore);
+    if (normalizedSource === 'templates') return taskState.templates || [];
+    if (normalizedSource === 'scheduled') return taskState.scheduledTasks || [];
+    return taskState.tasks || [];
+}
+
+function findNativeItemsByIds(items = [], ids = []) {
+    const idList = (Array.isArray(ids) ? ids : [ids])
+        .map(id => String(id || '').trim())
+        .filter(Boolean);
+    if (!idList.length) return [];
+    return items.filter(item => idList.some(id => item.id === id || item.id?.endsWith(id)));
+}
+
+async function runNativeProjectAction(args = {}, userText = '', assistantContext = {}) {
+    const source = normalizeNativeProjectSource(args.source, assistantContext.source);
+    const operation = String(args.operation || '').toLowerCase();
+    const items = await getNativeProjectItems(source, assistantContext);
+    const dateInfo = getDateInfo();
+    const fallbackDate = `${formatDateForAI(dateInfo.today)}T09:00`;
+
+    if (operation === 'create') {
+        const rawTasks = Array.isArray(args.tasks) && args.tasks.length > 0
+            ? args.tasks
+            : (args.title ? [args] : []);
+        if (!rawTasks.length) {
+            return { role: 'assistant', type: 'text', content: '没有获得可创建的任务内容，请描述标题和必要字段。' };
+        }
+
+        const entities = rawTasks.map((task, index) => {
+            if (source === 'templates') {
+                return normalizeTemplateEntity(task, index);
+            }
+            if (source === 'scheduled') {
+                return normalizeScheduledEntity(task, index);
+            }
+            return normalizeCreatedTask({
+                ...task,
+                priority: normalizePriority(task.priority || 'normal'),
+                subtasks: normalizeNativeSubtasks(task.subtasks || [])
+            }, fallbackDate, index);
+        });
+
+        return entities.length > 1 ? { tasks: entities } : entities[0];
+    }
+
+    if (operation === 'query') {
+        const matched = findNativeItemsByIds(items, args.task_ids || args.matched_task_ids || args.delete_task_ids || []);
+        if (matched.length > 0) {
+            return {
+                role: 'assistant',
+                type: 'query_result',
+                tasks: matched,
+                summary: args.summary || `找到 ${matched.length} 个${assistantContext.entityLabel || '任务'}`,
+                filterDescription: args.filter_description || ''
+            };
+        }
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: args.summary || args.message || '未找到匹配的项目数据。'
+        };
+    }
+
+    if (operation === 'delete') {
+        const matched = findNativeItemsByIds(items, args.delete_task_ids || args.task_ids || args.task_id || []);
+        if (!matched.length) {
+            return { role: 'assistant', type: 'text', content: args.message || '未找到要删除的项目数据。' };
+        }
+        return {
+            role: 'assistant',
+            type: 'delete_confirm',
+            tasks: matched,
+            message: args.message || `找到 ${matched.length} 个项目待删除`,
+            reason: args.reason || ''
+        };
+    }
+
+    if (operation === 'update') {
+        const operations = Array.isArray(args.operations) && args.operations.length > 0
+            ? args.operations
+            : [{ task_id: args.task_id || args.task_ids?.[0], updates: args.updates || {} }];
+        const updateOperations = [];
+        for (const operationItem of operations) {
+            const task = findNativeItemsByIds(items, operationItem.task_id || operationItem.task_ids || [])[0];
+            if (!task) continue;
+            const updates = cleanNativeUpdates(operationItem.updates || {}, source, task);
+            if (Object.keys(updates).length > 0) {
+                updateOperations.push({
+                    task: JSON.parse(JSON.stringify(task)),
+                    updates
+                });
+            }
+        }
+
+        if (!updateOperations.length) {
+            return { role: 'assistant', type: 'text', content: args.message || '未找到可修改的项目数据。' };
+        }
+
+        if (updateOperations.length === 1) {
+            return {
+                role: 'assistant',
+                type: 'update_confirm',
+                task: updateOperations[0].task,
+                updates: updateOperations[0].updates,
+                message: args.message || '确认修改该项目吗？'
+            };
+        }
+
+        return {
+            role: 'assistant',
+            type: 'multi_update_confirm',
+            operations: updateOperations,
+            message: args.message || `将修改 ${updateOperations.length} 个项目`
+        };
+    }
+
+    if (operation === 'mixed') {
+        const updateOps = [];
+        for (const operationItem of args.operations || []) {
+            const task = findNativeItemsByIds(items, operationItem.task_id || operationItem.task_ids || [])[0];
+            if (!task) continue;
+            const updates = cleanNativeUpdates(operationItem.updates || {}, source, task);
+            if (Object.keys(updates).length > 0) {
+                updateOps.push({
+                    task: JSON.parse(JSON.stringify(task)),
+                    updates
+                });
+            }
+        }
+        const deleteOps = findNativeItemsByIds(items, args.delete_task_ids || []);
+
+        if (!updateOps.length && !deleteOps.length) {
+            return { role: 'assistant', type: 'text', content: args.message || '未找到可执行的混合操作。' };
+        }
+
+        return {
+            role: 'assistant',
+            type: 'mixed_confirm',
+            updateOps,
+            deleteOps,
+            message: args.message || '确认执行这些项目操作吗？'
+        };
+    }
+
+    if (operation === 'subtask') {
+        const task = findNativeItemsByIds(items, args.task_id || args.task_ids || [])[0];
+        const subtaskChanges = Array.isArray(args.subtask_changes) ? args.subtask_changes : [];
+        if (!task || !subtaskChanges.length) {
+            return { role: 'assistant', type: 'text', content: args.message || '未找到要操作的子任务。' };
+        }
+        return {
+            role: 'assistant',
+            type: 'subtask_confirm',
+            task: JSON.parse(JSON.stringify(task)),
+            subtaskChanges,
+            message: args.message || `确认对 "${task.title}" 的子任务进行操作？`
+        };
+    }
+
+    return {
+        role: 'assistant',
+        type: 'text',
+        content: args.message || `未支持的项目工具操作：${operation || userText}`
+    };
+}
+
+async function executeNativeToolCall(toolCall, userText, config, assistantContext, requireFileConfirmation, progress) {
+    const args = parseNativeToolArguments(toolCall.arguments);
+    if (toolCall.name === 'workplan_web_search') {
+        progress('web_searching');
+        return await runWebSearchPlan({
+            mode: 'web',
+            url: args.url || '',
+            query: args.query || userText,
+            maxResults: args.maxResults || 6,
+            response_goal: args.response_goal || '根据网页搜索结果直接回答用户，并保留关键链接。',
+            message: args.message || '已通过原生工具调用执行网页搜索。'
+        }, userText, config, progress);
+    }
+
+    if (toolCall.name === 'workplan_local_file') {
+        progress('file_operating');
+        const plan = normalizeLocalFilePlan({
+            mode: 'file',
+            operation: args.operation,
+            path: args.path || '',
+            root: args.root || '',
+            query: args.query || '',
+            content: args.content || '',
+            response_goal: args.response_goal || '',
+            message: args.message || '已通过原生工具调用解析为本地文件操作。'
+        }, userText);
+        return await runLocalFilePlan(plan, userText, config, requireFileConfirmation);
+    }
+
+    if (toolCall.name === 'workplan_project_action') {
+        progress('task_processing');
+        return await runNativeProjectAction(args, userText, assistantContext);
+    }
+
+    return {
+        role: 'assistant',
+        type: 'text',
+        content: `模型请求了未知工具：${toolCall.name}`
+    };
+}
+
+async function tryResolveWithNativeTools(userText, assistantContext, config, intentHint, progress) {
+    if (!await shouldAttemptNativeToolCalling(config)) {
+        return null;
+    }
+
+    const tools = buildNativeToolDefinitions();
+    if (!tools.length) return null;
+
+    try {
+        const { callAIWithMessagesAndTools } = await import('../utils/ai-providers.js');
+        const response = await callAIWithMessagesAndTools(
+            config,
+            buildNativeToolMessages(userText, assistantContext, intentHint),
+            tools,
+            { maxTokens: Math.min(Number(config.maxTokens) || 2048, 2048), toolChoice: 'auto' }
+        );
+
+        const toolCalls = response.toolCalls || [];
+        if (!toolCalls.length) {
+            return null;
+        }
+
+        markNativeToolCapability(true);
+        const requireFileConfirmation = get(settingsStore).localFileConfig?.requireConfirmation ?? true;
+        const results = [];
+        for (const toolCall of toolCalls) {
+            results.push(await executeNativeToolCall(
+                toolCall,
+                userText,
+                config,
+                assistantContext,
+                requireFileConfirmation,
+                progress
+            ));
+        }
+
+        if (results.length === 1) {
+            return results[0];
+        }
+
+        return { __batchResults: results };
+    } catch (error) {
+        if (isNativeToolUnsupportedError(error)) {
+            markNativeToolCapability(false);
+            return null;
+        }
+        console.warn('[AI Tools] native tool calling failed, falling back to internal router:', error?.message || error);
+        return null;
+    }
 }
 
 function normalizeAssistantResult(result, assistantContext) {
@@ -2668,6 +3385,22 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     }
 
     progress('classifying');
+    const nativeToolResult = await tryResolveWithNativeTools(
+        text,
+        assistantContext,
+        currentConfig,
+        intentHint,
+        progress
+    );
+    if (nativeToolResult?.__batchResults?.length) {
+        return {
+            __batchResults: nativeToolResult.__batchResults.map(item => normalizeAssistantResult(item, assistantContext))
+        };
+    }
+    if (nativeToolResult) {
+        return normalizeAssistantResult(nativeToolResult, assistantContext);
+    }
+
     const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI, intentHint);
     const localFilePlan = await analyzeLocalFileIntent(text, currentConfig, callAI, intentHint);
     const relevantTasks = filterTasksByTimeScope(scopedItems, timeScope, dateInfo);

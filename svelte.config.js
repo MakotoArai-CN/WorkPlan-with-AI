@@ -1,6 +1,14 @@
 import adapter from '@sveltejs/adapter-static';
 
-const isWebTarget = process.env.VITE_BUILD_TARGET === 'web';
+function getCliMode() {
+    const modeArg = process.argv.find(arg => arg.startsWith('--mode='));
+    if (modeArg) return modeArg.slice('--mode='.length);
+
+    const modeIndex = process.argv.indexOf('--mode');
+    return modeIndex >= 0 ? process.argv[modeIndex + 1] : '';
+}
+
+const isWebTarget = process.env.VITE_BUILD_TARGET === 'web' || getCliMode() === 'web';
 const outDir = isWebTarget ? 'build-web' : 'build';
 
 export default {

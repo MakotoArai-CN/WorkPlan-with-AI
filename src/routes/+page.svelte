@@ -1,12 +1,18 @@
 <script>
-    import { onMount, tick } from "svelte";
+    import { onMount } from "svelte";
     import { get } from 'svelte/store';
     import { taskStore, currentView, activeTask } from '$lib/stores/tasks.js';
     import { showAiPanel, showAiSettings, clearChatHistory } from '$lib/stores/ai.js';
     import ContextMenu from '$lib/components/ContextMenu.svelte';
     import { settingsStore } from '$lib/stores/settings.js';
-    import { pushNavigation, popNavigation, peekNavigation, getNavigationDepth, handleBackPress, showExitToast, initializeNavigation, setupAndroidBackHandler } from '$lib/stores/navigation.js';
+    import { pushNavigation, popNavigation, peekNavigation, getNavigationDepth, initializeNavigation, setupAndroidBackHandler } from '$lib/stores/navigation.js';
     import { _ } from 'svelte-i18n';
+    import { showConfirm } from '$lib/stores/modal.js';
+    import {
+        getAndroidStoragePermissionStatus,
+        requestAndroidStoragePermissions
+    } from '$lib/utils/local-file-tools.js';
+    import { isAndroidRuntime } from '$lib/utils/runtime.js';
     import LoginModal from '$lib/components/LoginModal.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
     import MobileNav from '$lib/components/MobileNav.svelte';
@@ -27,55 +33,98 @@
     import AgreementModal from '$lib/components/AgreementModal.svelte';
 
     const DESKTOP_DETAIL_VIEWS = new Set(['dashboard', 'templates', 'scheduled', 'statistics', 'notes']);
+    const MOBILE_ROOT_VIEWS = new Set(['dashboard', 'templates', 'scheduled', 'notes', 'more']);
+    const MOBILE_SECONDARY_VIEWS = new Set(['aichat', 'passwords', 'settings', 'statistics']);
 
     let showModal = false;
     let editTask = null;
     let isMobile = false;
+    let isAndroid = false;
     let previousView = 'dashboard';
+    let suppressNavigationRecord = false;
+    let androidPermissionPromptShown = false;
 
     $: needsAgreement = !$settingsStore.agreementAccepted;
+    $: if (
+        !needsAgreement &&
+        isAndroid &&
+        !$settingsStore.androidPermissionsPrompted &&
+        !androidPermissionPromptShown
+    ) {
+        promptAndroidStartupPermissions();
+    }
 
-    onMount(async () => {
+    onMount(() => {
+        let cleanupBack = () => {};
+        let destroyed = false;
+
         isMobile = window.innerWidth < 768 ||
             /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        isAndroid = isAndroidRuntime();
         initializeNavigation('dashboard');
 
         if (isMobile) {
-            setupAndroidBackHandler(
-                get(settingsStore).closeToQuit,
-                {
-                    onPrimaryBack: () => {
-                        if (showModal) { closeModal(); return true; }
-                        if (get(currentView) === 'aichat') { handleAiChatBack(); return true; }
-                        if (get(showAiPanel)) { handleAiPanelBack(); return true; }
-                        if (get(activeTask)) { activeTask.set(null); return true; }
-                        if (get(showAiSettings)) { showAiSettings.set(false); return true; }
-                        return false;
-                    },
-                    onSecondaryBack: ({ next }) => {
-                        if (next && next !== get(currentView)) {
-                            currentView.set(next);
+            (async () => {
+                const cleanup = await setupAndroidBackHandler(
+                    () => get(settingsStore).closeToQuit,
+                    {
+                        onPrimaryBack: () => {
+                            if (showModal) { closeModal(); return true; }
+                            if (get(showAiSettings)) { showAiSettings.set(false); return true; }
+                            if (get(currentView) === 'aichat') { handleAiChatBack(); return true; }
+                            if (get(showAiPanel)) { handleAiPanelBack(); return true; }
+                            if (get(activeTask)) { activeTask.set(null); return true; }
+                            return false;
+                        },
+                        onSecondaryBack: ({ next }) => {
+                            const nextView = typeof next === 'string' ? next : '';
+                            if (nextView && nextView !== get(currentView)) {
+                                setCurrentViewFromBack(nextView);
+                                return;
+                            }
+
+                            const mainViews = ['dashboard', 'templates', 'scheduled', 'notes', 'more'];
+                            const currentViewValue = get(currentView);
+                            if (!mainViews.includes(currentViewValue)) {
+                                setCurrentViewFromBack('more');
+                            } else if (currentViewValue !== 'dashboard') {
+                                setCurrentViewFromBack('dashboard');
+                            }
+                        },
+                        onExit: async () => {
+                            try {
+                                const { invoke } = await import('@tauri-apps/api/core');
+                                await invoke('exit_app');
+                            } catch {
+                                window.close();
+                            }
+                        },
+                        onMinimize: async () => {
+                            try {
+                                const { getCurrentWindow } = await import('@tauri-apps/api/window');
+                                await getCurrentWindow().minimize();
+                            } catch {}
                         }
                     },
-                    onExit: async () => {
-                        try {
-                            const { exit } = await import('@tauri-apps/plugin-process');
-                            await exit(0);
-                        } catch {}
-                    },
-                    onMinimize: async () => {
-                        try {
-                            const { getCurrentWindow } = await import('@tauri-apps/api/window');
-                            await getCurrentWindow().minimize();
-                        } catch {}
-                    }
+                );
+                if (destroyed) {
+                    cleanup();
+                    return;
                 }
-            );
+                cleanupBack = cleanup;
+            })();
         }
+
+        return () => {
+            destroyed = true;
+            cleanupBack();
+        };
     });
 
     $: if ($currentView !== previousView) {
+        const from = previousView;
         activeTask.set(null);
+        recordMobileNavigation(from, $currentView);
         previousView = $currentView;
     }
 
@@ -113,13 +162,11 @@
 
     function handleOpenAiChat() {
         currentView.set('aichat');
-        pushNavigation('aichat');
     }
 
     async function handleGenerateReport(event) {
         const { type } = event.detail;
         currentView.set('statistics');
-        pushNavigation('statistics');
     }
 
     function handleAiPanelBack() {
@@ -134,10 +181,10 @@
         const depth = getNavigationDepth();
         if (depth > 1) {
             popNavigation();
-            currentView.set(peekNavigation() || 'more');
+            setCurrentViewFromBack(peekNavigation() || 'more');
             return;
         }
-        currentView.set('more');
+        setCurrentViewFromBack('more');
     }
 
     function handleTaskDetailBack() {
@@ -163,6 +210,61 @@
         showAiPanel.set(false);
         activeTask.set(null);
     }
+
+    function setCurrentViewFromBack(view) {
+        if (get(currentView) === view) {
+            suppressNavigationRecord = false;
+            return;
+        }
+        suppressNavigationRecord = true;
+        currentView.set(view);
+    }
+
+    function recordMobileNavigation(from, next) {
+        if (!isMobile) return;
+        if (suppressNavigationRecord) {
+            suppressNavigationRecord = false;
+            return;
+        }
+
+        if (MOBILE_ROOT_VIEWS.has(next)) {
+            initializeNavigation(next);
+            return;
+        }
+
+        if (MOBILE_SECONDARY_VIEWS.has(next)) {
+            if (!peekNavigation()) {
+                initializeNavigation(MOBILE_ROOT_VIEWS.has(from) ? from : 'more');
+            }
+            if (peekNavigation() !== next) {
+                pushNavigation(next);
+            }
+        }
+    }
+
+    async function promptAndroidStartupPermissions() {
+        androidPermissionPromptShown = true;
+        const t = get(_);
+
+        const storageStatus = await getAndroidStoragePermissionStatus();
+        if (storageStatus.available && storageStatus.granted && get(settingsStore).notificationAvailable) {
+            settingsStore.markAndroidPermissionsPrompted();
+            return;
+        }
+
+        const confirmed = await showConfirm({
+            title: t('settings.android_permissions_title') || '权限设置',
+            message: t('settings.android_permissions_desc') || 'WorkPlan 需要通知和媒体文件权限，用于任务提醒、附件读取和本地文件能力。确认后会打开系统授权窗口。',
+            confirmText: t('common.confirm') || '确认',
+            cancelText: t('common.cancel') || '取消',
+            variant: 'info'
+        });
+        settingsStore.markAndroidPermissionsPrompted();
+        if (!confirmed) return;
+
+        await requestAndroidStoragePermissions();
+        await settingsStore.requestNotificationPermission();
+    }
 </script>
 
 <div class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800 safe-area-container">
@@ -185,7 +287,7 @@
             {#if $currentView === 'dashboard'}
                 <Dashboard {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'aichat'}
-                <AiChat onBack={handleAiPanelBack} />
+                <AiChat onBack={handleAiChatBack} />
             {:else if $currentView === 'templates'}
                 <Templates {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'scheduled'}
@@ -246,14 +348,6 @@
         <AgreementModal isFirstTime={false} />
     {/if}
 </div>
-
-{#if $showExitToast}
-    <div class="fixed bottom-20 left-0 right-0 z-[102] flex justify-center pointer-events-none">
-        <div class="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium">
-            {$_('exit.press_again')}
-        </div>
-    </div>
-{/if}
 
 <style>
     :global(body) {

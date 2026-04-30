@@ -101,6 +101,13 @@
             runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.toolCallRuntimeAvailable : null,
         },
         {
+            id: "native-tools",
+            label: $_("ai_chat.capability_native_tools"),
+            active: $aiChatCapabilities.nativeToolCallAvailable,
+            icon: $aiChatCapabilities.nativeToolCallAvailable ? "ph-function" : "ph-code",
+            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.nativeToolCallRuntimeAvailable : null,
+        },
+        {
             id: "files",
             label: $_("ai_chat.capability_local_files"),
             active: $aiChatCapabilities.localFilesAvailable,

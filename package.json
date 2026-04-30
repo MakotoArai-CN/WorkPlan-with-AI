@@ -1,18 +1,19 @@
 {
   "name": "workplan",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "",
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "build:web": "node scripts/build-web.mjs",
-    "preview": "vite preview",
-    "check": "bun node_modules/@sveltejs/kit/svelte-kit.js sync && bun node_modules/svelte-check/bin/svelte-check --tsconfig ./jsconfig.json",
-    "check:watch": "bun node_modules/@sveltejs/kit/svelte-kit.js sync && bun node_modules/svelte-check/bin/svelte-check --tsconfig ./jsconfig.json --watch",
-    "tauri": "tauri",
-    "tauri:build": "tauri build",
-    "tauri:dev": "tauri dev"
+    "version:sync": "bun vite.config.js version:sync",
+    "dev": "bun run version:sync && bunx vite dev",
+    "build": "bun run version:sync && bunx vite build",
+    "build:web": "bun run version:sync && bunx vite build --mode web",
+    "preview": "bunx vite preview",
+    "check": "bun run version:sync && bun node_modules/@sveltejs/kit/svelte-kit.js sync && bun node_modules/svelte-check/bin/svelte-check --tsconfig ./jsconfig.json",
+    "check:watch": "bun run version:sync && bun node_modules/@sveltejs/kit/svelte-kit.js sync && bun node_modules/svelte-check/bin/svelte-check --tsconfig ./jsconfig.json --watch",
+    "tauri": "bun vite.config.js tauri",
+    "tauri:build": "bun vite.config.js tauri build",
+    "tauri:dev": "bun vite.config.js tauri dev"
   },
   "license": "AGPL-3.0",
   "dependencies": {
