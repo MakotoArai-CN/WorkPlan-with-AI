@@ -20,10 +20,11 @@
         updateOpenClawConfig,
         testConnection as testOpenClawConnection
     } from "../stores/openclaw.js";
-    import { isWebDemo } from "../utils/runtime.js";
+    import { isAndroidRuntime, isWebDemo } from "../utils/runtime.js";
 
     let openclawTestLoading = false;
     let openclawShowAdvanced = false;
+    let isAndroid = false;
 
     async function handleOpenClawTest() {
         openclawTestLoading = true;
@@ -43,6 +44,7 @@
     let trustedDirectoryInput = '';
 
     onMount(() => {
+        isAndroid = isAndroidRuntime();
         isMobile =
             /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
                 navigator.userAgent,
@@ -497,9 +499,14 @@
                                 type="url"
                                 value={$openclawConfig.baseUrl}
                                 on:change={(e) => updateOpenClawConfig({ baseUrl: e.target.value })}
-                                placeholder="http://127.0.0.1:18789"
+                                placeholder={isAndroid ? "http://192.168.1.100:18789" : "http://127.0.0.1:18789"}
                                 class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
                             />
+                            {#if isAndroid}
+                                <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1 leading-5">
+                                    {$_('settings.openclaw_android_hint')}
+                                </div>
+                            {/if}
                         </div>
 
                         <div>

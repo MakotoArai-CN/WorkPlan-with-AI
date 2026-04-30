@@ -4,180 +4,128 @@
     import '@phosphor-icons/web/regular';
     import '@phosphor-icons/web/bold';
     import '@phosphor-icons/web/fill';
-    import { taskStore, activeTasks, currentView, activeTask } from '$lib/stores/tasks.js';
+    import { taskStore, activeTasks } from '$lib/stores/tasks.js';
     import { settingsStore } from '$lib/stores/settings.js';
-    import { loadAiConfig, showAiPanel, showAiSettings } from '$lib/stores/ai.js';
+    import { loadAiConfig } from '$lib/stores/ai.js';
     import { notesStore } from '$lib/stores/notes.js';
     import { passwordsStore } from '$lib/stores/passwords.js';
     import { initOpenClaw } from '$lib/stores/openclaw.js';
     import { isWebDemo } from '$lib/utils/runtime.js';
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
-    import { setupAndroidBackHandler, showExitToast } from '$lib/stores/navigation.js';
+    import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
     import { get } from 'svelte/store';
     import { setupI18n } from '$lib/i18n/index.js';
     import { _, isLoading } from 'svelte-i18n';
 
-    let unlistenBack = () => {};
     let i18nReady = false;
 
-    onMount(async () => {
-        setupI18n();
-        await new Promise(resolve => {
-            const unsub = isLoading.subscribe(loading => {
-                if (!loading) { unsub(); resolve(); }
-            });
-        });
-        i18nReady = true;
-        taskStore.loadFromLocal();
-        await settingsStore.init();
-        loadAiConfig();
-        notesStore.load();
-        passwordsStore.load();
-        if (!isWebDemo) {
-            initOpenClaw();
-        }
-
-        if (isWebDemo) {
-            return () => {};
-        }
-
-        const currentSettings = get(settingsStore);
-        if (currentSettings.closeToQuit) {
-            try {
-                const { invoke } = await import('@tauri-apps/api/core');
-                await invoke('set_close_to_quit', { value: true });
-            } catch {}
-        }
-
+    onMount(() => {
+        let destroyed = false;
         let unlistenNotification = () => {};
         let unlistenAutostart = () => {};
         let unlistenUpdate = () => {};
         let unlistenAbout = () => {};
+        let notificationTimer = null;
+        let interval = null;
 
-        try {
-            const { listen } = await import('@tauri-apps/api/event');
-            unlistenNotification = await listen('tray-notification-toggle', () => {
-                settingsStore.toggleNotification();
-            });
-            unlistenAutostart = await listen('tray-autostart-toggle', async () => {
-                try {
-                    await settingsStore.toggleAutoStart();
-                } catch (e) {
-                    console.error(e);
-                }
-            });
-            unlistenUpdate = await listen('tray-check-update', async () => {
-                const { invoke } = await import('@tauri-apps/api/core');
-                try {
-                    const data = await invoke('check_update');
-                    if (data && data.has_update) {
-                        const confirmed = await showConfirm({
-                            title: get(_)('settings.update_available'),
-                            message: get(_)('settings.update_desc', { values: { version: data.latest_version } }),
-                            confirmText: get(_)('settings.download'),
-                            cancelText: get(_)('settings.later'),
-                            variant: 'success'
-                        });
-                        if (confirmed) {
-                            await invoke('open_releases');
+        (async () => {
+            setupI18n();
+            if (get(isLoading)) {
+                await new Promise(resolve => {
+                    let unsub = () => {};
+                    unsub = isLoading.subscribe(loading => {
+                        if (!loading) {
+                            unsub();
+                            resolve();
                         }
-                    } else {
-                        await showAlert({ title: get(_)('settings.check_update'), message: get(_)('settings.up_to_date'), variant: 'success' });
-                    }
-                } catch (e) {
-                    console.error(e);
-                }
-            });
-            unlistenAbout = await listen('tray-open-about', () => {
-                settingsStore.showAgreementModal();
-            });
-        } catch (e) {
-            console.log('Tauri events not available:', e);
-        }
+                    });
+                });
+            }
+            if (destroyed) return;
 
-        const closeToQuit = get(settingsStore).closeToQuit;
-        unlistenBack = await setupAndroidBackHandler(closeToQuit, {
-            onPrimaryBack: () => {
-                const currentViewValue = get(currentView);
-                const aiPanelOpen = get(showAiPanel);
-                const aiSettingsOpen = get(showAiSettings);
-                const activeTaskValue = get(activeTask);
+            i18nReady = true;
+            taskStore.loadFromLocal();
+            await settingsStore.init();
+            loadAiConfig();
+            notesStore.load();
+            passwordsStore.load();
+            if (!isWebDemo) {
+                initOpenClaw();
+            }
 
-                if (aiSettingsOpen) {
-                    showAiSettings.set(false);
-                    return true;
-                }
+            if (isWebDemo || destroyed) return;
 
-                if (currentViewValue === 'aichat') {
-                    currentView.set('dashboard');
-                    return true;
-                }
-
-                if (aiPanelOpen && currentViewValue !== 'passwords' && currentViewValue !== 'settings') {
-                    showAiPanel.set(false);
-                    return true;
-                }
-
-                if (activeTaskValue) {
-                    activeTask.set(null);
-                    return true;
-                }
-
-                return false;
-            },
-            onSecondaryBack: ({ next }) => {
-                const nextView = typeof next === 'string' ? next : '';
-                if (nextView) {
-                    currentView.set(nextView);
-                    return;
-                }
-
-                const mainViews = ['dashboard', 'templates', 'scheduled', 'notes', 'more'];
-                const currentViewValue = get(currentView);
-                if (!mainViews.includes(currentViewValue)) {
-                    currentView.set('more');
-                } else if (currentViewValue !== 'dashboard') {
-                    currentView.set('dashboard');
-                }
-            },
-            onExit: async () => {
+            const currentSettings = get(settingsStore);
+            if (currentSettings.closeToQuit) {
                 try {
                     const { invoke } = await import('@tauri-apps/api/core');
-                    await invoke('exit_app');
-                } catch {
-                    window.close();
-                }
-            },
-            onMinimize: async () => {
-                try {
-                    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-                    const win = getCurrentWindow();
-                    await win.minimize();
-                } catch {
-                    console.log('Minimize not available');
-                }
+                    await invoke('set_close_to_quit', { value: true });
+                } catch {}
             }
-        });
 
-        setTimeout(() => {
-            const tasks = get(activeTasks);
-            if (tasks.length > 0) {
-                settingsStore.showTaskNotification(tasks);
+            try {
+                const { listen } = await import('@tauri-apps/api/event');
+                unlistenNotification = await listen('tray-notification-toggle', () => {
+                    settingsStore.toggleNotification();
+                });
+                unlistenAutostart = await listen('tray-autostart-toggle', async () => {
+                    try {
+                        await settingsStore.toggleAutoStart();
+                    } catch (e) {
+                        console.error(e);
+                    }
+                });
+                unlistenUpdate = await listen('tray-check-update', async () => {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    try {
+                        const data = await invoke('check_update');
+                        if (data && data.has_update) {
+                            const confirmed = await showConfirm({
+                                title: get(_)('settings.update_available'),
+                                message: get(_)('settings.update_desc', { values: { version: data.latest_version } }),
+                                confirmText: get(_)('settings.download'),
+                                cancelText: get(_)('settings.later'),
+                                variant: 'success'
+                            });
+                            if (confirmed) {
+                                await invoke('open_releases');
+                            }
+                        } else {
+                            await showAlert({ title: get(_)('settings.check_update'), message: get(_)('settings.up_to_date'), variant: 'success' });
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    }
+                });
+                unlistenAbout = await listen('tray-open-about', () => {
+                    settingsStore.showAgreementModal();
+                });
+            } catch (e) {
+                console.log('Tauri events not available:', e);
             }
-        }, 2000);
 
-        const interval = setInterval(() => {
-            taskStore.checkScheduled();
-        }, 60000);
+            notificationTimer = setTimeout(() => {
+                if (destroyed) return;
+                const tasks = get(activeTasks);
+                if (tasks.length > 0) {
+                    settingsStore.showTaskNotification(tasks);
+                }
+            }, 2000);
+
+            interval = setInterval(() => {
+                taskStore.checkScheduled();
+            }, 60000);
+        })();
 
         return () => {
+            destroyed = true;
             unlistenNotification();
             unlistenAutostart();
             unlistenUpdate();
             unlistenAbout();
-            unlistenBack();
-            clearInterval(interval);
+            if (notificationTimer) clearTimeout(notificationTimer);
+            if (interval) clearInterval(interval);
         };
     });
 </script>

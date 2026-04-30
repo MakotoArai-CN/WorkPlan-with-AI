@@ -396,6 +396,7 @@ const PROVIDER_CONFIGS = {
 let baiduTokenCache = { token: null, expireTime: 0 };
 let modelCache = {};
 const ALLOWED_ENDPOINT_PROTOCOLS = new Set(['http:', 'https:']);
+const NATIVE_TOOL_BODY_FORMATS = new Set(['openai']);
 
 function normalizeHttpEndpoint(url) {
     const value = String(url || '').trim();
@@ -685,6 +686,8 @@ function buildRequestBody(provider, model, messages, options) {
     const temperature = options.temperature || 0.7;
     const maxTokens = options.maxTokens || 2048;
     const stream = options.stream || false;
+    const tools = Array.isArray(options.tools) ? options.tools : [];
+    const toolChoice = options.toolChoice || 'auto';
     switch (format) {
         case 'baidu':
             return { messages, temperature, max_output_tokens: maxTokens, stream };
@@ -718,7 +721,14 @@ function buildRequestBody(provider, model, messages, options) {
                 generationConfig: { temperature, maxOutputTokens: maxTokens }
             };
         default:
-            return { model, messages, temperature, max_tokens: maxTokens, stream };
+            {
+                const body = { model, messages, temperature, max_tokens: maxTokens, stream };
+                if (tools.length > 0) {
+                    body.tools = tools;
+                    body.tool_choice = toolChoice;
+                }
+                return body;
+            }
     }
 }
 
@@ -744,6 +754,41 @@ function parseResponse(provider, responseData) {
         default:
             return responseData.choices?.[0]?.message?.content || '';
     }
+}
+
+function parseResponseWithToolCalls(provider, responseData) {
+    const format = provider.bodyFormat || 'openai';
+    if (responseData.error) {
+        throw new Error('API 错误: ' + (responseData.error.message || JSON.stringify(responseData.error)));
+    }
+
+    if (format !== 'openai') {
+        return {
+            content: parseResponse(provider, responseData),
+            toolCalls: [],
+            raw: responseData
+        };
+    }
+
+    const choice = responseData.choices?.[0] || {};
+    const message = choice.message || {};
+    const toolCalls = Array.isArray(message.tool_calls)
+        ? message.tool_calls.map((call, index) => ({
+            id: call.id || `tool_call_${index}`,
+            type: call.type || 'function',
+            name: call.function?.name || '',
+            arguments: call.function?.arguments || '{}',
+            raw: call
+        })).filter(call => call.name)
+        : [];
+
+    return {
+        content: typeof message.content === 'string' ? message.content : '',
+        toolCalls,
+        finishReason: choice.finish_reason || '',
+        message,
+        raw: responseData
+    };
 }
 
 function parseStreamChunk(provider, chunk) {
@@ -772,6 +817,19 @@ function parseStreamChunk(provider, chunk) {
 
 function isLocalProvider(providerId) {
     return providerId === 'ollama' || providerId === 'lmstudio' || providerId === 'openclaw';
+}
+
+export function canProviderUseNativeTools(providerId) {
+    if (isG4FProvider(providerId) || providerId === 'openclaw') {
+        return false;
+    }
+
+    const provider = PROVIDER_CONFIGS[providerId];
+    if (!provider) {
+        return false;
+    }
+
+    return NATIVE_TOOL_BODY_FORMATS.has(provider.bodyFormat || 'openai');
 }
 
 function getEffectiveEndpoint(provider, providerId, config) {
@@ -869,6 +927,86 @@ export async function callAI(config, userMessage, systemPrompt) {
     }
     const responseData = await response.json();
     return parseResponse(provider, responseData);
+}
+
+export async function callAIWithMessagesAndTools(config, messages, tools = [], options = {}) {
+    const providerId = config.provider || 'g4f-default';
+
+    if (!canProviderUseNativeTools(providerId)) {
+        const error = new Error('当前 AI 提供商不支持原生工具调用');
+        error.nativeToolUnsupported = true;
+        throw error;
+    }
+
+    const provider = PROVIDER_CONFIGS[providerId];
+    if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
+    const isCustomProvider = providerId === 'custom';
+    const isLocal = isLocalProvider(providerId);
+    let endpoint = getEffectiveEndpoint(provider, providerId, config);
+    let model;
+    if (isCustomProvider) {
+        model = config.customModel || config.model || 'auto';
+        if (!endpoint) throw new Error('请配置自定义 API 端点');
+    } else {
+        const cachedModels = getCachedModels(providerId);
+        model = validateModel(provider, config.model, cachedModels, false);
+    }
+    const apiKey = config.apiKey || '';
+    const secretKey = config.secretKey || '';
+    if (providerId === 'cloudflare' && config.accountId) {
+        endpoint = endpoint.replace('{account_id}', config.accountId).replace('{model}', model);
+    }
+    if (providerId === 'google') {
+        endpoint = endpoint.replace('{model}', model);
+    }
+    if (providerId === 'huggingface') {
+        endpoint = endpoint.replace('{model}', model);
+    }
+    if (!endpoint) throw new Error('未配置 API 端点');
+    const requiresApiKey = provider.authType !== 'none' && !isLocal && !isCustomProvider;
+    if (requiresApiKey && !apiKey) throw new Error('未配置 API Key');
+    const requestBody = buildRequestBody(provider, model, messages, {
+        temperature: options.temperature ?? config.temperature ?? 0.7,
+        maxTokens: options.maxTokens ?? config.maxTokens ?? 2048,
+        stream: false,
+        tools,
+        toolChoice: options.toolChoice || 'auto'
+    });
+    const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    if (provider.headers) {
+        Object.assign(headers, provider.headers);
+    }
+    if (config.customHeaders) {
+        Object.assign(headers, config.customHeaders);
+    }
+    let finalEndpoint = endpoint;
+    if (provider.authType === 'baidu_token') {
+        const accessToken = await getBaiduAccessToken(apiKey, secretKey);
+        finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
+    } else if (provider.authType === 'bearer' && apiKey) {
+        headers['Authorization'] = 'Bearer ' + apiKey;
+    } else if (provider.authType === 'x-api-key' && apiKey) {
+        headers['X-API-Key'] = apiKey;
+    } else if (provider.authType === 'api-key' && apiKey) {
+        headers['api-key'] = apiKey;
+    } else if (provider.authType === 'query_key' && apiKey) {
+        finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
+    }
+    const response = await fetchWithTauri(finalEndpoint, {
+        method: 'POST',
+        headers,
+        body: requestBody
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        const error = new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
+        if (/tool|function|unsupported|not support|不支持/i.test(errorText)) {
+            error.nativeToolUnsupported = true;
+        }
+        throw error;
+    }
+    const responseData = await response.json();
+    return parseResponseWithToolCalls(provider, responseData);
 }
 
 export async function callAIWithMessages(config, messages) {
@@ -1155,7 +1293,8 @@ export async function getProviderList() {
             docUrl: 'https://g4f.dev/',
             apiUrl: '',
             authType: provider.requiresApiKey ? 'bearer' : 'none',
-            supportsModelList: true
+            supportsModelList: true,
+            supportsNativeTools: false
         });
     }
 
@@ -1169,6 +1308,7 @@ export async function getProviderList() {
             apiUrl: provider.apiUrl,
             authType: provider.authType,
             supportsModelList: provider.supportsModelList,
+            supportsNativeTools: canProviderUseNativeTools(id),
             supportsCustomModel: provider.supportsCustomModel || false,
             supportsCustomEndpoint: provider.supportsCustomEndpoint || false
         });
@@ -1186,12 +1326,18 @@ export function getProviderInfo(providerId) {
             defaultModel: models[0] || 'auto',
             authType: 'none',
             supportsModelList: true,
+            supportsNativeTools: false,
             docUrl: 'https://g4f.dev/',
             apiUrl: ''
         };
     }
 
-    return PROVIDER_CONFIGS[providerId] || null;
+    const provider = PROVIDER_CONFIGS[providerId];
+    if (!provider) return null;
+    return {
+        ...provider,
+        supportsNativeTools: canProviderUseNativeTools(providerId)
+    };
 }
 
 export function clearModelCache() {

@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - 'VERSION'
       - 'src-tauri/tauri.conf.json'
   workflow_dispatch:
 
@@ -41,10 +42,10 @@ jobs:
           test -f g4f.dev/dist/js/providers.json || { echo "Missing g4f.dev/dist/js/providers.json"; exit 1; }
           test -f g4f.dev/dist/js/client.js || { echo "Missing g4f.dev/dist/js/client.js"; exit 1; }
 
-      - name: Get version from tauri.conf.json
+      - name: Get version from VERSION
         id: get_version
         run: |
-          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          VERSION=$(tr -d '[:space:]' < VERSION)
           echo "version=v${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Check if tag exists
@@ -105,6 +106,9 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      - name: Sync version metadata
+        run: bun run version:sync
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -155,6 +159,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
+
+      - name: Sync version metadata
+        run: bun run version:sync
 
       - name: Modify tauri.conf.json for WebView2 bootstrapper
         shell: powershell
@@ -221,6 +228,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
+
+      - name: Sync version metadata
+        run: bun run version:sync
 
       - name: Modify tauri.conf.json for WebView2 offlineInstaller
         shell: powershell
@@ -292,6 +302,9 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      - name: Sync version metadata
+        run: bun run version:sync
+
       - name: Configure Linux bundle targets
         run: |
           jq '.bundle.targets = ["deb", "rpm", "appimage"]' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
@@ -359,6 +372,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
+
+      - name: Sync version metadata
+        run: bun run version:sync
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -434,6 +450,9 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      - name: Sync version metadata
+        run: bun run version:sync
+
       - name: Initialize Android project
         run: bun run tauri android init
 
@@ -486,7 +505,7 @@ jobs:
               compileSdk = 36
               namespace = "com.makotoarai.workplan"
               defaultConfig {
-                  manifestPlaceholders["usesCleartextTraffic"] = "false"
+                  manifestPlaceholders["usesCleartextTraffic"] = "true"
                   applicationId = "com.makotoarai.workplan"
                   minSdk = 24
                   targetSdk = 36
@@ -546,6 +565,8 @@ jobs:
           dependencies {
               implementation("androidx.webkit:webkit:1.14.0")
               implementation("androidx.appcompat:appcompat:1.7.1")
+              implementation("androidx.core:core-ktx:1.16.0")
+              implementation("androidx.core:core-splashscreen:1.0.1")
               implementation("androidx.activity:activity-ktx:1.10.1")
               implementation("com.google.android.material:material:1.12.0")
               testImplementation("junit:junit:4.13.2")

@@ -10,12 +10,18 @@ import { isWebDemo } from '../utils/runtime.js';
 
 const DARK_THEMES = new Set(['dark', 'graphite']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
+const APP_VERSION = typeof __WORKPLAN_VERSION__ === 'string' ? __WORKPLAN_VERSION__ : '0.0.0';
 let themeTransitionTimer = null;
 let notificationChannelPromise = null;
 
 function isMobilePlatform() {
     if (typeof window === 'undefined') return false;
     return /Android|iPhone|iPad|iPod/i.test(window.navigator?.userAgent || '');
+}
+
+function isAndroidPlatform() {
+    if (typeof window === 'undefined') return false;
+    return /Android/i.test(window.navigator?.userAgent || '');
 }
 
 async function dispatchNotification({ title, body, channelId }) {
@@ -52,10 +58,11 @@ function getInitialSettings() {
             enableAiChatTools: true,
             enableAiExecutionNotification: true,
             closeToQuit: false,
+            androidPermissionsPrompted: false,
             agreementAccepted: false,
             showAgreement: false,
             autoSaveApiKey: false,
-            appVersion: '0.3.6',
+            appVersion: APP_VERSION,
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
             theme: 'auto',
@@ -79,10 +86,11 @@ function getInitialSettings() {
                 enableAiChatTools: parsed.enableAiChatTools ?? true,
                 enableAiExecutionNotification: parsed.enableAiExecutionNotification ?? true,
                 closeToQuit: parsed.closeToQuit ?? false,
+                androidPermissionsPrompted: parsed.androidPermissionsPrompted ?? false,
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
                 autoSaveApiKey: parsed.autoSaveApiKey ?? false,
-                appVersion: '0.3.6',
+                appVersion: APP_VERSION,
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
                 theme: parsed.theme || 'auto',
@@ -115,10 +123,11 @@ function getDefaultSettings() {
         enableAiChatTools: true,
         enableAiExecutionNotification: true,
         closeToQuit: false,
+        androidPermissionsPrompted: false,
         agreementAccepted: false,
         showAgreement: false,
         autoSaveApiKey: false,
-        appVersion: '0.3.6',
+        appVersion: APP_VERSION,
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         theme: 'auto',
@@ -141,6 +150,7 @@ function createSettingsStore() {
             enableAiChatTools: state.enableAiChatTools,
             enableAiExecutionNotification: state.enableAiExecutionNotification,
             closeToQuit: state.closeToQuit,
+            androidPermissionsPrompted: state.androidPermissionsPrompted,
             agreementAccepted: state.agreementAccepted,
             autoSaveApiKey: state.autoSaveApiKey,
             dailyReportPrompt: state.dailyReportPrompt,
@@ -244,6 +254,25 @@ function createSettingsStore() {
         }
     }
 
+    async function refreshNotificationPermission({ request = false } = {}) {
+        try {
+            const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
+            let granted = await isPermissionGranted();
+            if (!granted && request) {
+                const permission = await requestPermission();
+                granted = permission === 'granted';
+            }
+            update(s => ({ ...s, notificationAvailable: granted }));
+            if (granted) {
+                await ensureNotificationChannel();
+            }
+            return granted;
+        } catch {
+            update(s => ({ ...s, notificationAvailable: false }));
+            return false;
+        }
+    }
+
     async function init() {
         if (typeof window === 'undefined') return;
 
@@ -269,7 +298,7 @@ function createSettingsStore() {
         }, 5000);
 
         if (isWebDemo) {
-            update(s => ({ ...s, appVersion: '0.3.6 (web demo)', notificationAvailable: false, autoStart: false }));
+            update(s => ({ ...s, appVersion: APP_VERSION, notificationAvailable: false, autoStart: false }));
             return;
         }
 
@@ -278,7 +307,7 @@ function createSettingsStore() {
             const version = await invoke('get_app_version');
             update(s => ({ ...s, appVersion: version }));
         } catch {
-            update(s => ({ ...s, appVersion: '0.3.6' }));
+            update(s => ({ ...s, appVersion: APP_VERSION }));
         }
 
         const workspaceRoot = await getWorkspaceRoot();
@@ -286,20 +315,7 @@ function createSettingsStore() {
             update(s => ({ ...s, workspaceRoot }));
         }
 
-        try {
-            const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
-            let granted = await isPermissionGranted();
-            if (!granted) {
-                const permission = await requestPermission();
-                granted = permission === 'granted';
-            }
-            update(s => ({ ...s, notificationAvailable: granted }));
-            if (granted) {
-                await ensureNotificationChannel();
-            }
-        } catch {
-            update(s => ({ ...s, notificationAvailable: false }));
-        }
+        await refreshNotificationPermission({ request: !isAndroidPlatform() });
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -317,6 +333,7 @@ function createSettingsStore() {
     return {
         subscribe,
         init,
+        requestNotificationPermission: () => refreshNotificationPermission({ request: true }),
         toggleNotification: () => update(s => {
             const newState = { ...s, enableNotification: !s.enableNotification };
             save(newState);
@@ -371,6 +388,11 @@ function createSettingsStore() {
                 return newState;
             });
         },
+        markAndroidPermissionsPrompted: () => update(s => {
+            const newState = { ...s, androidPermissionsPrompted: true };
+            save(newState);
+            return newState;
+        }),
         toggleAutoStart: async () => {
             update(s => ({ ...s, autoStartLoading: true }));
             const current = get({ subscribe });

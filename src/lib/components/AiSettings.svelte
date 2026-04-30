@@ -29,7 +29,7 @@
         openExternalUrl,
     } from "../utils/open-external.js";
     import { getOpenClawGatewayEndpoint, getOpenClawWebSocketUrl } from "../utils/openclaw-client.js";
-    import { isWebDemo } from "../utils/runtime.js";
+    import { isAndroidRuntime, isWebDemo } from "../utils/runtime.js";
 
     function t(key, opts) { return get(_)(key, opts); }
 
@@ -44,6 +44,7 @@
     let lastProfileId = "";
     let autoFetchTimer = null;
     let lastAutoFetchKey = "";
+    let isAndroid = false;
 
     const defaultDailyPrompt = t('ai_settings_page.default_daily_prompt');
 
@@ -99,6 +100,7 @@
     }
 
     onMount(async () => {
+        isAndroid = isAndroidRuntime();
         providers = await getAiProviders();
         await hydrateCurrentProviderConfigWithDefaults();
         if (isWebDemo && $aiConfig.provider === "openclaw") {
@@ -593,7 +595,7 @@
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 font-mono"
                             />
                             <div class="text-[10px] text-slate-400 mt-1">
-                                {$_('ai_settings_page.local_hint_openclaw')}
+                                {isAndroid ? $_('ai_settings_page.local_hint_openclaw_android') : $_('ai_settings_page.local_hint_openclaw')}
                             </div>
                         </div>
                     {:else if $aiConfig.provider === "ollama" || $aiConfig.provider === "lmstudio"}
