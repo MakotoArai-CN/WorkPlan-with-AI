@@ -60,6 +60,8 @@ jobs:
   build-windows:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     strategy:
       fail-fast: false
       matrix:
@@ -138,11 +140,14 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+          if-no-files-found: error
 
   build-windows-webview2:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
     runs-on: windows-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     steps:
       - uses: actions/checkout@v4
 
@@ -211,14 +216,17 @@ jobs:
         shell: powershell
         run: |
           $artifactDir = "webview2-artifacts"
+          $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { "src-tauri/target" }
           New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
-          $installers = @(Get-ChildItem -Path "src-tauri/target" -Recurse -File -Filter "*.exe" |
+          Write-Host "Collecting installers from: $targetDir"
+
+          $installers = @(Get-ChildItem -Path $targetDir -Recurse -File -Filter "*.exe" |
             Where-Object { $_.FullName -like "*\release\bundle\nsis\*" })
 
           if ($installers.Count -eq 0) {
             Write-Host "Available bundle directories:"
-            Get-ChildItem -Path "src-tauri/target" -Recurse -Directory -ErrorAction SilentlyContinue |
+            Get-ChildItem -Path $targetDir -Recurse -Directory -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -like "*\bundle*" } |
               ForEach-Object { Write-Host $_.FullName }
             throw "No NSIS installer was generated."
@@ -241,6 +249,8 @@ jobs:
     needs: get-version
     if: needs.get-version.outputs.tag_exists == 'false'
     runs-on: windows-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     steps:
       - uses: actions/checkout@v4
 
@@ -309,14 +319,17 @@ jobs:
         shell: powershell
         run: |
           $artifactDir = "webview2-offline-artifacts"
+          $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { "src-tauri/target" }
           New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
-          $installers = @(Get-ChildItem -Path "src-tauri/target" -Recurse -File -Filter "*.exe" |
+          Write-Host "Collecting installers from: $targetDir"
+
+          $installers = @(Get-ChildItem -Path $targetDir -Recurse -File -Filter "*.exe" |
             Where-Object { $_.FullName -like "*\release\bundle\nsis\*" })
 
           if ($installers.Count -eq 0) {
             Write-Host "Available bundle directories:"
-            Get-ChildItem -Path "src-tauri/target" -Recurse -Directory -ErrorAction SilentlyContinue |
+            Get-ChildItem -Path $targetDir -Recurse -Directory -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -like "*\bundle*" } |
               ForEach-Object { Write-Host $_.FullName }
             throw "No NSIS installer was generated."
