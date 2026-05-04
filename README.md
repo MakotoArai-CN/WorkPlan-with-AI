@@ -151,7 +151,7 @@ WorkPlan-with-ai/
 ## 致谢
 
 - [AsheQSQ/WorkPlan](https://github.com/AsheQSQ/WorkPlan) — 项目灵感来源
-- [SvelteKit](https://kit.svelte.dev/) · [Tauri](https://tauri.app/) · [Supabase](https://supabase.com/) · [Tailwind CSS](https://tailwindcss.com/) · [Phosphor Icons](https://phosphoricons.com/)
+- [SvelteKit](https://kit.svelte.dev/) · [Tauri](https://tauri.app/) · [Supabase](https://supabase.com/) · [Tailwind CSS](https://tailwindcss.com/) · [Phosphor Icons](https://phosphoricons.com/) ·[Linux.do](https://linux.do/)
 
 ## Todolist
 

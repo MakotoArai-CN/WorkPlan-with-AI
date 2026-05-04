@@ -180,20 +180,37 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
           VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+        with:
+          args: --bundles nsis
 
-      - name: Rename WebView2 installer
+      - name: Collect WebView2 installer
         shell: powershell
         run: |
-          Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | ForEach-Object {
+          $artifactDir = "webview2-artifacts"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          $installers = @(Get-ChildItem -Path "src-tauri/target" -Recurse -File -Filter "*.exe" |
+            Where-Object { $_.FullName -like "*\release\bundle\nsis\*" })
+
+          if ($installers.Count -eq 0) {
+            Write-Host "Available bundle directories:"
+            Get-ChildItem -Path "src-tauri/target" -Recurse -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -like "*\bundle*" } |
+              ForEach-Object { Write-Host $_.FullName }
+            throw "No NSIS installer was generated."
+          }
+
+          $installers | ForEach-Object {
             $newName = $_.Name -replace '\.exe$', '-webview2.exe'
-            Rename-Item $_.FullName $newName
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $artifactDir $newName) -Force
           }
 
       - name: Upload WebView2 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-webview2
-          path: src-tauri/target/release/bundle/nsis/*-webview2.exe
+          path: webview2-artifacts/*.exe
+          if-no-files-found: error
 
   # 离线版本
   build-windows-webview2-offlineInstaller:
@@ -249,20 +266,37 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
           VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
+        with:
+          args: --bundles nsis
 
-      - name: Rename WebView2 offlineInstaller
+      - name: Collect WebView2 offlineInstaller
         shell: powershell
         run: |
-          Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | ForEach-Object {
+          $artifactDir = "webview2-offline-artifacts"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          $installers = @(Get-ChildItem -Path "src-tauri/target" -Recurse -File -Filter "*.exe" |
+            Where-Object { $_.FullName -like "*\release\bundle\nsis\*" })
+
+          if ($installers.Count -eq 0) {
+            Write-Host "Available bundle directories:"
+            Get-ChildItem -Path "src-tauri/target" -Recurse -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -like "*\bundle*" } |
+              ForEach-Object { Write-Host $_.FullName }
+            throw "No NSIS installer was generated."
+          }
+
+          $installers | ForEach-Object {
             $newName = $_.Name -replace '\.exe$', '-webview2-offlineInstaller.exe'
-            Rename-Item $_.FullName $newName
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $artifactDir $newName) -Force
           }
 
       - name: Upload WebView2 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-webview2-offlineInstaller
-          path: src-tauri/target/release/bundle/nsis/*-webview2-offlineInstaller.exe
+          path: webview2-offline-artifacts/*.exe
+          if-no-files-found: error
 
   build-linux:
     needs: get-version
