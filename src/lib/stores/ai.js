@@ -165,6 +165,8 @@ export const providerModels = writable({});
 export const modelsLoading = writable(false);
 export const lastFailedMessage = writable(null);
 export const streamingContent = writable('');
+let activeModelLoadCount = 0;
+const activeModelLoadPromises = new Map();
 let _streamAbortController = null;
 
 export function stopStreaming() {
@@ -376,6 +378,88 @@ function extractProviderConfigFromProfile(profile) {
     return result;
 }
 
+function stableStringify(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(stableStringify).join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+        const keys = Object.keys(value).sort();
+        return `{${keys.map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+function connectionProfileComparable(profile = {}) {
+    return {
+        id: profile.id || '',
+        name: profile.name || '',
+        provider: profile.provider || '',
+        apiKey: profile.apiKey || '',
+        secretKey: profile.secretKey || '',
+        model: profile.model || '',
+        customModel: profile.customModel || '',
+        customEndpoint: profile.customEndpoint || '',
+        accountId: profile.accountId || '',
+        providerConfigs: profile.providerConfigs || {},
+        createdAt: profile.createdAt || '',
+        updatedAt: profile.updatedAt || ''
+    };
+}
+
+function connectionProfileContentChanged(previous = {}, next = {}) {
+    const comparableFields = [
+        'name',
+        'provider',
+        'apiKey',
+        'secretKey',
+        'model',
+        'customModel',
+        'customEndpoint',
+        'accountId'
+    ];
+    if (comparableFields.some(field => (previous[field] || '') !== (next[field] || ''))) {
+        return true;
+    }
+    return stableStringify(previous.providerConfigs || {}) !== stableStringify(next.providerConfigs || {});
+}
+
+function aiConfigComparable(state = {}) {
+    return {
+        provider: state.provider || '',
+        apiKey: state.apiKey || '',
+        secretKey: state.secretKey || '',
+        model: state.model || '',
+        customModel: state.customModel || '',
+        customEndpoint: state.customEndpoint || '',
+        accountId: state.accountId || '',
+        temperature: state.temperature ?? '',
+        maxTokens: state.maxTokens ?? '',
+        customHeaders: state.customHeaders || {},
+        dailyReportPrompt: state.dailyReportPrompt || '',
+        weeklyReportPrompt: state.weeklyReportPrompt || '',
+        providerConfigs: state.providerConfigs || {},
+        activeProfileId: state.activeProfileId || '',
+        activeProfileName: state.activeProfileName || '',
+        connectionProfiles: (state.connectionProfiles || []).map(connectionProfileComparable)
+    };
+}
+
+function aiConfigStatesEqual(a, b) {
+    return stableStringify(aiConfigComparable(a)) === stableStringify(aiConfigComparable(b));
+}
+
+function setAiConfigIfChanged(nextState) {
+    if (!aiConfigStatesEqual(get(aiConfig), nextState)) {
+        aiConfig.set(nextState);
+    }
+}
+
+function updateAiConfigIfChanged(createNextState) {
+    const current = get(aiConfig);
+    const nextState = createNextState(current);
+    setAiConfigIfChanged(nextState);
+}
+
 function mergeProviderConfigs(providerConfigs, providerId, config) {
     return {
         ...(providerConfigs || {}),
@@ -464,8 +548,7 @@ function syncActiveProfile(state, overrides = {}) {
         providerId,
         nextState
     );
-
-    profiles[profileIndex >= 0 ? profileIndex : 0] = {
+    const syncedProfile = {
         ...activeProfile,
         name: nextState.activeProfileName || activeProfile.name || '默认连接',
         provider: providerId,
@@ -475,9 +558,13 @@ function syncActiveProfile(state, overrides = {}) {
         customModel: nextState.customModel || '',
         customEndpoint: nextState.customEndpoint || '',
         accountId: nextState.accountId || '',
-        providerConfigs,
-        updatedAt: new Date().toISOString()
+        providerConfigs
     };
+    const nextProfile = connectionProfileContentChanged(activeProfile, syncedProfile)
+        ? { ...syncedProfile, updatedAt: new Date().toISOString() }
+        : { ...syncedProfile, updatedAt: activeProfile.updatedAt };
+
+    profiles[profileIndex >= 0 ? profileIndex : 0] = nextProfile;
 
     return {
         connectionProfiles: profiles,
@@ -558,49 +645,48 @@ export function hydrateCurrentProviderConfig() {
     const cached = providerConfigs[providerId] || null;
     const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
 
-    aiConfig.update(c => {
-        const nextState = {
-            ...c,
-            apiKey: merged.apiKey || '',
-            secretKey: merged.secretKey || '',
-            model: merged.model || (c.model || 'auto'),
-            customModel: merged.customModel || '',
-            customEndpoint: merged.customEndpoint || '',
-            accountId: merged.accountId || ''
-        };
-        return { ...nextState, ...syncActiveProfile(nextState) };
-    });
+    const nextState = {
+        ...current,
+        apiKey: merged.apiKey || '',
+        secretKey: merged.secretKey || '',
+        model: merged.model || (current.model || 'auto'),
+        customModel: merged.customModel || '',
+        customEndpoint: merged.customEndpoint || '',
+        accountId: merged.accountId || ''
+    };
+    setAiConfigIfChanged({ ...nextState, ...syncActiveProfile(nextState) });
 }
 
 export async function hydrateCurrentProviderConfigWithDefaults() {
     const current = get(aiConfig);
     const providerId = current.provider || 'g4f-default';
     const providerInfo = await getProviderInfoCached(providerId);
+    const latest = get(aiConfig);
+    if ((latest.provider || 'g4f-default') !== providerId) return;
 
-    const providerConfigs = current.providerConfigs || {};
+    const providerConfigs = latest.providerConfigs || {};
     const cached = providerConfigs[providerId] || null;
     const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
 
     const normalizedModel = await normalizeProviderModel(providerId, providerInfo, merged);
 
-    aiConfig.update(c => {
-        const nextState = {
-            ...c,
-            apiKey: merged.apiKey || '',
-            secretKey: merged.secretKey || '',
-            model: providerId === 'custom' ? (merged.model || 'auto') : normalizedModel,
-            customModel: merged.customModel || '',
-            customEndpoint: merged.customEndpoint || '',
-            accountId: merged.accountId || ''
-        };
-        return { ...nextState, ...syncActiveProfile(nextState) };
-    });
+    const nextState = {
+        ...latest,
+        apiKey: merged.apiKey || '',
+        secretKey: merged.secretKey || '',
+        model: providerId === 'custom' ? (merged.model || 'auto') : normalizedModel,
+        customModel: merged.customModel || '',
+        customEndpoint: merged.customEndpoint || '',
+        accountId: merged.accountId || ''
+    };
+    setAiConfigIfChanged({ ...nextState, ...syncActiveProfile(nextState) });
 }
 
 export async function switchProvider(newProviderId) {
-    resetAiChatRuntimeCapabilities();
     const current = get(aiConfig);
     const prevProviderId = current.provider || 'g4f-default';
+    if (prevProviderId === newProviderId) return;
+    resetAiChatRuntimeCapabilities();
 
     const providerConfigsUpdated = mergeProviderConfigs(current.providerConfigs, prevProviderId, current);
 
@@ -610,20 +696,20 @@ export async function switchProvider(newProviderId) {
 
     const normalizedModel = await normalizeProviderModel(newProviderId, newProviderInfo, merged);
 
-    aiConfig.update(c => {
-        const nextState = {
-            ...c,
-            provider: newProviderId,
-            apiKey: merged.apiKey || '',
-            secretKey: merged.secretKey || '',
-            model: newProviderId === 'custom' ? (merged.model || 'auto') : normalizedModel,
-            customModel: merged.customModel || '',
-            customEndpoint: merged.customEndpoint || '',
-            accountId: merged.accountId || '',
-            providerConfigs: providerConfigsUpdated
-        };
-        return { ...nextState, ...syncActiveProfile(nextState) };
-    });
+    const latest = get(aiConfig);
+    if ((latest.provider || 'g4f-default') !== prevProviderId) return;
+    const nextState = {
+        ...latest,
+        provider: newProviderId,
+        apiKey: merged.apiKey || '',
+        secretKey: merged.secretKey || '',
+        model: newProviderId === 'custom' ? (merged.model || 'auto') : normalizedModel,
+        customModel: merged.customModel || '',
+        customEndpoint: merged.customEndpoint || '',
+        accountId: merged.accountId || '',
+        providerConfigs: providerConfigsUpdated
+    };
+    setAiConfigIfChanged({ ...nextState, ...syncActiveProfile(nextState) });
 }
 
 export function loadAiConfig() {
@@ -664,7 +750,7 @@ export function loadAiConfig() {
                 });
             }
 
-            aiConfig.set(nextState);
+            setAiConfigIfChanged(nextState);
         } catch (e) {
             console.error('Failed to load AI config:', e);
         }
@@ -718,12 +804,12 @@ export function saveAiConfig() {
         connectionProfiles: nextState.connectionProfiles
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-    aiConfig.set(nextState);
+    setAiConfigIfChanged(nextState);
     saveApiKeyToPasswords(nextState.provider, nextState, nextState.activeProfileName);
 }
 
 export function addConnectionProfile(name = '') {
-    aiConfig.update(current => {
+    updateAiConfigIfChanged(current => {
         const newProfile = createConnectionProfileFromState(current, {
             id: createId('profile'),
             name: name || `连接 ${((current.connectionProfiles || []).length || 0) + 1}`
@@ -738,14 +824,17 @@ export function addConnectionProfile(name = '') {
 }
 
 export function selectConnectionProfile(profileId) {
+    const current = get(aiConfig);
+    if (!profileId || profileId === current.activeProfileId) return;
     resetAiChatRuntimeCapabilities();
-    aiConfig.update(current => applyProfileToState(current, profileId));
+    setAiConfigIfChanged(applyProfileToState(current, profileId));
 }
 
 export function updateConnectionProfileName(name) {
     const trimmedName = name.trim();
     if (!trimmedName) return;
-    aiConfig.update(current => {
+    updateAiConfigIfChanged(current => {
+        if (trimmedName === current.activeProfileName) return current;
         const profiles = (current.connectionProfiles || []).map(profile =>
             profile.id === current.activeProfileId
                 ? { ...profile, name: trimmedName, updatedAt: new Date().toISOString() }
@@ -760,9 +849,10 @@ export function updateConnectionProfileName(name) {
 }
 
 export function deleteConnectionProfile(profileId) {
-    aiConfig.update(current => {
+    updateAiConfigIfChanged(current => {
+        if (!profileId) return current;
         const profiles = (current.connectionProfiles || []).filter(profile => profile.id !== profileId);
-        if (profiles.length === 0) {
+        if (profiles.length === (current.connectionProfiles || []).length || profiles.length === 0) {
             return current;
         }
         const nextActiveId = current.activeProfileId === profileId ? profiles[0].id : current.activeProfileId;
@@ -1045,13 +1135,12 @@ export function openAiChatWorkspace({
 
 export function updateAiConfig(updates) {
     const capabilityKeys = ['provider', 'apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
-    if (capabilityKeys.some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
+    const current = get(aiConfig);
+    if (capabilityKeys.some(key => Object.prototype.hasOwnProperty.call(updates, key) && current[key] !== updates[key])) {
         resetAiChatRuntimeCapabilities();
     }
-    aiConfig.update(c => {
-        const nextState = { ...c, ...updates };
-        return { ...nextState, ...syncActiveProfile(nextState) };
-    });
+    const nextState = { ...current, ...updates };
+    setAiConfigIfChanged({ ...nextState, ...syncActiveProfile(nextState) });
 }
 
 export async function getAiProviders() {
@@ -1065,23 +1154,34 @@ export async function getAiProviderInfo(providerId) {
 }
 
 export async function loadModelsForProvider(providerId, apiKey = '', customEndpoint = '') {
+    const loadKey = `${providerId || ''}\u0000${apiKey || ''}\u0000${customEndpoint || ''}`;
+    const activeLoad = activeModelLoadPromises.get(loadKey);
+    if (activeLoad) return activeLoad;
+
+    activeModelLoadCount += 1;
     modelsLoading.set(true);
-    try {
-        const { fetchProviderModels } = await import('../utils/ai-providers.js');
-        const models = await fetchProviderModels(providerId, apiKey, customEndpoint);
-        providerModels.update(cache => ({
-            ...cache,
-            [providerId]: models
-        }));
-        return models;
-    } catch (e) {
-        console.error(`Failed to load models for ${providerId}:`, e);
-        const { getProviderInfo } = await import('../utils/ai-providers.js');
-        const provider = getProviderInfo(providerId);
-        return provider?.defaultModels || [];
-    } finally {
-        modelsLoading.set(false);
-    }
+    const loadPromise = (async () => {
+        try {
+            const { fetchProviderModels } = await import('../utils/ai-providers.js');
+            const models = await fetchProviderModels(providerId, apiKey, customEndpoint);
+            providerModels.update(cache => ({
+                ...cache,
+                [providerId]: models
+            }));
+            return models;
+        } catch (e) {
+            console.error(`Failed to load models for ${providerId}:`, e);
+            const { getProviderInfo } = await import('../utils/ai-providers.js');
+            const provider = getProviderInfo(providerId);
+            return provider?.defaultModels || [];
+        } finally {
+            activeModelLoadPromises.delete(loadKey);
+            activeModelLoadCount = Math.max(0, activeModelLoadCount - 1);
+            modelsLoading.set(activeModelLoadCount > 0);
+        }
+    })();
+    activeModelLoadPromises.set(loadKey, loadPromise);
+    return loadPromise;
 }
 
 export function getModelsForProvider(providerId) {

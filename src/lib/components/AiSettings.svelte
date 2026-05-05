@@ -12,7 +12,6 @@
         getAiProviders,
         loadModelsForProvider,
         modelsLoading,
-        providerModels,
         getAiProviderInfo,
         switchProvider,
         hydrateCurrentProviderConfigWithDefaults,
@@ -44,6 +43,11 @@
     let lastProfileId = "";
     let autoFetchTimer = null;
     let lastAutoFetchKey = "";
+    let settingsPanelWasOpen = false;
+    let settingsInitializing = false;
+    let settingsInitRequestId = 0;
+    let modelLoadRequestId = 0;
+    let modelsLoadedForKey = "";
     let isAndroid = false;
 
     const defaultDailyPrompt = t('ai_settings_page.default_daily_prompt');
@@ -51,10 +55,15 @@
     const defaultWeeklyPrompt = t('ai_settings_page.default_weekly_prompt');
 
     async function loadCurrentProviderInfo() {
-        currentProvider = await getAiProviderInfo($aiConfig.provider);
+        const providerId = $aiConfig.provider;
+        const providerInfo = await getAiProviderInfo(providerId);
+        if ($showAiSettings && providerId === $aiConfig.provider) {
+            currentProvider = providerInfo;
+        }
     }
 
     async function loadCurrentProviderModels() {
+        const requestId = ++modelLoadRequestId;
         const providerId = $aiConfig.provider;
         const apiKey = providerId === "openclaw"
             ? ($openclawConfig.apiKey || $aiConfig.apiKey || "")
@@ -62,17 +71,25 @@
         const endpoint = providerId === "openclaw"
             ? (getOpenClawGatewayEndpoint($openclawConfig) || $aiConfig.customEndpoint || "")
             : ($aiConfig.customEndpoint || "");
+        const loadKey = getAutoFetchKey(providerId, apiKey, endpoint);
+        const initialModel = $aiConfig.model || "";
+        const initialCustomModel = $aiConfig.customModel || "";
+        const isLatestRequest = () =>
+            requestId === modelLoadRequestId && providerId === $aiConfig.provider;
 
         if (providerId === "custom") {
             if (!endpoint) {
-                currentModels = [];
+                if (isLatestRequest()) currentModels = [];
                 return;
             }
             const models = await loadModelsForProvider(providerId, apiKey, endpoint);
+            if (!isLatestRequest()) return;
             currentModels = models || [];
+            modelsLoadedForKey = loadKey;
             if (currentModels.length > 0) {
                 const savedModel = $aiConfig.customModel;
-                if (!savedModel || !currentModels.includes(savedModel)) {
+                const userChangedModel = savedModel !== initialCustomModel;
+                if (!userChangedModel && (!savedModel || !currentModels.includes(savedModel))) {
                     updateAiConfig({ customModel: currentModels[0] });
                 }
             }
@@ -84,17 +101,60 @@
             apiKey,
             endpoint,
         );
+        if (!isLatestRequest()) return;
         currentModels = models || [];
+        modelsLoadedForKey = loadKey;
 
         if (currentModels.length > 0) {
             const savedModel = $aiConfig.model;
+            const userChangedModel = savedModel !== initialModel;
             const canKeepAuto = isG4FProvider(providerId);
             if (
-                !savedModel ||
-                (!canKeepAuto && savedModel === "auto") ||
-                (savedModel !== "auto" && !currentModels.includes(savedModel))
+                !userChangedModel &&
+                (
+                    !savedModel ||
+                    (!canKeepAuto && savedModel === "auto") ||
+                    (savedModel !== "auto" && !currentModels.includes(savedModel))
+                )
             ) {
                 updateAiConfig({ model: currentModels[0] });
+            }
+        }
+    }
+
+    function getAutoFetchKey(providerId, apiKey, customEndpoint) {
+        return `${providerId}|${apiKey || ""}|${customEndpoint || ""}`;
+    }
+
+    async function initializeSettingsPanel() {
+        const initRequestId = ++settingsInitRequestId;
+        const isCurrentInit = () => initRequestId === settingsInitRequestId && $showAiSettings;
+        settingsInitializing = true;
+        try {
+            await hydrateCurrentProviderConfigWithDefaults();
+            if (!isCurrentInit()) return;
+            if (isWebDemo && $aiConfig.provider === "openclaw") {
+                await switchProvider("g4f-default");
+                if (!isCurrentInit()) return;
+            }
+            await loadCurrentProviderInfo();
+            if (!isCurrentInit()) return;
+            await loadCurrentProviderModels();
+            if (!isCurrentInit()) return;
+            dailyPrompt = $settingsStore.dailyReportPrompt || "";
+            weeklyPrompt = $settingsStore.weeklyReportPrompt || "";
+            profileNameDraft = $aiConfig.activeProfileName || "";
+        } finally {
+            if (initRequestId === settingsInitRequestId) {
+                settingsInitializing = false;
+                if ($showAiSettings) {
+                    const providerId = $aiConfig.provider;
+                    lastAutoFetchKey = getAutoFetchKey(
+                        providerId,
+                        providerId === "openclaw" ? ($openclawConfig.apiKey || $aiConfig.apiKey) : $aiConfig.apiKey,
+                        providerId === "openclaw" ? getOpenClawGatewayEndpoint($openclawConfig) : $aiConfig.customEndpoint,
+                    );
+                }
             }
         }
     }
@@ -102,26 +162,28 @@
     onMount(async () => {
         isAndroid = isAndroidRuntime();
         providers = await getAiProviders();
-        await hydrateCurrentProviderConfigWithDefaults();
-        if (isWebDemo && $aiConfig.provider === "openclaw") {
-            await switchProvider("g4f-default");
-        }
-        await loadCurrentProviderInfo();
-        await loadCurrentProviderModels();
-        dailyPrompt = $settingsStore.dailyReportPrompt || "";
-        weeklyPrompt = $settingsStore.weeklyReportPrompt || "";
-        profileNameDraft = $aiConfig.activeProfileName || "";
     });
 
-    $: if ($showAiSettings) {
-        (async () => {
-            await hydrateCurrentProviderConfigWithDefaults();
-            if (isWebDemo && $aiConfig.provider === "openclaw") {
-                await switchProvider("g4f-default");
+    $: {
+        if ($showAiSettings && !settingsPanelWasOpen) {
+            settingsPanelWasOpen = true;
+            initializeSettingsPanel().catch((error) => {
+                console.error("Failed to initialize AI settings:", error);
+            });
+        } else if (!$showAiSettings && settingsPanelWasOpen) {
+            settingsPanelWasOpen = false;
+            settingsInitializing = false;
+            settingsInitRequestId += 1;
+            modelLoadRequestId += 1;
+            lastAutoFetchKey = "";
+            if (autoFetchTimer) {
+                clearTimeout(autoFetchTimer);
+                autoFetchTimer = null;
             }
-            await loadCurrentProviderInfo();
-            await loadCurrentProviderModels();
-        })();
+            currentProvider = null;
+            currentModels = [];
+            modelsLoadedForKey = "";
+        }
     }
 
     async function handleTestConnection() {
@@ -266,13 +328,27 @@
     );
 
     function scheduleAutoFetchModels(providerId, apiKey, customEndpoint) {
-        if (!$showAiSettings) return;
-        const key = `${providerId}|${apiKey || ""}|${customEndpoint || ""}`;
+        if (!$showAiSettings || settingsInitializing) return;
+        const key = getAutoFetchKey(providerId, apiKey, customEndpoint);
         if (key === lastAutoFetchKey) return;
         lastAutoFetchKey = key;
         if (autoFetchTimer) clearTimeout(autoFetchTimer);
         autoFetchTimer = setTimeout(() => {
             autoFetchTimer = null;
+            const currentProviderId = $aiConfig.provider;
+            const currentApiKey = currentProviderId === "openclaw"
+                ? ($openclawConfig.apiKey || $aiConfig.apiKey)
+                : $aiConfig.apiKey;
+            const currentEndpoint = currentProviderId === "openclaw"
+                ? getOpenClawGatewayEndpoint($openclawConfig)
+                : $aiConfig.customEndpoint;
+            if (
+                !$showAiSettings ||
+                key !== getAutoFetchKey(currentProviderId, currentApiKey, currentEndpoint)
+            ) {
+                return;
+            }
+            if (key === modelsLoadedForKey) return;
             if (providerId === "custom") {
                 if (!customEndpoint) return;
             } else if (providerId !== "openclaw" && currentProvider && currentProvider.authType !== "none" && !apiKey) {
@@ -294,14 +370,12 @@
     })();
     $: displayModels = (() => {
         if (isCustomProvider) {
-            const models = $providerModels[$aiConfig.provider] || currentModels || [];
+            const models = currentModels || [];
             return [...new Set(models.filter(Boolean))];
         }
-        const models =
-            $providerModels[$aiConfig.provider] ||
-            currentModels ||
-            currentProvider?.defaultModels ||
-            [];
+        const models = currentModels.length > 0
+            ? currentModels
+            : (currentProvider?.defaultModels || []);
         const merged = isG4FProvider($aiConfig.provider)
             ? ["auto", ...models]
             : models;
