@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, parse, resolve } from 'node:path';
+import { dirname, join, parse, resolve, sep } from 'node:path';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
@@ -749,6 +749,83 @@ function workplanAndroidGeneratedPlugin(mode) {
     };
 }
 
+function workplanVditorVendorPlugin(mode) {
+    const vendorRoute = '/vendor/vditor/dist';
+    const sourceDir = resolve(process.cwd(), 'node_modules', 'vditor', 'dist');
+
+    function contentType(file) {
+        if (file.endsWith('.js')) return 'application/javascript; charset=utf-8';
+        if (file.endsWith('.css')) return 'text/css; charset=utf-8';
+        if (file.endsWith('.svg')) return 'image/svg+xml';
+        if (file.endsWith('.png')) return 'image/png';
+        if (file.endsWith('.jpg') || file.endsWith('.jpeg')) return 'image/jpeg';
+        if (file.endsWith('.gif')) return 'image/gif';
+        if (file.endsWith('.woff2')) return 'font/woff2';
+        if (file.endsWith('.woff')) return 'font/woff';
+        if (file.endsWith('.ttf')) return 'font/ttf';
+        return 'application/octet-stream';
+    }
+
+    function isInsideSourceDir(file) {
+        return file === sourceDir || file.startsWith(`${sourceDir}${sep}`);
+    }
+
+    function walkFiles(dir, files = []) {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const file = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                walkFiles(file, files);
+            } else if (entry.isFile()) {
+                files.push(file);
+            }
+        }
+        return files;
+    }
+
+    function runtimeFiles() {
+        const runtimeRoots = ['css', 'images', 'js']
+            .map(dir => join(sourceDir, dir))
+            .filter(dir => existsSync(dir));
+        const files = runtimeRoots.flatMap(dir => walkFiles(dir));
+        const rootCss = join(sourceDir, 'index.css');
+        if (existsSync(rootCss)) {
+            files.push(rootCss);
+        }
+        return files;
+    }
+
+    return {
+        name: 'workplan-vditor-vendor',
+        configureServer(server) {
+            server.middlewares.use(vendorRoute, (req, res, next) => {
+                const url = new URL(req.url || '/', 'http://localhost');
+                const assetPath = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+                const file = resolve(sourceDir, assetPath);
+                if (!isInsideSourceDir(file) || !existsSync(file) || !statSync(file).isFile()) {
+                    next();
+                    return;
+                }
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Content-Type', contentType(file));
+                createReadStream(file).pipe(res);
+            });
+        },
+        generateBundle() {
+            if (!existsSync(sourceDir)) {
+                throw new Error('Missing Vditor dist assets. Run the package install step before building.');
+            }
+            for (const file of runtimeFiles()) {
+                const relative = file.slice(sourceDir.length + 1).split(sep).join('/');
+                this.emitFile({
+                    type: 'asset',
+                    fileName: `vendor/vditor/dist/${relative}`,
+                    source: readFileSync(file)
+                });
+            }
+        }
+    };
+}
+
 function defaultCargoTargetDir() {
     const root = parse(process.cwd()).root;
     const candidates = [
@@ -913,6 +990,7 @@ export default defineConfig(({ command, mode }) => {
         plugins: [
             tailwindcss(),
             sveltekit(),
+            workplanVditorVendorPlugin(mode),
             workplanAndroidGeneratedPlugin(mode)
         ],
         clearScreen: false,

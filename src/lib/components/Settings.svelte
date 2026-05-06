@@ -73,7 +73,6 @@
         const t = get(_);
         try {
             await settingsStore.testNotification();
-            showToast({ message: t('settings.notification_sent') || '已发送测试通知', type: 'success', duration: 2000 });
         } catch (error) {
             await showAlert({ title: t('common.error'), message: error.message, variant: "danger" });
         }
