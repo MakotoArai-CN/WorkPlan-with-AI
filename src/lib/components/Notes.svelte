@@ -36,6 +36,12 @@
     let vditorContainer;
     let milkdownEditor = null;
     let milkdownContainer;
+    let milkdownCommandApi = null;
+    let activeEditorType = null;
+    let selectedEditorType = 'vditor';
+    let editorInitToken = 0;
+    let editorInitializing = false;
+    let editorError = '';
     let autoSaveTimer = null;
     let selectedCategory = null;
     $: if (selectedCategory === null) selectedCategory = $_('notes.category_all');
@@ -45,6 +51,36 @@
     let aiSuggestionTimer = null;
     let autoSaveEnabled = true;
     export let openDetailPanel = null;
+
+    const milkdownToolbarItems = [
+        { id: 'paragraph', title: '正文', icon: 'ph-text-t', command: 'turnIntoTextCommand' },
+        { id: 'h1', title: '一级标题', icon: 'ph-text-h-one', command: 'wrapInHeadingCommand', payload: 1 },
+        { id: 'h2', title: '二级标题', icon: 'ph-text-h-two', command: 'wrapInHeadingCommand', payload: 2 },
+        { id: 'sep-1', separator: true },
+        { id: 'bold', title: '粗体', icon: 'ph-text-b', command: 'toggleStrongCommand' },
+        { id: 'italic', title: '斜体', icon: 'ph-text-italic', command: 'toggleEmphasisCommand' },
+        { id: 'inline-code', title: '行内代码', icon: 'ph-code', command: 'toggleInlineCodeCommand' },
+        { id: 'link', title: '链接', icon: 'ph-link-simple', command: 'toggleLinkCommand', prompt: true },
+        { id: 'sep-2', separator: true },
+        { id: 'bullet-list', title: '无序列表', icon: 'ph-list-bullets', command: 'wrapInBulletListCommand' },
+        { id: 'ordered-list', title: '有序列表', icon: 'ph-list-numbers', command: 'wrapInOrderedListCommand' },
+        { id: 'blockquote', title: '引用', icon: 'ph-quotes', command: 'wrapInBlockquoteCommand' },
+        { id: 'code-block', title: '代码块', icon: 'ph-code-block', command: 'createCodeBlockCommand' },
+        { id: 'hr', title: '分隔线', icon: 'ph-minus', command: 'insertHrCommand' },
+        { id: 'sep-3', separator: true },
+        { id: 'undo', title: '撤销', icon: 'ph-arrow-counter-clockwise', action: 'undo' },
+        { id: 'redo', title: '重做', icon: 'ph-arrow-clockwise', action: 'redo' }
+    ];
+
+    $: selectedEditorType = $settingsStore.markdownEditor === 'milkdown' ? 'milkdown' : 'vditor';
+    $: if (
+        editMode &&
+        activeEditorType &&
+        selectedEditorType !== activeEditorType &&
+        !editorInitializing
+    ) {
+        void initEditor();
+    }
 
     onMount(async () => {
         notesStore.load();
@@ -60,14 +96,12 @@
     onDestroy(() => {
         window.removeEventListener("resize", handleResize);
         document.removeEventListener("keydown", handleKeydown);
-        if (vditorInstance) {
-            vditorInstance.destroy();
-        }
-        if (milkdownEditor) {
-            milkdownEditor = null;
-        }
+        void destroyEditor();
         if (autoSaveTimer) {
             clearTimeout(autoSaveTimer);
+        }
+        if (aiSuggestionTimer) {
+            clearTimeout(aiSuggestionTimer);
         }
     });
 
@@ -100,13 +134,14 @@
         });
     }
 
-    async function initVditor() {
+    async function initVditor(token) {
         if (!vditorContainer) return;
-        if (vditorInstance) {
-            vditorInstance.destroy();
-        }
         const Vditor = (await import("vditor")).default;
-        vditorInstance = new Vditor(vditorContainer, {
+        if (token !== editorInitToken || selectedEditorType !== 'vditor' || !editMode) return;
+
+        const container = vditorContainer;
+        container.innerHTML = '';
+        const instance = new Vditor(container, {
             height: "100%",
             mode: "ir",
             theme: "classic",
@@ -179,6 +214,7 @@
                 filename: (name) => sanitizeUploadName(name),
             },
             input: (value) => {
+                if (instance !== vditorInstance) return;
                 editContent = value;
                 if (autoSaveEnabled) {
                     scheduleAutoSave();
@@ -188,6 +224,7 @@
                 aiSuggestionTimer = setTimeout(() => requestAiSuggestion(value), 1500);
             },
             keydown: (e) => {
+                if (instance !== vditorInstance) return;
                 if (e.key === 'Tab' && aiSuggestion && !e.shiftKey) {
                     e.preventDefault();
                     if (vditorInstance) {
@@ -199,29 +236,40 @@
                 }
             },
             after: () => {
+                if (token !== editorInitToken || selectedEditorType !== 'vditor' || !editMode) {
+                    instance.destroy();
+                    return;
+                }
+                vditorInstance = instance;
+                activeEditorType = 'vditor';
                 if (editContent) {
-                    vditorInstance.setValue(editContent);
+                    instance.setValue(editContent);
                 }
             },
         });
     }
 
-    async function initMilkdown() {
+    async function initMilkdown(token) {
         if (!milkdownContainer) return;
-        if (milkdownEditor) {
-            milkdownEditor = null;
-            milkdownContainer.innerHTML = '';
-        }
-        const { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } = await import('@milkdown/core');
-        const { commonmark } = await import('@milkdown/preset-commonmark');
+        const { Editor, rootCtx, defaultValueCtx } = await import('@milkdown/core');
+        const commonmarkApi = await import('@milkdown/preset-commonmark');
+        const { commonmark } = commonmarkApi;
         const { nord } = await import('@milkdown/theme-nord');
         const { listener, listenerCtx } = await import('@milkdown/plugin-listener');
-        milkdownEditor = await Editor.make()
+        const { getMarkdown } = await import('@milkdown/utils');
+        if (token !== editorInitToken || selectedEditorType !== 'milkdown' || !editMode) return;
+
+        const container = milkdownContainer;
+        container.innerHTML = '';
+        milkdownCommandApi = { ...commonmarkApi, getMarkdown };
+        let editor = null;
+        editor = await Editor.make()
             .config(nord)
             .config((ctx) => {
-                ctx.set(rootCtx, milkdownContainer);
+                ctx.set(rootCtx, container);
                 ctx.set(defaultValueCtx, editContent || '');
                 ctx.get(listenerCtx).markdownUpdated((ctx, markdown) => {
+                    if (token !== editorInitToken || selectedEditorType !== 'milkdown' || !editMode) return;
                     editContent = markdown;
                     if (autoSaveEnabled) {
                         scheduleAutoSave();
@@ -231,6 +279,14 @@
             .use(commonmark)
             .use(listener)
             .create();
+
+        if (token !== editorInitToken || selectedEditorType !== 'milkdown' || !editMode) {
+            await editor.destroy(true);
+            return;
+        }
+
+        milkdownEditor = editor;
+        activeEditorType = 'milkdown';
     }
 
     function scheduleAutoSave() {
@@ -262,15 +318,37 @@
         return matchesSearch && matchesCategory;
     });
 
-    function getEditor() {
-        return $settingsStore.markdownEditor || 'vditor';
-    }
-
     async function initEditor() {
-        if (getEditor() === 'milkdown') {
-            await initMilkdown();
-        } else {
-            await initVditor();
+        const token = ++editorInitToken;
+        editorInitializing = true;
+        editorError = '';
+        syncContentFromEditor();
+
+        try {
+            await destroyEditor({ cancelPending: false });
+            await tick();
+            if (token !== editorInitToken || !editMode) return;
+
+            const requestedEditorType = selectedEditorType;
+            activeEditorType = requestedEditorType;
+            if (requestedEditorType === 'milkdown') {
+                await initMilkdown(token);
+            } else {
+                await initVditor(token);
+            }
+        } catch (error) {
+            console.error('Failed to initialize notes editor:', error);
+            activeEditorType = null;
+            editorError = get(_)('common.error') || '编辑器初始化失败';
+            showToast({
+                message: editorError,
+                type: 'error',
+                duration: 2000
+            });
+        } finally {
+            if (token === editorInitToken) {
+                editorInitializing = false;
+            }
         }
     }
 
@@ -285,7 +363,10 @@
         tick().then(initEditor);
     }
 
-    function selectNote(note) {
+    async function selectNote(note) {
+        if (editMode) {
+            await destroyEditor();
+        }
         notesStore.setActiveNote(note.id);
         editMode = false;
         editingTitle = false;
@@ -316,38 +397,133 @@
         editingTitle = false;
     }
 
-    function destroyEditor() {
+    function syncContentFromEditor() {
         if (vditorInstance) {
-            vditorInstance.destroy();
-            vditorInstance = null;
-        }
-        if (milkdownEditor) {
-            milkdownEditor = null;
-            if (milkdownContainer) milkdownContainer.innerHTML = '';
+            try {
+                editContent = vditorInstance.getValue();
+            } catch {}
+        } else if (milkdownEditor && milkdownCommandApi?.getMarkdown) {
+            try {
+                editContent = milkdownEditor.action(milkdownCommandApi.getMarkdown());
+            } catch {}
         }
     }
 
-    function saveNote() {
-        if ($activeNote) {
-            if (vditorInstance) {
-                editContent = vditorInstance.getValue();
+    async function destroyEditor({ cancelPending = true } = {}) {
+        if (cancelPending) {
+            editorInitToken += 1;
+            editorInitializing = false;
+        }
+        activeEditorType = null;
+
+        const currentVditor = vditorInstance;
+        vditorInstance = null;
+        if (currentVditor) {
+            try {
+                currentVditor.destroy();
+            } catch (error) {
+                console.warn('Failed to destroy Vditor:', error);
             }
+        }
+        if (vditorContainer) {
+            vditorContainer.innerHTML = '';
+        }
+
+        const currentMilkdown = milkdownEditor;
+        milkdownEditor = null;
+        if (currentMilkdown) {
+            try {
+                await currentMilkdown.destroy(true);
+            } catch (error) {
+                console.warn('Failed to destroy Milkdown:', error);
+            }
+        }
+        if (milkdownContainer) {
+            milkdownContainer.innerHTML = '';
+        }
+        if (currentMilkdown) {
+            milkdownCommandApi = null;
+        }
+    }
+
+    async function runMilkdownToolbar(item) {
+        if (!milkdownEditor || editorInitializing || item.separator) return;
+
+        try {
+            const { commandsCtx, editorViewCtx } = await import('@milkdown/core');
+            if (item.action === 'undo' || item.action === 'redo') {
+                const history = await import('@milkdown/prose/history');
+                milkdownEditor.action((ctx) => {
+                    const view = ctx.get(editorViewCtx);
+                    const command = item.action === 'undo' ? history.undo : history.redo;
+                    command(view.state, view.dispatch);
+                    view.focus();
+                });
+                return;
+            }
+
+            const command = milkdownCommandApi?.[item.command];
+            if (!command) return;
+
+            let payload = item.payload;
+            if (item.prompt) {
+                const href = window.prompt('URL');
+                if (!href) return;
+                payload = { href };
+            }
+
+            milkdownEditor.action((ctx) => {
+                const view = ctx.get(editorViewCtx);
+                const key = command.key || commandNameFallback(item.command);
+                ctx.get(commandsCtx).call(key, payload);
+                view.focus();
+            });
+            syncContentFromEditor();
+        } catch (error) {
+            console.error('Milkdown toolbar command failed:', error);
+            showToast({
+                message: get(_)('common.error') || '操作失败',
+                type: 'error',
+                duration: 1500
+            });
+        }
+    }
+
+    function commandNameFallback(command) {
+        return {
+            turnIntoTextCommand: 'TurnIntoText',
+            wrapInHeadingCommand: 'WrapInHeading',
+            toggleStrongCommand: 'ToggleStrong',
+            toggleEmphasisCommand: 'ToggleEmphasis',
+            toggleInlineCodeCommand: 'ToggleInlineCode',
+            toggleLinkCommand: 'ToggleLink',
+            wrapInBulletListCommand: 'WrapInBulletList',
+            wrapInOrderedListCommand: 'WrapInOrderedList',
+            wrapInBlockquoteCommand: 'WrapInBlockquote',
+            createCodeBlockCommand: 'CreateCodeBlock',
+            insertHrCommand: 'InsertHr'
+        }[command];
+    }
+
+    async function saveNote() {
+        if ($activeNote) {
+            syncContentFromEditor();
             notesStore.updateNote($activeNote.id, {
                 title: editTitle,
                 content: editContent,
             });
+            await destroyEditor();
             editMode = false;
             editingTitle = false;
-            destroyEditor();
         }
     }
 
-    function cancelEdit() {
+    async function cancelEdit() {
+        await destroyEditor();
         editMode = false;
         editTitle = "";
         editContent = "";
         editingTitle = false;
-        destroyEditor();
     }
 
     async function deleteNote() {
@@ -804,9 +980,40 @@
                                 </div>
                             </div>
                         {/if}
-                        {#if $settingsStore.markdownEditor === 'milkdown'}
-                            <div bind:this={milkdownContainer} class="h-full overflow-y-auto milkdown-container"></div>
+                        {#if selectedEditorType === 'milkdown'}
+                            <div class="milkdown-editor-shell">
+                                <div class="milkdown-toolbar" aria-label="Milkdown toolbar">
+                                    {#each milkdownToolbarItems as item}
+                                        {#if item.separator}
+                                            <div class="milkdown-toolbar-separator"></div>
+                                        {:else}
+                                            <button
+                                                type="button"
+                                                class="milkdown-toolbar-button"
+                                                title={item.title}
+                                                aria-label={item.title}
+                                                disabled={editorInitializing || !milkdownEditor}
+                                                on:mousedown={(event) => event.preventDefault()}
+                                                on:click={() => runMilkdownToolbar(item)}
+                                            >
+                                                <i class="ph {item.icon}"></i>
+                                            </button>
+                                        {/if}
+                                    {/each}
+                                </div>
+                                {#if editorError}
+                                    <div class="px-4 py-2 text-xs font-bold text-red-600 bg-red-50 border-b border-red-100">
+                                        {editorError}
+                                    </div>
+                                {/if}
+                                <div bind:this={milkdownContainer} class="flex-1 min-h-0 overflow-y-auto milkdown-container"></div>
+                            </div>
                         {:else}
+                            {#if editorError}
+                                <div class="px-4 py-2 text-xs font-bold text-red-600 bg-red-50 border-b border-red-100">
+                                    {editorError}
+                                </div>
+                            {/if}
                             <div bind:this={vditorContainer} class="h-full"></div>
                         {/if}
                     {:else}
@@ -895,10 +1102,61 @@
     :global(.vditor-tooltipped::before) {
         z-index: 201 !important;
     }
+    .milkdown-editor-shell {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: #f8fafc;
+    }
+    .milkdown-toolbar {
+        min-height: 48px;
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        overflow-x: auto;
+        border-bottom: 1px solid #e2e8f0;
+        background: rgba(255, 255, 255, 0.96);
+        flex-shrink: 0;
+    }
+    .milkdown-toolbar-button {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #475569;
+        background: transparent;
+        border: 1px solid transparent;
+        transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        flex: 0 0 auto;
+    }
+    .milkdown-toolbar-button:hover:not(:disabled) {
+        color: #047857;
+        background: #ecfdf5;
+        border-color: #bbf7d0;
+    }
+    .milkdown-toolbar-button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+    .milkdown-toolbar-button i {
+        font-size: 18px;
+        line-height: 1;
+    }
+    .milkdown-toolbar-separator {
+        width: 1px;
+        height: 22px;
+        background: #e2e8f0;
+        margin: 0 4px;
+        flex: 0 0 auto;
+    }
     :global(.milkdown-container) {
         height: 100%;
         overflow-y: auto;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        background: #f8fafc;
         color: #0f172a;
         padding: 24px;
     }
@@ -911,11 +1169,13 @@
         padding: 28px 32px;
         background: rgba(255, 255, 255, 0.94);
         border: 1px solid #dbeafe;
-        border-radius: 20px;
+        border-radius: 8px;
         box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
         font-size: 15px;
         line-height: 1.8;
         color: #0f172a;
+        white-space: pre-wrap;
+        word-break: break-word;
     }
     :global(.milkdown-container .ProseMirror:focus) {
         outline: none;
@@ -928,8 +1188,26 @@
         color: #0f172a;
     }
     :global(.dark .milkdown-container) {
-        background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+        background: #0f172a;
         color: #e2e8f0;
+    }
+    :global(.dark) .milkdown-editor-shell {
+        background: #0f172a;
+    }
+    :global(.dark) .milkdown-toolbar {
+        background: rgba(15, 23, 42, 0.96);
+        border-color: #334155;
+    }
+    :global(.dark) .milkdown-toolbar-button {
+        color: #cbd5e1;
+    }
+    :global(.dark) .milkdown-toolbar-button:hover:not(:disabled) {
+        color: #6ee7b7;
+        background: rgba(6, 78, 59, 0.35);
+        border-color: #047857;
+    }
+    :global(.dark) .milkdown-toolbar-separator {
+        background: #334155;
     }
     :global(.dark .milkdown-container .ProseMirror) {
         background: rgba(15, 23, 42, 0.92);
