@@ -5842,7 +5842,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workplan"
-version = "0.3.7"
+version = "0.3.9"
 dependencies = [
  "base64 0.22.1",
  "dirs 6.0.0",

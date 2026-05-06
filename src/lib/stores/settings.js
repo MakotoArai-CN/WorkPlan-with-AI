@@ -407,12 +407,14 @@ function createSettingsStore() {
             }
         },
         setTheme: (theme) => update(s => {
+            if (s.theme === theme) return s;
             applyTheme(theme, { animate: true });
             const newState = { ...s, theme };
             save(newState);
             return newState;
         }),
         setMarkdownEditor: (editor) => update(s => {
+            if (s.markdownEditor === editor) return s;
             const newState = { ...s, markdownEditor: editor };
             save(newState);
             return newState;
