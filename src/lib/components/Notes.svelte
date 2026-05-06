@@ -134,6 +134,36 @@
         });
     }
 
+    function normalizeVditorEditable(container, token, { focus = false } = {}) {
+        if (token !== editorInitToken || selectedEditorType !== 'vditor' || !editMode) return;
+        const root = container?.classList?.contains('vditor')
+            ? container
+            : container?.querySelector?.('.vditor');
+        const editable = root?.querySelector?.(
+            '.vditor-ir pre.vditor-reset, .vditor-wysiwyg pre.vditor-reset, .vditor-sv'
+        );
+        if (!editable) return;
+
+        editable.setAttribute('contenteditable', 'true');
+        editable.removeAttribute('readonly');
+        editable.removeAttribute('disabled');
+        editable.style.pointerEvents = 'auto';
+        editable.style.userSelect = 'text';
+        editable.style.webkitUserSelect = 'text';
+
+        if (focus) {
+            requestAnimationFrame(() => {
+                if (
+                    token !== editorInitToken ||
+                    selectedEditorType !== 'vditor' ||
+                    activeEditorType !== 'vditor' ||
+                    !editMode
+                ) return;
+                editable.focus({ preventScroll: true });
+            });
+        }
+    }
+
     async function initVditor(token) {
         if (!vditorContainer) return;
         const Vditor = (await import("vditor")).default;
@@ -142,6 +172,7 @@
         const container = vditorContainer;
         container.innerHTML = '';
         const instance = new Vditor(container, {
+            cdn: "/vendor/vditor",
             height: "100%",
             mode: "ir",
             theme: "classic",
@@ -245,6 +276,7 @@
                 if (editContent) {
                     instance.setValue(editContent);
                 }
+                normalizeVditorEditable(container, token, { focus: true });
             },
         });
     }
@@ -1014,7 +1046,9 @@
                                     {editorError}
                                 </div>
                             {/if}
-                            <div bind:this={vditorContainer} class="h-full"></div>
+                            <div class="vditor-editor-shell">
+                                <div bind:this={vditorContainer} class="vditor-editor-host"></div>
+                            </div>
                         {/if}
                     {:else}
                         <div
@@ -1065,9 +1099,29 @@
 {/if}
 
 <style>
+    .vditor-editor-shell {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: #fff;
+        overflow: hidden;
+    }
+    .vditor-editor-host {
+        flex: 1 1 auto;
+        min-height: 0;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        pointer-events: auto;
+    }
     :global(.vditor) {
         border: none !important;
-        overflow: visible !important;
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        height: 100% !important;
+        overflow: hidden !important;
+        pointer-events: auto !important;
     }
     :global(.vditor-toolbar) {
         border-bottom: 1px solid #e2e8f0 !important;
@@ -1079,8 +1133,27 @@
     :global(.vditor-toolbar__item) {
         overflow: visible !important;
     }
+    :global(.vditor-content) {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+        pointer-events: auto !important;
+    }
     :global(.vditor-ir) {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
         padding: 16px !important;
+        overflow-y: auto !important;
+        pointer-events: auto !important;
+    }
+    :global(.vditor-ir pre.vditor-reset),
+    :global(.vditor-wysiwyg pre.vditor-reset),
+    :global(.vditor-sv) {
+        min-height: 100% !important;
+        pointer-events: auto !important;
+        user-select: text !important;
+        -webkit-user-select: text !important;
+        cursor: text !important;
     }
     :global(.vditor-hint) {
         z-index: 200 !important;
@@ -1101,6 +1174,12 @@
     :global(.vditor-tooltipped::after),
     :global(.vditor-tooltipped::before) {
         z-index: 201 !important;
+    }
+    :global(.dark) .vditor-editor-shell {
+        background: #0f172a;
+    }
+    :global(.dark .vditor) {
+        background: #0f172a !important;
     }
     .milkdown-editor-shell {
         height: 100%;
