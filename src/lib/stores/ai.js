@@ -357,6 +357,9 @@ export async function probeAiCapabilities() {
 
 const WEEKDAY_MAP = ['日', '一', '二', '三', '四', '五', '六'];
 const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const AI_PASSIVE_CONTEXT_LIMIT = 8;
+const AI_PROJECT_SUMMARY_LIMIT = 6;
+const AI_LARGE_TASK_CONTEXT_THRESHOLD = 1000;
 
 function extractProviderConfigFromAiConfig(config) {
     const result = {};
@@ -1266,6 +1269,18 @@ function formatDateForAI(date) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function parseDateOnlyToLocal(value = '') {
+    const match = String(value || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getTaskDateOnly(task = {}) {
+    const rawDate = String(task?.date || '').split('T')[0];
+    return parseDateOnlyToLocal(rawDate);
+}
+
 function normalizeRepeatDays(values = []) {
     return [...new Set(
         (Array.isArray(values) ? values : [])
@@ -1278,7 +1293,7 @@ function normalizeRepeatDays(values = []) {
 function formatFullTaskForAI(task) {
     const dateInfo = getDateInfo();
     const rawDate = task.date ? task.date.split('T')[0] : '';
-    const taskDate = rawDate ? new Date(rawDate) : null;
+    const taskDate = rawDate ? parseDateOnlyToLocal(rawDate) : null;
     let relativeDay = '无日期';
     if (taskDate && !Number.isNaN(taskDate.getTime())) {
         if (taskDate.getTime() === dateInfo.today.getTime()) {
@@ -1321,6 +1336,11 @@ function formatTemplateForAI(template) {
     return `[ID:${template.id}] "${template.title}" | 状态:${statusMap[template.status] || '未开始'} | 优先级:${priorityMap[template.priority] || '普通'}${template.note ? ` | 备注:${template.note}` : ''}${subtasksStr}`;
 }
 
+function formatItemsForAI(items = [], formatter) {
+    const sourceItems = Array.isArray(items) ? items : [];
+    return sourceItems.map(item => formatter(item)).join('\n');
+}
+
 function normalizeTemplateEntity(template, index = 0) {
     return {
         id: template.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1351,12 +1371,11 @@ const UPDATE_KEYWORDS = [
 const QUERY_KEYWORDS = [
     '查询', '查看', '搜索', '找', '有什么', '哪些', '列出', '显示', '查一下',
     '看看', '告诉我', '有没有', '是否有', '什么任务',
+    '什么时候', '何时', '哪天', '哪日', '哪月', '哪一年', '做了什么', '干了什么',
     'query', 'search', 'find', 'list', 'show', 'what'
 ];
-const PAST_TIME_KEYWORDS = [
-    '过去', '昨天', '前天', '上周', '上个月', '之前', '以前', '历史',
-    '去年', '前几天', '早些时候'
-];
+const CREATE_KEYWORDS = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
+const TASK_LOOKUP_QUESTION_REGEX = /(什么时候|何时|哪天|哪日|哪月|哪一年|做了什么|干了什么|什么时候做|什么时候干)/;
 
 const SUBTASK_KEYWORDS = [
     '子任务', '子步骤', '步骤', '小任务', '分解', '拆分',
@@ -1476,6 +1495,11 @@ function getAssistantMetaBySource(source = 'tasks') {
 
 function detectOperationType(text) {
     const lowerText = text.toLowerCase();
+    const hasCreateIntent = CREATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        /(安排|提醒|记得|帮我安排|请安排|schedule|remind)/i.test(text);
+    if (!hasCreateIntent && looksLikeTaskAnalysisRequest(text)) {
+        return 'query';
+    }
     let deleteScore = 0;
     let updateScore = 0;
     let queryScore = 0;
@@ -1517,93 +1541,372 @@ function detectOperationType(text) {
     return 'create';
 }
 
-function detectTimeScope(text, dateInfo) {
-    const lowerText = text.toLowerCase();
-    let includePast = false;
-    let includeFuture = true;
-    let startDate = null;
-    let endDate = null;
-    for (const keyword of PAST_TIME_KEYWORDS) {
-        if (lowerText.includes(keyword)) {
-            includePast = true;
-            break;
-        }
-    }
-    if (lowerText.includes('昨天')) {
-        startDate = dateInfo.yesterday;
-        endDate = dateInfo.yesterday;
-        includePast = true;
-    } else if (lowerText.includes('前天')) {
-        startDate = dateInfo.dayBeforeYesterday;
-        endDate = dateInfo.dayBeforeYesterday;
-        includePast = true;
-    } else if (lowerText.includes('今天') || lowerText.includes('今日')) {
-        startDate = dateInfo.today;
-        endDate = dateInfo.today;
-    } else if (lowerText.includes('明天')) {
-        startDate = dateInfo.tomorrow;
-        endDate = dateInfo.tomorrow;
-    } else if (lowerText.includes('后天')) {
-        startDate = dateInfo.dayAfterTomorrow;
-        endDate = dateInfo.dayAfterTomorrow;
-    }
-    if (lowerText.includes('明天') && lowerText.includes('后天')) {
-        startDate = dateInfo.tomorrow;
-        endDate = dateInfo.dayAfterTomorrow;
-    }
-    if (lowerText.includes('上周') || lowerText.includes('上一周')) {
-        startDate = dateInfo.lastWeek.start;
-        endDate = dateInfo.lastWeek.end;
-        includePast = true;
-    } else if (lowerText.includes('下周') || lowerText.includes('下一周')) {
-        startDate = dateInfo.nextWeek.start;
-        endDate = dateInfo.nextWeek.end;
-    } else if (lowerText.includes('本周') || lowerText.includes('这周') || lowerText.includes('整周')) {
-        startDate = dateInfo.thisWeek.start;
-        endDate = dateInfo.thisWeek.end;
-        includePast = true;
-    }
-    if (lowerText.includes('上个月') || lowerText.includes('上月')) {
-        startDate = dateInfo.lastMonth.start;
-        endDate = dateInfo.lastMonth.end;
-        includePast = true;
-    } else if (lowerText.includes('下个月') || lowerText.includes('下月')) {
-        startDate = dateInfo.nextMonth.start;
-        endDate = dateInfo.nextMonth.end;
-    } else if (lowerText.includes('本月') || lowerText.includes('这个月') || lowerText.includes('整月')) {
-        startDate = dateInfo.thisMonth.start;
-        endDate = dateInfo.thisMonth.end;
-        includePast = true;
-    }
-    if (lowerText.includes('所有') || lowerText.includes('全部')) {
-        if (includePast || lowerText.includes('过去所有') || lowerText.includes('历史')) {
-            startDate = new Date(2020, 0, 1);
-            endDate = new Date(2099, 11, 31);
-            includePast = true;
-        } else {
-            startDate = dateInfo.today;
-            endDate = new Date(2099, 11, 31);
-        }
-    }
-    return { includePast, includeFuture, startDate, endDate };
+function startOfDay(date) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
 }
 
-function filterTasksByTimeScope(tasks, timeScope, dateInfo) {
+function endOfDay(date) {
+    const d = new Date(date);
+    d.setHours(23, 59, 59, 999);
+    return d;
+}
+
+function getMonthRange(date) {
+    const d = new Date(date);
+    return {
+        startDate: startOfDay(new Date(d.getFullYear(), d.getMonth(), 1)),
+        endDate: endOfDay(new Date(d.getFullYear(), d.getMonth() + 1, 0))
+    };
+}
+
+function normalizeTimeScope({ startDate, endDate, explicit = true, rangeType = 'range', mentionedDate = null } = {}) {
+    return {
+        explicit,
+        rangeType,
+        mentionedDate: mentionedDate ? startOfDay(mentionedDate) : (startDate ? startOfDay(startDate) : null),
+        startDate: startDate ? startOfDay(startDate) : null,
+        endDate: endDate ? endOfDay(endDate) : null
+    };
+}
+
+function getDefaultTaskTimeScope(dateInfo) {
+    return normalizeTimeScope({
+        explicit: false,
+        rangeType: 'default',
+        startDate: dateInfo.lastMonth.start,
+        endDate: dateInfo.nextMonth.end,
+        mentionedDate: dateInfo.today
+    });
+}
+
+function getMonthToCurrentScope(mentionedDate, dateInfo) {
+    const monthRange = getMonthRange(mentionedDate);
+    const mentionedDay = startOfDay(mentionedDate);
+    const today = startOfDay(dateInfo.today);
+
+    if (mentionedDay <= today) {
+        return normalizeTimeScope({
+            startDate: monthRange.startDate,
+            endDate: dateInfo.today,
+            explicit: true,
+            rangeType: 'month_to_current',
+            mentionedDate
+        });
+    }
+
+    return normalizeTimeScope({
+        startDate: monthRange.startDate,
+        endDate: monthRange.endDate,
+        explicit: true,
+        rangeType: 'month',
+        mentionedDate
+    });
+}
+
+function extractExplicitDateMentions(text = '', dateInfo = getDateInfo()) {
+    const mentions = [];
+    const used = [];
+    const addMention = (index, length, startDate, endDate, rangeType = 'day') => {
+        if (used.some(([start, end]) => index < end && index + length > start)) return;
+        used.push([index, index + length]);
+        mentions.push({
+            index,
+            startDate: startOfDay(startDate),
+            endDate: endOfDay(endDate || startDate),
+            mentionedDate: startOfDay(startDate),
+            rangeType
+        });
+    };
+
+    const patterns = [
+        {
+            regex: /(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?/g,
+            parse: (m) => ({ date: new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])), type: 'day' })
+        },
+        {
+            regex: /(\d{4})[-/.年](\d{1,2})月?/g,
+            parse: (m) => ({ date: new Date(Number(m[1]), Number(m[2]) - 1, 1), type: 'month' })
+        },
+        {
+            regex: /(\d{1,2})月(\d{1,2})日?/g,
+            parse: (m) => ({ date: new Date(dateInfo.today.getFullYear(), Number(m[1]) - 1, Number(m[2])), type: 'day' })
+        },
+        {
+            regex: /(\d{1,2})月/g,
+            parse: (m) => ({ date: new Date(dateInfo.today.getFullYear(), Number(m[1]) - 1, 1), type: 'month' })
+        }
+    ];
+
+    for (const pattern of patterns) {
+        for (const match of text.matchAll(pattern.regex)) {
+            const parsed = pattern.parse(match);
+            if (!parsed.date || Number.isNaN(parsed.date.getTime())) continue;
+            if (parsed.type === 'month') {
+                const monthRange = getMonthRange(parsed.date);
+                addMention(match.index || 0, match[0].length, monthRange.startDate, monthRange.endDate, 'month');
+            } else {
+                addMention(match.index || 0, match[0].length, parsed.date, parsed.date, 'day');
+            }
+        }
+    }
+
+    return mentions.sort((a, b) => a.index - b.index);
+}
+
+function detectTimeScope(text, dateInfo) {
+    const lowerText = text.toLowerCase();
+    const defaultScope = getDefaultTaskTimeScope(dateInfo);
+    let scope = null;
+
+    if (lowerText.includes('昨天')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.yesterday, endDate: dateInfo.yesterday, rangeType: 'day' });
+    } else if (lowerText.includes('前天')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.dayBeforeYesterday, endDate: dateInfo.dayBeforeYesterday, rangeType: 'day' });
+    } else if (lowerText.includes('今天') || lowerText.includes('今日')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.today, endDate: dateInfo.today, rangeType: 'day' });
+    } else if (lowerText.includes('明天') && lowerText.includes('后天')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.tomorrow, endDate: dateInfo.dayAfterTomorrow, rangeType: 'range' });
+    } else if (lowerText.includes('明天')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.tomorrow, endDate: dateInfo.tomorrow, rangeType: 'day' });
+    } else if (lowerText.includes('后天')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.dayAfterTomorrow, endDate: dateInfo.dayAfterTomorrow, rangeType: 'day' });
+    } else if (lowerText.includes('上周') || lowerText.includes('上一周')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.lastWeek.start, endDate: dateInfo.lastWeek.end, rangeType: 'week' });
+    } else if (lowerText.includes('下周') || lowerText.includes('下一周')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.nextWeek.start, endDate: dateInfo.nextWeek.end, rangeType: 'week' });
+    } else if (lowerText.includes('本周') || lowerText.includes('这周') || lowerText.includes('整周')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.thisWeek.start, endDate: dateInfo.thisWeek.end, rangeType: 'week' });
+    } else if (lowerText.includes('上个月') || lowerText.includes('上月')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.lastMonth.start, endDate: dateInfo.lastMonth.end, rangeType: 'month' });
+    } else if (lowerText.includes('下个月') || lowerText.includes('下月')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.nextMonth.start, endDate: dateInfo.nextMonth.end, rangeType: 'month' });
+    } else if (lowerText.includes('本月') || lowerText.includes('这个月') || lowerText.includes('整月')) {
+        scope = normalizeTimeScope({ startDate: dateInfo.thisMonth.start, endDate: dateInfo.thisMonth.end, rangeType: 'month' });
+    }
+
+    const explicitMentions = extractExplicitDateMentions(text, dateInfo);
+    const rangeRequested = /(到|至|--|—|-|~|～)/.test(text);
+    const untilNowRequested = /(至今|到现在|到今天|到目前|截止目前|以来)/.test(text);
+    if (explicitMentions.length >= 2 && rangeRequested) {
+        const first = explicitMentions[0];
+        const last = explicitMentions[explicitMentions.length - 1];
+        scope = normalizeTimeScope({
+            startDate: first.startDate <= last.startDate ? first.startDate : last.startDate,
+            endDate: first.endDate >= last.endDate ? first.endDate : last.endDate,
+            rangeType: 'range',
+            mentionedDate: first.mentionedDate
+        });
+    } else if (explicitMentions.length >= 1) {
+        const mention = explicitMentions[0];
+        if (untilNowRequested) {
+            const monthRange = getMonthRange(mention.mentionedDate);
+            scope = normalizeTimeScope({
+                startDate: monthRange.startDate,
+                endDate: dateInfo.today,
+                rangeType: 'range',
+                mentionedDate: mention.mentionedDate
+            });
+        } else {
+            scope = normalizeTimeScope(mention);
+        }
+    }
+
+    return scope || defaultScope;
+}
+
+function getTaskScopeForContext(tasks = [], timeScope = getDefaultTaskTimeScope(getDateInfo()), dateInfo = getDateInfo(), options = {}) {
+    const scope = timeScope || getDefaultTaskTimeScope(dateInfo);
+    if (options.mode !== 'ai_context') {
+        return scope;
+    }
+
+    if (!scope.explicit || !scope.mentionedDate) {
+        return scope;
+    }
+
+    if (
+        Array.isArray(tasks) &&
+        tasks.length >= AI_LARGE_TASK_CONTEXT_THRESHOLD &&
+        (scope.rangeType === 'day' || scope.rangeType === 'month')
+    ) {
+        return {
+            ...normalizeTimeScope({
+                ...getMonthRange(scope.mentionedDate),
+                explicit: true,
+                rangeType: 'month',
+                mentionedDate: scope.mentionedDate
+            }),
+            narrowedForLargeDataset: true
+        };
+    }
+
+    if (scope.rangeType === 'day') {
+        return getMonthToCurrentScope(scope.mentionedDate, dateInfo);
+    }
+
+    return scope;
+}
+
+function filterTasksByTimeScope(tasks, timeScope) {
     if (!tasks || tasks.length === 0) return [];
     return tasks.filter(task => {
-        const taskDate = new Date(task.date.split('T')[0]);
-        if (timeScope.startDate && timeScope.endDate) {
-            const start = new Date(timeScope.startDate);
-            start.setHours(0, 0, 0, 0);
-            const end = new Date(timeScope.endDate);
-            end.setHours(23, 59, 59, 999);
-            return taskDate >= start && taskDate <= end;
+        const taskDate = getTaskDateOnly(task);
+        if (!taskDate) {
+            return !timeScope.explicit;
         }
-        if (!timeScope.includePast && taskDate < dateInfo.today) {
-            return false;
+        if (timeScope.startDate && timeScope.endDate) {
+            return taskDate >= timeScope.startDate && taskDate <= timeScope.endDate;
         }
         return true;
     });
+}
+
+function getTimeScopedItems(assistantContext, timeScope, dateInfo, options = {}) {
+    const items = assistantContext.items || [];
+    const effectiveScope = getTaskScopeForContext(
+        items,
+        timeScope || getDefaultTaskTimeScope(dateInfo),
+        dateInfo,
+        options
+    );
+    return assistantContext.source === 'tasks'
+        ? filterTasksByTimeScope(items, effectiveScope)
+        : items;
+}
+
+function normalizeSearchText(value = '') {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[，。！？、；;,.!?()[\]{}"'“”‘’`~～:：/\\|]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getTaskSearchText(task = {}) {
+    return normalizeSearchText([
+        task.title || '',
+        task.note || '',
+        task.date || '',
+        task.deadline || '',
+        task.status || '',
+        task.priority || '',
+        ...(Array.isArray(task.subtasks) ? task.subtasks.map(item => item?.title || '') : [])
+    ].join(' '));
+}
+
+function looksLikeTaskAnalysisRequest(text = '') {
+    const lowerText = String(text || '').toLowerCase();
+    return PROJECT_ANALYSIS_KEYWORDS.some(keyword => lowerText.includes(keyword)) ||
+        /(分析|总结|汇总|统计|复盘|日报|周报|月报|报告|趋势|占比|完成率|进展|report|summary|analysis|review|progress)/i.test(lowerText);
+}
+
+function looksLikeSingleTaskLookup(text = '', operationType = '') {
+    const lowerText = String(text || '').toLowerCase();
+    const hasReferenceLookup = /(参照|参考|对照)/.test(lowerText);
+    const hasMutationKeyword = CREATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        DELETE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        UPDATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase()));
+    if (operationType !== 'query' && !(hasReferenceLookup && !hasMutationKeyword)) return false;
+    if (looksLikeTaskAnalysisRequest(text)) return false;
+    if (/(全部|所有|列表|列出|显示|有哪些|多少|几项|所有任务|全部任务)/.test(lowerText)) return false;
+    return hasReferenceLookup ||
+        TASK_LOOKUP_QUESTION_REGEX.test(lowerText) ||
+        /(查.*任务|查询.*任务|搜索.*任务|找.*任务|有没有.*任务|是否有.*任务)/.test(lowerText) ||
+        Boolean(extractQuotedSegment(text));
+}
+
+function extractTaskLookupKeywords(text = '') {
+    const quoted = extractQuotedSegment(text);
+    if (quoted) return [normalizeSearchText(quoted)].filter(Boolean);
+
+    const cleaned = normalizeSearchText(text)
+        .replace(/(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?/g, ' ')
+        .replace(/(\d{4})[-/.年](\d{1,2})月?/g, ' ')
+        .replace(/(\d{1,2})月(\d{1,2})日?/g, ' ')
+        .replace(/(\d{1,2})月/g, ' ')
+        .replace(/(今天|今日|明天|后天|昨天|前天|本周|这周|上周|下周|本月|这个月|上月|上个月|下月|下个月|上午|中午|下午|晚上|今晚|早上|凌晨|周一|周二|周三|周四|周五|周六|周日)/g, ' ')
+        .replace(/(查询|查看|搜索|查一下|找一下|找|告诉我|有没有|是否有|参照|参考|对照|类似|相似|上次|之前|以前|任务|事项|安排|什么时候|何时|哪天|哪日|哪月|哪一年|什么|做了什么|干了什么|做的|干的|完成|已完成|搞定|处理|执行|进行|关于|有关|分析|总结|汇总|统计|复盘|报告|日报|周报|月报|这些|相关|的|了|吗|呢|请|帮我|一下)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return cleaned
+        .split(/\s+/)
+        .map(item => item.trim())
+        .filter(item => item.length >= 2);
+}
+
+function searchTasksLocally(tasks = [], keywords = []) {
+    const normalizedKeywords = keywords
+        .map(item => normalizeSearchText(item))
+        .filter(Boolean);
+    if (!Array.isArray(tasks) || normalizedKeywords.length === 0) return [];
+
+    return tasks
+        .map(task => {
+            const title = normalizeSearchText(task.title || '');
+            const note = normalizeSearchText(task.note || '');
+            const subtaskText = normalizeSearchText((task.subtasks || []).map(item => item?.title || '').join(' '));
+            const fullText = getTaskSearchText(task);
+            let score = 0;
+            for (const keyword of normalizedKeywords) {
+                if (title.includes(keyword)) score += 8;
+                if (note.includes(keyword)) score += 3;
+                if (subtaskText.includes(keyword)) score += 2;
+                if (fullText.includes(keyword)) score += 1;
+            }
+            return { task, score };
+        })
+        .filter(item => item.score > 0)
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            const aTime = getTaskDateOnly(a.task)?.getTime() || 0;
+            const bTime = getTaskDateOnly(b.task)?.getTime() || 0;
+            return bTime - aTime;
+        })
+        .map(item => item.task);
+}
+
+function tryResolveLocalTaskLookup(userText, allTasks = [], relevantTasks = [], operationType = '', timeScope = null) {
+    if (!looksLikeSingleTaskLookup(userText, operationType)) return null;
+    const keywords = extractTaskLookupKeywords(userText);
+    if (keywords.length === 0) return null;
+
+    const baseTasks = timeScope?.explicit ? relevantTasks : allTasks;
+    const matchedTasks = searchTasksLocally(baseTasks, keywords);
+    if (matchedTasks.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '本地任务检索没有找到匹配项。请补充更具体的任务标题、关键词或时间。'
+        };
+    }
+
+    return {
+        role: 'assistant',
+        type: 'query_result',
+        tasks: matchedTasks,
+        summary: `本地检索到 ${matchedTasks.length} 个匹配任务。`,
+        filterDescription: `关键词：${keywords.join('、')}。未向 AI 提交完整任务列表。`
+    };
+}
+
+function getTaskCandidatesForAI(userText, allTasks = [], relevantTasks = [], operationType = '', timeScope = null) {
+    if (operationType !== 'query' && !looksLikeTaskAnalysisRequest(userText)) {
+        return relevantTasks;
+    }
+    if (looksLikeSingleTaskLookup(userText, operationType)) {
+        return relevantTasks;
+    }
+
+    const keywords = extractTaskLookupKeywords(userText);
+    if (keywords.length === 0) {
+        return relevantTasks;
+    }
+
+    const matchedTasks = searchTasksLocally(relevantTasks, keywords);
+    return matchedTasks.length > 0 ? matchedTasks : relevantTasks;
 }
 
 function normalizeAssistantPayload(payload = []) {
@@ -1994,11 +2297,13 @@ function extractJsonPayload(value = '') {
 
 function formatContextItemsForAI(items = [], context = {}) {
     const label = context.entityLabel || '任务';
-    if (!Array.isArray(items) || items.length === 0) {
+    const sourceItems = Array.isArray(items) ? items : [];
+    if (sourceItems.length === 0) {
         return `- [${label}] 暂无`;
     }
-    return items
-        .slice(0, 24)
+    const limit = context.source === 'tasks' ? sourceItems.length : AI_PASSIVE_CONTEXT_LIMIT;
+    const lines = sourceItems
+        .slice(0, limit)
         .map((item) => {
             const parts = [`- [${label}] ${item.title || '未命名'}`];
             if (item.status) parts.push(item.status);
@@ -2011,8 +2316,11 @@ function formatContextItemsForAI(items = [], context = {}) {
             }
             if (item.category) parts.push(`category=${item.category}`);
             return parts.join(' | ');
-        })
-        .join('\n');
+        });
+    if (context.source !== 'tasks' && sourceItems.length > AI_PASSIVE_CONTEXT_LIMIT) {
+        lines.push(`- [${label}] 共 ${sourceItems.length} 项，仅显示前 ${AI_PASSIVE_CONTEXT_LIMIT} 项`);
+    }
+    return lines.join('\n');
 }
 
 function formatNoteContextForAI(context = {}) {
@@ -2250,7 +2558,19 @@ async function buildContextualAssistantResponse(userText, assistantContext, conf
     const { callAIWithMessages } = await import('../utils/ai-providers.js');
     const nowStr = getFormattedDateTime();
     const projectContext = await getProjectContextSummary();
-    const scopedItems = formatContextItemsForAI(assistantContext.items, assistantContext);
+    const dateInfo = getDateInfo();
+    const timeScope = detectTimeScope(userText, dateInfo);
+    const operationType = detectOperationType(userText);
+    const contextItems = assistantContext.source === 'tasks'
+        ? getTaskCandidatesForAI(
+            userText,
+            assistantContext.items || [],
+            getTimeScopedItems(assistantContext, timeScope, dateInfo, { mode: 'ai_context' }),
+            operationType,
+            timeScope
+        )
+        : (assistantContext.items || []);
+    const scopedItems = formatContextItemsForAI(contextItems, assistantContext);
     const noteContext = formatNoteContextForAI(assistantContext);
     const allowActions = options.allowActions ?? true;
 
@@ -2864,7 +3184,7 @@ function formatNativeProjectItemsForAI(assistantContext = {}) {
     const formatter = source === 'templates' ? formatTemplateForAI : formatFullTaskForAI;
     return [
         `【可操作数据 source=${source}】`,
-        ...items.slice(0, 50).map(item => formatter(item))
+        formatItemsForAI(items, formatter)
     ].join('\n');
 }
 
@@ -2893,6 +3213,7 @@ function buildNativeToolMessages(userText, assistantContext = {}, intentHint = n
 4. 普通闲聊、解释、写作、翻译、不需要项目工具的问题，不要调用工具，直接回答文本。
 5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。
 6. 普通任务时间使用 YYYY-MM-DDTHH:mm；定时任务 repeatDays 中周日=0，周一至周六=1-6。
+7. 普通任务的可操作数据已按时间范围过滤；用户未明确提到过去/历史时，不要操作未列出的历史任务。
 ${hintText}
 
 【当前页面】
@@ -3429,14 +3750,33 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
     const subtaskOperation = detectSubtaskOperation(text);
     const lowerText = text.toLowerCase();
-    const createKeywords = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
-    const isExplicitCreate = createKeywords.some(keyword => lowerText.includes(keyword));
+    const isExplicitCreate = CREATE_KEYWORDS.some(keyword => lowerText.includes(keyword));
     const hasNoActionKeyword = !DELETE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) &&
         !UPDATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) &&
         !QUERY_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase()));
     const operationType = detectOperationType(text);
     const dateInfo = getDateInfo();
     const timeScope = detectTimeScope(text, dateInfo);
+    const relevantTasks = getTimeScopedItems(assistantContext, timeScope, dateInfo);
+    const needsExpandedTaskContext = operationType === 'query' || looksLikeTaskAnalysisRequest(text);
+    const aiRelevantTasks = needsExpandedTaskContext
+        ? getTimeScopedItems(assistantContext, timeScope, dateInfo, { mode: 'ai_context' })
+        : relevantTasks;
+    const aiTaskCandidates = assistantContext.source === 'tasks'
+        ? getTaskCandidatesForAI(text, scopedItems, aiRelevantTasks, operationType, timeScope)
+        : scopedItems;
+    const hasWebIntent = intentHint === 'web_search' || (!intentHint && looksLikeWebSearchIntent(text));
+    const hasFileIntent = intentHint === 'file' || (!intentHint && looksLikeFileIntent(text));
+    const hasProjectIntent = intentHint === 'task' ||
+        (!hasWebIntent && !hasFileIntent && (looksLikeProjectIntent(text) || assistantContext.source !== 'tasks'));
+    const allowImplicitCreate = assistantContext.scope === 'dashboard' ||
+        assistantContext.scope === 'project' ||
+        assistantContext.source === 'templates' ||
+        assistantContext.source === 'scheduled';
+    const shouldHandleAsCreate = isExplicitCreate ||
+        (allowImplicitCreate && hasNoActionKeyword && operationType === 'create');
+    const shouldUseInternalCreate = assistantContext.mode !== 'note' &&
+        shouldHandleAsCreate;
 
     const { callAI } = await import('../utils/ai-providers.js');
     const requireFileConfirmation = get(settingsStore).localFileConfig?.requireConfirmation ?? true;
@@ -3485,29 +3825,37 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     }
 
     progress('classifying');
-    const nativeToolResult = await tryResolveWithNativeTools(
-        text,
-        assistantContext,
-        currentConfig,
-        intentHint,
-        progress
-    );
-    if (nativeToolResult?.__batchResults?.length) {
-        return {
-            __batchResults: nativeToolResult.__batchResults.map(item => normalizeAssistantResult(item, assistantContext))
-        };
+    const localTaskLookupResult = assistantContext.source === 'tasks'
+        ? tryResolveLocalTaskLookup(text, scopedItems, relevantTasks, operationType, timeScope)
+        : null;
+    if (localTaskLookupResult) {
+        return normalizeAssistantResult(localTaskLookupResult, assistantContext);
     }
-    if (nativeToolResult) {
-        return normalizeAssistantResult(nativeToolResult, assistantContext);
+
+    if (!shouldUseInternalCreate) {
+        const nativeToolContext = {
+            ...assistantContext,
+            items: hasProjectIntent ? aiTaskCandidates : []
+        };
+        const nativeToolResult = await tryResolveWithNativeTools(
+            text,
+            nativeToolContext,
+            currentConfig,
+            intentHint,
+            progress
+        );
+        if (nativeToolResult?.__batchResults?.length) {
+            return {
+                __batchResults: nativeToolResult.__batchResults.map(item => normalizeAssistantResult(item, assistantContext))
+            };
+        }
+        if (nativeToolResult) {
+            return normalizeAssistantResult(nativeToolResult, assistantContext);
+        }
     }
 
     const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI, intentHint);
     const localFilePlan = await analyzeLocalFileIntent(text, currentConfig, callAI, intentHint);
-    const relevantTasks = filterTasksByTimeScope(scopedItems, timeScope, dateInfo);
-    const allowImplicitCreate = assistantContext.scope === 'dashboard' ||
-        assistantContext.scope === 'project' ||
-        assistantContext.source === 'templates' ||
-        assistantContext.source === 'scheduled';
 
     let result;
 
@@ -3535,8 +3883,8 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         result = await buildContextualAssistantResponse(text, assistantContext, currentConfig);
     } else if (assistantContext.source === 'templates' && subtaskOperation) {
         progress('task_processing');
-        result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
-    } else if (assistantContext.source === 'templates' && (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword))) {
+        result = await analyzeSubtaskIntent(text, scopedItems, scopedItems, dateInfo, currentConfig, callAI);
+    } else if (assistantContext.source === 'templates' && shouldHandleAsCreate) {
         progress('task_processing');
         result = await analyzeTemplateCreateIntent(text, scopedItems, currentConfig, callAI);
     } else if (assistantContext.source === 'templates' && operationType === 'mixed') {
@@ -3553,31 +3901,31 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         result = await analyzeTemplateQueryIntent(text, scopedItems, currentConfig, callAI);
     } else if (assistantContext.source === 'scheduled' && subtaskOperation) {
         progress('task_processing');
-        result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
-    } else if (assistantContext.source === 'scheduled' && (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword))) {
+        result = await analyzeSubtaskIntent(text, scopedItems, scopedItems, dateInfo, currentConfig, callAI);
+    } else if (assistantContext.source === 'scheduled' && shouldHandleAsCreate) {
         progress('task_processing');
         result = await analyzeScheduledCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     } else if (assistantContext.source === 'scheduled' && operationType === 'update') {
         progress('task_processing');
-        result = await analyzeScheduledUpdateIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+        result = await analyzeScheduledUpdateIntent(text, scopedItems, aiTaskCandidates, dateInfo, currentConfig, callAI);
     } else if (subtaskOperation) {
         progress('task_processing');
-        result = await analyzeSubtaskIntent(text, scopedItems, dateInfo, currentConfig, callAI);
-    } else if (isExplicitCreate || (allowImplicitCreate && hasNoActionKeyword)) {
+        result = await analyzeSubtaskIntent(text, scopedItems, aiTaskCandidates, dateInfo, currentConfig, callAI);
+    } else if (shouldHandleAsCreate) {
         progress('task_processing');
         result = await analyzeCreateIntent(text, scopedItems, dateInfo, currentConfig, callAI);
     } else if (operationType === 'mixed') {
         progress('task_processing');
-        result = await analyzeMixedIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+        result = await analyzeMixedIntent(text, scopedItems, aiTaskCandidates, dateInfo, currentConfig, callAI);
     } else if (operationType === 'delete') {
         progress('task_processing');
-        result = await analyzeDeleteIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+        result = await analyzeDeleteIntent(text, scopedItems, aiTaskCandidates, dateInfo, currentConfig, callAI);
     } else if (operationType === 'update') {
         progress('task_processing');
-        result = await analyzeUpdateIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+        result = await analyzeUpdateIntent(text, scopedItems, aiTaskCandidates, dateInfo, currentConfig, callAI);
     } else if (operationType === 'query') {
         progress('task_processing');
-        result = await analyzeQueryIntent(text, scopedItems, relevantTasks, dateInfo, currentConfig, callAI);
+        result = await analyzeQueryIntent(text, scopedItems, aiTaskCandidates, dateInfo, currentConfig, callAI);
     } else if (hasNoActionKeyword) {
         // No specific tool action matched — signal caller to use streaming chat instead
         return { __useStreamingChat: true };
@@ -3829,7 +4177,8 @@ async function analyzeScheduledUpdateIntent(userText, allTasks, relevantTasks, d
         };
     }
 
-    const taskList = allTasks.map(task => formatFullTaskForAI(task)).join('\n');
+    const scopedTasks = relevantTasks?.length ? relevantTasks : allTasks;
+    const taskList = formatItemsForAI(scopedTasks, formatFullTaskForAI);
     const systemPrompt = `你是 WorkPlan 的定时任务助手。用户想修改定时任务。
 
 【现有定时任务】
@@ -3885,7 +4234,7 @@ ${taskList}
 
         const updateOperations = [];
         for (const operation of parsed.operations) {
-            const task = allTasks.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
+            const task = scopedTasks.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
             if (!task || !operation.updates) continue;
 
             const updates = {};
@@ -3988,7 +4337,7 @@ async function analyzeTemplateDeleteIntent(userText, allTemplates, config, callA
         };
     }
 
-    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const templateList = formatItemsForAI(allTemplates, formatTemplateForAI);
     const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想删除任务模板。
 
 【现有模板】
@@ -4044,7 +4393,7 @@ async function analyzeTemplateUpdateIntent(userText, allTemplates, config, callA
         };
     }
 
-    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const templateList = formatItemsForAI(allTemplates, formatTemplateForAI);
     const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想修改任务模板。
 
 【现有模板】
@@ -4153,7 +4502,7 @@ async function analyzeTemplateMixedIntent(userText, allTemplates, config, callAI
         };
     }
 
-    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const templateList = formatItemsForAI(allTemplates, formatTemplateForAI);
     const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想对模板执行混合操作（修改和删除）。
 
 【现有模板】
@@ -4251,7 +4600,7 @@ async function analyzeTemplateQueryIntent(userText, allTemplates, config, callAI
         };
     }
 
-    const templateList = allTemplates.map(item => formatTemplateForAI(item)).join('\n');
+    const templateList = formatItemsForAI(allTemplates, formatTemplateForAI);
     const systemPrompt = `你是 WorkPlan 的任务模板助手。用户想查询任务模板。
 
 【现有模板】
@@ -4432,7 +4781,7 @@ async function analyzeCreateIntent(userText, existingTasks, dateInfo, config, ca
     return tasksFromAI[0] || uniqueTasks[0] || null;
 }
 
-async function analyzeSubtaskIntent(userText, allTasks, dateInfo, config, callAI) {
+async function analyzeSubtaskIntent(userText, allTasks, relevantTasks, dateInfo, config, callAI) {
     if (!allTasks || allTasks.length === 0) {
         return {
             role: 'assistant',
@@ -4440,9 +4789,16 @@ async function analyzeSubtaskIntent(userText, allTasks, dateInfo, config, callAI
             content: '当前没有任何任务可以操作子任务。'
         };
     }
+    if (!relevantTasks || relevantTasks.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '在指定的时间范围内没有找到可操作的任务。'
+        };
+    }
 
     const nowStr = getFormattedDateTime();
-    const taskList = allTasks.map(t => formatFullTaskForAI(t)).join('\n');
+    const taskList = formatItemsForAI(relevantTasks, formatFullTaskForAI);
 
     const systemPrompt = `你是一个智能任务管理助手。用户想要对任务的子任务进行操作。
 
@@ -4500,7 +4856,7 @@ ${taskList}
             return { role: 'assistant', type: 'text', content: parsed.message || '未找到匹配的任务或子任务。' };
         }
 
-        const task = allTasks.find(t => t.id === parsed.task_id || t.id.endsWith(parsed.task_id));
+        const task = relevantTasks.find(t => t.id === parsed.task_id || t.id.endsWith(parsed.task_id));
         if (!task) {
             return { role: 'assistant', type: 'text', content: '未找到指定的任务。' };
         }
@@ -4535,7 +4891,7 @@ async function analyzeDeleteIntent(userText, allTasks, relevantTasks, dateInfo, 
         };
     }
     const nowStr = getFormattedDateTime();
-    const taskList = relevantTasks.map(t => formatFullTaskForAI(t)).join('\n');
+    const taskList = formatItemsForAI(relevantTasks, formatFullTaskForAI);
     const systemPrompt = `你是一个智能任务管理助手。用户想要删除任务。
 【当前时间】${nowStr}
 【今天】${formatDateForAI(dateInfo.today)}
@@ -4569,7 +4925,7 @@ ${taskList}
         const jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleanJsonStr);
         if (parsed.delete_task_ids && parsed.delete_task_ids.length > 0) {
-            const tasksToDelete = allTasks.filter(t =>
+            const tasksToDelete = relevantTasks.filter(t =>
                 parsed.delete_task_ids.includes(t.id) ||
                 parsed.delete_task_ids.some(id => t.id.endsWith(id))
             );
@@ -4598,8 +4954,15 @@ async function analyzeUpdateIntent(userText, allTasks, relevantTasks, dateInfo, 
             content: '当前没有任何任务可以修改。'
         };
     }
+    if (!relevantTasks || relevantTasks.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '在指定的时间范围内没有找到可修改的任务。'
+        };
+    }
     const nowStr = getFormattedDateTime();
-    const taskList = allTasks.map(t => formatFullTaskForAI(t)).join('\n');
+    const taskList = formatItemsForAI(relevantTasks, formatFullTaskForAI);
     const lowerText = userText.toLowerCase();
     const statusKeywords = {
         done: ['完成', '搞定', '做完', '已完成', 'complete', 'done', 'finish'],
@@ -4653,7 +5016,7 @@ ${taskList}
             if (parsed.operations && parsed.operations.length > 0) {
                 const updateOperations = [];
                 for (const op of parsed.operations) {
-                    const task = allTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
+                    const task = relevantTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
                     if (task) {
                         const updates = { status: detectedStatus };
                         if (detectedStatus === 'done') {
@@ -4735,7 +5098,7 @@ ${taskList}
             };
             for (const op of parsed.operations) {
                 if (!op.updates || Object.keys(op.updates).length === 0) continue;
-                const task = allTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
+                const task = relevantTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
                 if (!task) continue;
                 const taskSnapshot = {
                     id: task.id, title: task.title, date: task.date,
@@ -4802,8 +5165,15 @@ async function analyzeMixedIntent(userText, allTasks, relevantTasks, dateInfo, c
             content: '当前没有任何任务可以操作。'
         };
     }
+    if (!relevantTasks || relevantTasks.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '在指定的时间范围内没有找到可操作的任务。'
+        };
+    }
     const nowStr = getFormattedDateTime();
-    const taskList = allTasks.map(t => formatFullTaskForAI(t)).join('\n');
+    const taskList = formatItemsForAI(relevantTasks, formatFullTaskForAI);
     const systemPrompt = `你是一个智能任务管理助手。用户想要修改任务。
 【当前时间】${nowStr}
 【今天】${formatDateForAI(dateInfo.today)}
@@ -4858,7 +5228,7 @@ ${taskList}
                 'critical': 'critical'
             };
             for (const op of parsed.operations) {
-                const task = allTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
+                const task = relevantTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
                 if (task && op.updates && Object.keys(op.updates).length > 0) {
                     const taskSnapshot = JSON.parse(JSON.stringify(task));
                     if (op.updates.priority) {
@@ -4909,8 +5279,15 @@ async function analyzeQueryIntent(userText, allTasks, relevantTasks, dateInfo, c
             content: '当前没有任何任务。'
         };
     }
+    if (!relevantTasks || relevantTasks.length === 0) {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: '在指定的时间范围内没有找到任务。'
+        };
+    }
     const nowStr = getFormattedDateTime();
-    const taskList = allTasks.map(t => formatFullTaskForAI(t)).join('\n');
+    const taskList = formatItemsForAI(relevantTasks, formatFullTaskForAI);
     const systemPrompt = `你是一个智能任务管理助手。用户想要查询任务。
 【当前时间】${nowStr}
 【今天】${formatDateForAI(dateInfo.today)}
@@ -4940,7 +5317,7 @@ ${taskList}
         const jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleanJsonStr);
         if (parsed.matched_task_ids && parsed.matched_task_ids.length > 0) {
-            const matchedTasks = allTasks.filter(t =>
+            const matchedTasks = relevantTasks.filter(t =>
                 parsed.matched_task_ids.includes(t.id) ||
                 parsed.matched_task_ids.some(id => t.id.endsWith(id))
             );
@@ -4967,30 +5344,56 @@ async function getProjectContextSummary() {
     const taskState = get(taskStore);
     const noteState = get(notesStore);
 
-    const taskLines = (taskState.tasks || [])
-        .slice(-20)
-        .map(task => `- [任务] ${task.title} | ${task.status} | ${task.date}`)
-        .join('\n');
-    const templateLines = (taskState.templates || [])
-        .slice(-12)
-        .map(template => `- [模板] ${template.title}`)
-        .join('\n');
-    const scheduledLines = (taskState.scheduledTasks || [])
-        .slice(-12)
-        .map(task => `- [定时] ${task.title} | ${Array.isArray(task.repeatDays) ? task.repeatDays.join(',') : ''}`)
-        .join('\n');
-    const noteLines = (noteState.notes || [])
-        .filter(note => !note.aiLocked)
-        .slice(-12)
-        .map(note => `- [笔记] ${note.title} | ${note.category || '未分类'}`)
-        .join('\n');
+    const formatSummaryLines = (items, label, formatter, limit = AI_PROJECT_SUMMARY_LIMIT) => {
+        const sourceItems = Array.isArray(items) ? items : [];
+        if (sourceItems.length === 0) return `- [${label}] 暂无`;
+
+        const shownItems = Number.isFinite(limit)
+            ? sourceItems.slice(-limit)
+            : sourceItems;
+        const lines = shownItems.map(formatter);
+        if (sourceItems.length > shownItems.length) {
+            lines.push(`- [${label}] 共 ${sourceItems.length} 项，项目摘要显示最近 ${shownItems.length} 项`);
+        }
+        return lines.join('\n');
+    };
+
+    const dateInfo = getDateInfo();
+    const defaultTaskScope = getDefaultTaskTimeScope(dateInfo);
+    const allTasks = taskState.tasks || [];
+    const scopedTasks = filterTasksByTimeScope(allTasks, defaultTaskScope);
+    const taskRangeLine = `- [任务范围] ${formatDateForAI(defaultTaskScope.startDate)} 至 ${formatDateForAI(defaultTaskScope.endDate)}，范围内 ${scopedTasks.length} / 全部 ${allTasks.length} 项`;
+    const taskLines = formatSummaryLines(
+        scopedTasks,
+        '任务',
+        task => `- [任务] ${task.title} | ${task.status} | ${task.date}`,
+        Infinity
+    );
+    const templateLines = formatSummaryLines(
+        taskState.templates || [],
+        '模板',
+        template => `- [模板] ${template.title}`
+    );
+    const scheduledLines = formatSummaryLines(
+        taskState.scheduledTasks || [],
+        '定时',
+        task => `- [定时] ${task.title} | ${Array.isArray(task.repeatDays) ? task.repeatDays.join(',') : ''}`
+    );
+    const accessibleNotes = (noteState.notes || [])
+        .filter(note => !note.aiLocked);
+    const noteLines = formatSummaryLines(
+        accessibleNotes,
+        '笔记',
+        note => `- [笔记] ${note.title} | ${note.category || '未分类'}`
+    );
 
     return [
         '【项目上下文】',
-        taskLines || '- [任务] 暂无',
-        templateLines || '- [模板] 暂无',
-        scheduledLines || '- [定时] 暂无',
-        noteLines || '- [笔记] 暂无'
+        taskRangeLine,
+        taskLines,
+        templateLines,
+        scheduledLines,
+        noteLines
     ].join('\n');
 }
 
