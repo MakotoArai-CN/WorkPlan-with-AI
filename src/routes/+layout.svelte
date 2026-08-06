@@ -9,7 +9,7 @@
     import { loadAiConfig } from '$lib/stores/ai.js';
     import { notesStore } from '$lib/stores/notes.js';
     import { passwordsStore } from '$lib/stores/passwords.js';
-    import { initOpenClaw } from '$lib/stores/openclaw.js';
+    import { initConnector } from '$lib/stores/connector.js';
     import { isWebDemo } from '$lib/utils/runtime.js';
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
@@ -28,6 +28,7 @@
         let unlistenAbout = () => {};
         let notificationTimer = null;
         let interval = null;
+        let heartbeatInterval = null;
 
         (async () => {
             setupI18n();
@@ -51,7 +52,7 @@
             notesStore.load();
             passwordsStore.load();
             if (!isWebDemo) {
-                initOpenClaw();
+                initConnector();
             }
 
             if (isWebDemo || destroyed) return;
@@ -116,6 +117,12 @@
             interval = setInterval(() => {
                 taskStore.checkScheduled();
             }, 60000);
+
+            // 心跳：每分钟检查一次，用户空闲 ≥5 分钟且距上次同步 ≥5 分钟时做一次后台双向同步。
+            heartbeatInterval = setInterval(() => {
+                if (destroyed) return;
+                taskStore.maybeHeartbeat({ idleMs: 300000, minIntervalMs: 300000 });
+            }, 60000);
         })();
 
         return () => {
@@ -126,6 +133,7 @@
             unlistenAbout();
             if (notificationTimer) clearTimeout(notificationTimer);
             if (interval) clearInterval(interval);
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
         };
     });
 </script>

@@ -3,7 +3,7 @@
     import { showConfirm, showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
-    import { exportToJSON } from '../utils/export.js';
+    import { exportToJSON, describeSavedLocation } from '../utils/export.js';
 
     const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
 
@@ -118,8 +118,11 @@
             JSON.parse(taskStore.exportData($taskStore)),
             `planpro_backup_${new Date().toISOString().split('T')[0]}.json`
         );
-        if (result?.success) {
-            showToast({ message: result.path ? `${t('settings.backup_success')}: ${result.path}` : t('settings.backup_success'), type: 'success' });
+        if (result?.cancelled) {
+            showToast({ message: t('common.cancel'), type: 'info' });
+        } else if (result?.success) {
+            const location = describeSavedLocation(result.path);
+            showToast({ message: location ? `${t('settings.backup_success')}: ${location}` : t('settings.backup_success'), type: 'success', duration: 6000 });
         } else {
             showToast({ message: String(result?.error || t('common.error')), type: 'error' });
         }
@@ -183,21 +186,24 @@
     class:w-72={!collapsed}
     class:w-24={collapsed}
 >
-    <div class="px-4 py-3 flex items-center border-b border-slate-100 h-16 gap-3">
-        <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md shrink-0">
-            <i class="ph ph-check-square-offset text-xl"></i>
-        </div>
-
-        <div
-            class="flex-1 min-w-0 transition-all duration-300 overflow-hidden"
-            class:opacity-0={collapsed}
-            class:w-0={collapsed}
-        >
-            <h1 class="text-lg font-bold tracking-tight text-slate-800 leading-tight truncate">WorkPlan</h1>
-            <div class="text-[10px] text-slate-400 font-mono truncate" title={$_('sidebar.current_key')}>
-                {$taskStore.accessKey}
+    <div class="py-3 flex items-center border-b border-slate-100 h-16 transition-all duration-300"
+         class:px-4={!collapsed}
+         class:px-2={collapsed}
+         class:gap-3={!collapsed}
+         class:justify-center={collapsed}
+    >
+        {#if !collapsed}
+            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md shrink-0">
+                <i class="ph ph-check-square-offset text-xl"></i>
             </div>
-        </div>
+
+            <div class="flex-1 min-w-0 overflow-hidden">
+                <h1 class="text-lg font-bold tracking-tight text-slate-800 leading-tight truncate">WorkPlan</h1>
+                <div class="text-[10px] text-slate-400 font-mono truncate" title={$_('sidebar.current_key')}>
+                    {$taskStore.accessKey}
+                </div>
+            </div>
+        {/if}
 
         <button
             on:click={toggleCollapse}

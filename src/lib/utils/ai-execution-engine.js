@@ -1,6 +1,7 @@
 import { searchWeb, fetchWebContent } from './web-search.js';
 import { readSelectedTextFiles } from './local-file-tools.js';
 import { generateImage } from './ai-media-generation.js';
+import { normalizePriority } from './task-vocabulary.js';
 
 let _cancelledPlans = new Set();
 
@@ -20,6 +21,14 @@ function generatePlanId() {
     return `plan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Local-time "YYYY-MM-DDTHH:mm", matching the format the task store expects.
+// toISOString() would shift the date across midnight for non-UTC users.
+function localDateTimeNow() {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 export async function decomposeIntoSteps(userMessage, config) {
     const { callAI } = await import('./ai-providers.js');
 
@@ -34,7 +43,7 @@ export async function decomposeIntoSteps(userMessage, config) {
 - "content_generation": 让 AI 生成文本（params: { prompt: "...", context_from_steps?: [0,1] }）
 - "image_generation": 生成图片（params: { prompt: "图片描述" }）
 - "summarize": 汇总前面步骤结果（params: { focus?: "总结要点" }）
-- "task_create": 仅当用户明确要求"创建任务/添加任务/记录待办"时使用（params: { title, priority?: "high|normal|low", note? }）
+- "task_create": 仅当用户明确要求"创建任务/添加任务/记录待办"时使用（params: { title, priority?: "normal|urgent|critical", date?: "YYYY-MM-DDTHH:mm", note? }）
 
 ## 关键规则
 
@@ -85,9 +94,14 @@ export async function decomposeIntoSteps(userMessage, config) {
             createdAt: Date.now()
         };
     } catch (e) {
+        // The model did not return usable plan JSON. Falling back to a single
+        // content_generation step is reasonable, but the user asked for a multi-step
+        // plan — flag the downgrade instead of pretending this was the plan.
         return {
             id: generatePlanId(),
             title: '执行计划',
+            degraded: true,
+            degradedReason: `未能解析多步计划（${e.message || e}），已按单步请求处理`,
             steps: [{
                 id: `fallback_0`,
                 index: 0,
@@ -152,7 +166,14 @@ async function executeStep(step, previousResults, config, userMessage) {
         case 'file_read': {
             const paths = step.params.paths || [];
             if (paths.length === 0) throw new Error('缺少文件路径');
-            const files = await readSelectedTextFiles({ paths, maxBytes: 64000 });
+            // These paths come from the model, not the user, so they are only ever
+            // read within the workspace or an explicitly trusted directory. The
+            // backend enforces this; passing the list keeps the error messages useful.
+            const files = await readSelectedTextFiles({
+                paths,
+                maxBytes: 64000,
+                trustedDirectories: config.trustedDirectories || []
+            });
             return {
                 type: 'file_read',
                 files: files.map(f => ({ name: f.name || f.path, content: f.content?.slice(0, 4000) || '' }))
@@ -208,7 +229,12 @@ async function executeStep(step, previousResults, config, userMessage) {
                 type: 'task_create',
                 task: {
                     title: step.params.title || '新任务',
-                    priority: step.params.priority || 'medium',
+                    // The plan JSON is free-form, so run priority through the shared
+                    // vocabulary instead of trusting the model's spelling.
+                    priority: normalizePriority(step.params.priority),
+                    // Tasks are date-scoped throughout the app; without a date the
+                    // task exists in the store but never shows up in any view.
+                    date: step.params.date || localDateTimeNow(),
                     note: step.params.note || '',
                     status: 'todo'
                 }
@@ -238,6 +264,15 @@ export async function executePlan(plan, callbacks = {}) {
         const step = plan.steps[i];
         step.status = 'running';
         if (onStepStart) onStepStart(step, i);
+
+        // A failed step does not stop the run, so a later step can end up
+        // summarizing context that was never produced. Record that so the summary
+        // does not present a guess as an authoritative answer.
+        const missingContext = (step.params?.context_from_steps || [])
+            .filter(idx => results[idx] === undefined);
+        if (missingContext.length) {
+            step.contextIncomplete = missingContext;
+        }
 
         try {
             const config = callbacks.getConfig ? callbacks.getConfig() : {};
@@ -304,6 +339,10 @@ export function formatPlanSummary(plan, results) {
     const parts = [];
     parts.push(`## ${plan.title}\n`);
 
+    if (plan.degraded && plan.degradedReason) {
+        parts.push(`> ⚠️ ${plan.degradedReason}\n`);
+    }
+
     for (const step of plan.steps) {
         const icon = step.status === 'done' ? '✅'
             : step.status === 'failed' ? '❌'
@@ -313,6 +352,10 @@ export function formatPlanSummary(plan, results) {
 
         if (step.status === 'failed' && step.error) {
             parts.push(`   错误: ${step.error}`);
+        }
+        if (step.contextIncomplete?.length) {
+            const refs = step.contextIncomplete.map(idx => idx + 1).join('、');
+            parts.push(`   ⚠️ 依赖的步骤 ${refs} 没有产出结果，本步骤是在信息不完整的情况下执行的`);
         }
     }
 

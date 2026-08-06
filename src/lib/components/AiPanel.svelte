@@ -8,7 +8,6 @@
         showAiSettings,
         sendAiMessage,
         retryLastMessage,
-        confirmLocalFileOperation,
         confirmAiTask,
         confirmMultiTask,
         confirmAllMultiTasks,
@@ -706,48 +705,6 @@
                             >
                                 <i class="ph ph-arrow-clockwise"></i> {$_('ai_panel.retry')}
                             </button>
-                        </div>
-                    {:else if msg.type === "file_confirm"}
-                        <div class="mt-1">
-                            <div class="mb-2 font-bold text-fuchsia-600 text-xs md:text-sm flex items-center gap-1">
-                                <i class="ph ph-folder-open"></i>
-                                {msg.message}
-                            </div>
-                            <div class="bg-fuchsia-50 border border-fuchsia-200 rounded-xl p-3 mb-3 text-left">
-                                <div class="text-[10px] uppercase tracking-[0.16em] font-bold text-fuchsia-500">
-                                    {msg.operation.operation}
-                                </div>
-                                <div class="mt-1 text-xs font-mono break-all text-slate-700">
-                                    {msg.operation.path}
-                                </div>
-                                {#if msg.operation.root}
-                                    <div class="mt-2 text-[10px] text-slate-500 break-all">
-                                        root: {msg.operation.root}
-                                    </div>
-                                {/if}
-                                {#if msg.operation.query}
-                                    <div class="mt-1 text-[10px] text-slate-500">
-                                        query: {msg.operation.query}
-                                    </div>
-                                {/if}
-                                {#if msg.operation.content}
-                                    <pre class="mt-3 text-[10px] leading-6 rounded-lg bg-white border border-fuchsia-100 p-3 overflow-x-auto text-slate-600"><code>{msg.operation.content.slice(0, 400)}{msg.operation.content.length > 400 ? '\n...' : ''}</code></pre>
-                                {/if}
-                            </div>
-                            <div class="flex gap-2">
-                                <button
-                                    on:click={() => confirmLocalFileOperation(index, msg.operation)}
-                                    class="flex-1 bg-fuchsia-600 text-white py-1.5 rounded-lg font-bold text-xs hover:bg-fuchsia-700 flex items-center justify-center gap-1"
-                                >
-                                    <i class="ph ph-check"></i> {$_('common.confirm')}
-                                </button>
-                                <button
-                                    on:click={() => removeAiMessage(index)}
-                                    class="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs hover:bg-slate-200"
-                                >
-                                    {$_('common.cancel')}
-                                </button>
-                            </div>
                         </div>
                     {:else if msg.type === "task_card"}
                         <div class="mt-1">

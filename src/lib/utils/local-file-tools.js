@@ -260,7 +260,8 @@ export async function searchLocalFiles({
     return await invoke('search_local_files', {
         root: root || null,
         query,
-        maxResults
+        maxResults,
+        trustedDirs: trustedDirectories
     });
 }
 
@@ -290,7 +291,8 @@ export async function readLocalFile({
 
     return await invoke('read_local_file', {
         path,
-        maxBytes
+        maxBytes,
+        trustedDirs: trustedDirectories
     });
 }
 
@@ -388,10 +390,12 @@ export async function pickTrustedDirectory({
     return typeof selected === 'string' ? selected : '';
 }
 
+// The picker runs in the Rust backend so that the user's selection is recorded there
+// as the read authorization. Picking in the webview and handing paths back would let
+// any caller of read_selected_text_files (including AI-generated execution plans)
+// read arbitrary files.
 export async function pickLocalTextFiles() {
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const selected = await open({
-        multiple: true,
+    return await invoke('pick_files_for_read', {
         filters: [
             {
                 name: 'Text and code files',
@@ -399,85 +403,95 @@ export async function pickLocalTextFiles() {
             }
         ]
     });
-
-    if (!selected) return [];
-    return Array.isArray(selected) ? selected : [selected];
 }
 
 export async function readSelectedTextFiles({
     paths = [],
-    maxBytes = 128000
+    maxBytes = 128000,
+    trustedDirectories = []
 } = {}) {
     if (!Array.isArray(paths) || paths.length === 0) {
         return [];
     }
     return await invoke('read_selected_text_files', {
         paths,
-        maxBytes
+        maxBytes,
+        trustedDirs: trustedDirectories
     });
 }
 
-export function looksLikeFileIntent(text = '') {
-    const lowerText = String(text).toLowerCase();
-    const keywords = [
-        '文件',
-        '目录',
-        '文件夹',
-        '路径',
-        '读取',
-        '打开文件',
-        '扫描',
-        '查找文件',
-        '搜索文件',
-        '列出',
-        '写入',
-        '写到',
-        '保存到',
-        '创建文件',
-        '修改文件',
-        '删除文件',
-        '检查目录',
-        '检查文件',
-        '查看文件',
-        '查看目录',
-        '有什么文件',
-        '有哪些文件',
-        '文件内容',
-        '文件列表',
-        '当前目录',
-        '工作目录',
-        '写个文件',
-        '写一个文件',
-        '文本文件',
-        '.txt',
-        '.json',
-        '.md',
-        '.csv',
-        '.log',
-        'read file',
-        'scan folder',
-        'scan directory',
-        'search file',
-        'open file',
-        'write file',
-        'delete file',
-        'list files',
-        'list directory',
-        'check directory',
-        'file content',
-        'workspace'
-    ];
+// 已知文件扩展名白名单（文本 + 媒体 + 常见文档/压缩），用于"强信号"文件意图判定。
+const KNOWN_FILE_EXTENSIONS = [
+    ...SUPPORTED_TEXT_FILE_EXTENSIONS,
+    ...SUPPORTED_MEDIA_EXTENSIONS,
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'zip', 'rar', '7z', 'gz', 'tar'
+];
+// 匹配 ".md" / ".json" 等真实扩展名，且后面不接更多字母数字，避免 "v1.2"、"等3.0" 之类误判。
+const KNOWN_FILE_EXTENSION_PATTERN = new RegExp(
+    '\\.(?:' + KNOWN_FILE_EXTENSIONS.join('|') + ')(?![a-z0-9])',
+    'i'
+);
+const FILE_ACTION_VERBS_ZH = '读取|读一下|读出|打开|写入|写到|保存到|保存为|新建|创建|修改|覆盖|追加|删除|移除|扫描|列出|查找|搜索|查看|检查';
+const FILE_NOUNS_ZH = '文件|文件夹|目录|路径';
+// "操作动词 + (≤4 个非标点字符) + 文件名词" 紧邻搭配，如「读取文件」「打开这个目录」；
+// 像「修改**错别字/文件」这类动词与名词间隔过远的描述句不会命中。
+const FILE_VERB_NOUN_PATTERN_ZH = new RegExp(
+    '(?:' + FILE_ACTION_VERBS_ZH + ')[^，。；、\\s]{0,4}(?:' + FILE_NOUNS_ZH + ')'
+);
+const FILE_VERB_NOUN_PATTERN_EN = /\b(?:read|open|write|save|create|modify|edit|delete|remove|scan|list|search|view|check)\b[^.,;\n]{0,12}\b(?:files?|folders?|director(?:y|ies)|paths?)\b/i;
+// 必须包含分隔符的路径 token：Windows 盘符路径、含多级的 POSIX 路径、./ 或 ../ 相对路径。
+const STRICT_PATH_PATTERNS = [
+    /[a-z]:[\\/][^\s"'`，。；、]+/i,
+    /(?:^|[\s(])[.~]?\/[^\s"'`，。；、)]+\/[^\s"'`，。；、)]*/,
+    /(?:^|[\s(])\.{1,2}\/[^\s"'`，。；、)]+/
+];
+const WORKSPACE_HINT_PATTERN = /(?:工作目录|工作区|当前目录|workspace)/i;
+const WORKSPACE_ACTION_PATTERN = new RegExp(
+    '(?:' + FILE_ACTION_VERBS_ZH + '|read|open|write|save|create|scan|list|search)',
+    'i'
+);
 
-    if (keywords.some((keyword) => lowerText.includes(keyword))) {
+function extractQuotedFileSegment(text = '') {
+    const patterns = [/`([^`]+)`/, /“([^”]+)”/, /"([^"]+)"/, /'([^']+)'/];
+    for (const pattern of patterns) {
+        const match = String(text).match(pattern);
+        if (match?.[1]?.trim()) return match[1].trim();
+    }
+    return '';
+}
+
+// 仅当出现"强信号"时才判定为本地文件意图，避免「需要修改错别字/文件」这类描述句被误判。
+export function looksLikeFileIntent(text = '') {
+    const raw = String(text || '');
+    const lowerText = raw.toLowerCase();
+
+    // 1) 明确的路径 token（必须含分隔符）
+    if (STRICT_PATH_PATTERNS.some((pattern) => pattern.test(raw))) {
         return true;
     }
 
-    const pathPatterns = [
-        /[a-z]:\\[^\s]+/i,
-        /(?:^|\s)[.~]?\/[^\s]+/,
-        /\w+\.\w{1,5}$/,
-    ];
-    return pathPatterns.some((pattern) => pattern.test(lowerText));
+    // 2) 带已知扩展名的文件名，如 report.md、data.json
+    if (KNOWN_FILE_EXTENSION_PATTERN.test(raw)) {
+        return true;
+    }
+
+    // 3) 引号包裹且内含路径分隔符或已知扩展名
+    const quoted = extractQuotedFileSegment(raw);
+    if (quoted && (/[\\/]/.test(quoted) || KNOWN_FILE_EXTENSION_PATTERN.test(quoted))) {
+        return true;
+    }
+
+    // 4) "操作动词 + 文件名词"紧邻搭配（中/英）
+    if (FILE_VERB_NOUN_PATTERN_ZH.test(raw) || FILE_VERB_NOUN_PATTERN_EN.test(lowerText)) {
+        return true;
+    }
+
+    // 5) 明确的工作目录/工作区 + 操作动词
+    if (WORKSPACE_HINT_PATTERN.test(raw) && WORKSPACE_ACTION_PATTERN.test(raw)) {
+        return true;
+    }
+
+    return false;
 }
 
 export function getMediaType(ext = '') {
@@ -494,11 +508,156 @@ export function getFileExtension(path = '') {
     return dotIndex > 0 ? name.slice(dotIndex + 1).toLowerCase() : '';
 }
 
+const TEXT_MIME_TYPES = new Set([
+    'application/json',
+    'application/ld+json',
+    'application/xml',
+    'application/x-sh',
+    'application/x-shellscript',
+    'application/x-yaml',
+    'application/yaml',
+    'image/svg+xml'
+]);
+
+function guessExtensionFromMimeType(mimeType = '') {
+    const normalized = String(mimeType || '').toLowerCase();
+    if (!normalized) return '';
+    if (normalized === 'image/jpeg') return 'jpg';
+    if (normalized === 'image/png') return 'png';
+    if (normalized === 'image/gif') return 'gif';
+    if (normalized === 'image/webp') return 'webp';
+    if (normalized === 'image/bmp') return 'bmp';
+    if (normalized === 'image/svg+xml') return 'svg';
+    if (normalized === 'audio/mpeg') return 'mp3';
+    if (normalized === 'audio/wav') return 'wav';
+    if (normalized === 'audio/ogg') return 'ogg';
+    if (normalized === 'video/mp4') return 'mp4';
+    if (normalized === 'video/webm') return 'webm';
+    if (normalized === 'application/json') return 'json';
+    if (normalized === 'text/markdown') return 'md';
+    if (normalized.startsWith('text/')) return 'txt';
+    return '';
+}
+
+function getSafePastedFileName(file, index = 0) {
+    const rawName = String(file?.name || '').trim();
+    if (rawName) return rawName;
+
+    const ext = guessExtensionFromMimeType(file?.type) || 'bin';
+    return `pasted-file-${index + 1}.${ext}`;
+}
+
+function isPastedTextFile(file, name = '') {
+    const mimeType = String(file?.type || '').toLowerCase();
+    const ext = getFileExtension(name);
+    return SUPPORTED_TEXT_FILE_EXTENSIONS.includes(ext) ||
+        mimeType.startsWith('text/') ||
+        TEXT_MIME_TYPES.has(mimeType);
+}
+
+function getPastedMediaType(file, name = '') {
+    const mimeType = String(file?.type || '').toLowerCase();
+    const ext = getFileExtension(name);
+    return getMediaType(ext) ||
+        (mimeType.startsWith('image/') ? 'image' : null) ||
+        (mimeType.startsWith('audio/') ? 'audio' : null) ||
+        (mimeType.startsWith('video/') ? 'video' : null);
+}
+
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+}
+
+function getPastedAttachmentPath(file, name, index = 0) {
+    const encodedName = encodeURIComponent(name || `file-${index + 1}`);
+    const size = Number(file?.size || 0);
+    const modified = Number(file?.lastModified || Date.now());
+    return `clipboard://${encodedName}?size=${size}&modified=${modified}&index=${index}`;
+}
+
+export async function readPastedFilesAsAttachments(fileList, {
+    textMaxBytes = 96000,
+    mediaMaxBytes = 10_000_000
+} = {}) {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (files.length === 0) {
+        return [];
+    }
+
+    const attachments = [];
+    for (const [index, file] of files.entries()) {
+        const name = getSafePastedFileName(file, index);
+        const mimeType = String(file.type || '');
+        const size = Number(file.size || 0);
+        const path = getPastedAttachmentPath(file, name, index);
+        const base = {
+            path,
+            name,
+            size,
+            mimeType,
+            truncated: false
+        };
+
+        if (isPastedTextFile(file, name)) {
+            const limit = Math.max(1024, Number(textMaxBytes || 96000));
+            const truncated = size > limit;
+            const blob = truncated ? file.slice(0, limit) : file;
+            attachments.push({
+                ...base,
+                content: await blob.text(),
+                truncated,
+                mediaType: 'text'
+            });
+            continue;
+        }
+
+        const mediaType = getPastedMediaType(file, name);
+        if (mediaType) {
+            const limit = Math.max(1024, Number(mediaMaxBytes || 10_000_000));
+            const truncated = size > limit;
+            let base64Data = '';
+            let thumbnailUrl = '';
+            if (!truncated) {
+                base64Data = arrayBufferToBase64(await file.arrayBuffer());
+                if (mediaType === 'image' && base64Data) {
+                    thumbnailUrl = `data:${mimeType || 'application/octet-stream'};base64,${base64Data}`;
+                }
+            }
+            attachments.push({
+                ...base,
+                content: truncated ? '（文件过大，未读取二进制内容）' : '',
+                truncated,
+                mediaType,
+                base64Data,
+                thumbnailUrl
+            });
+            continue;
+        }
+
+        attachments.push({
+            ...base,
+            content: '（此文件类型无法自动读取内容，仅作为文件附件接收。）',
+            mediaType: 'file'
+        });
+    }
+
+    return attachments;
+}
+
 export async function pickMediaFiles() {
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const selected = await open({
-        multiple: true,
+    return await invoke('pick_files_for_read', {
         filters: [
+            {
+                name: 'All media',
+                extensions: SUPPORTED_MEDIA_EXTENSIONS
+            },
             {
                 name: 'Images',
                 extensions: SUPPORTED_IMAGE_EXTENSIONS
@@ -510,28 +669,23 @@ export async function pickMediaFiles() {
             {
                 name: 'Video',
                 extensions: SUPPORTED_VIDEO_EXTENSIONS
-            },
-            {
-                name: 'All media',
-                extensions: SUPPORTED_MEDIA_EXTENSIONS
             }
         ]
     });
-
-    if (!selected) return [];
-    return Array.isArray(selected) ? selected : [selected];
 }
 
 export async function readSelectedMediaFiles({
     paths = [],
-    maxBytes = 10_000_000
+    maxBytes = 10_000_000,
+    trustedDirectories = []
 } = {}) {
     if (!Array.isArray(paths) || paths.length === 0) {
         return [];
     }
     return await invoke('read_binary_files', {
         paths,
-        maxBytes
+        maxBytes,
+        trustedDirs: trustedDirectories
     });
 }
 

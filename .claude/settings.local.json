@@ -10,7 +10,11 @@
       "Bash(curl -s \"https://api.github.com/search/repositories?q=tauri-plugin-mobile-onbackpressed-listener\")",
       "Bash(curl -sL \"https://jsr.io/@kingsword/tauri-plugin-mobile-onbackpressed-listener/meta.json\")",
       "Bash(curl -sL \"https://static.crates.io/crates/tauri-plugin-mobile-onbackpressed-listener/tauri-plugin-mobile-onbackpressed-listener-2.0.0.crate\" -o /tmp/plugin.crate)",
-      "Bash(tar -xzf plugin.crate -C /tmp/)"
+      "Bash(tar -xzf plugin.crate -C /tmp/)",
+      "Bash(git rm *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "playwright"
+  ]
 }
