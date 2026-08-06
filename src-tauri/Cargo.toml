@@ -1,6 +1,6 @@
 [package]
 name = "workplan"
-version = "0.3.10"
+version = "0.3.11"
 description = "WorkPlan with AI - Task Management"
 authors = ["MakotoArai-CN"]
 edition = "2021"
@@ -31,12 +31,15 @@ walkdir = "2.5"
 base64 = "0.22"
 ego-tree = "0.10"
 dirs = "6"
+getrandom = "0.3"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 winreg = { version = "0.52", optional = true }
 
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 tauri-plugin-mobile-onbackpressed-listener = "2.0.0"
+# Biometric unlock is Android-only in this app; the plugin has no desktop support.
+tauri-plugin-biometric = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

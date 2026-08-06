@@ -9,6 +9,11 @@
     import { currentView } from "../stores/tasks.js";
     import { showConfirm, showAlert, showToast } from "../stores/modal.js";
     import { generatePassword } from "../utils/crypto.js";
+    import {
+        isDeviceBindingSupported,
+        validatePinFormat,
+        MAX_PIN_ATTEMPTS,
+    } from "../utils/device-auth.js";
     import { exportToCSV, exportToEncryptedJSON } from "../utils/export.js";
     import { onMount, onDestroy, tick } from "svelte";
     import CryptoJS from "crypto-js";
@@ -20,6 +25,39 @@
     let unlockPassword = "";
     let showSetupModal = false;
     let showUnlockModal = false;
+
+    // --- Device binding / PIN / recovery ---
+    let deviceBindingSupported = false;
+    let deviceBindingEnabled = false;
+    let pinEnabled = false;
+    let pinAttemptsRemaining = MAX_PIN_ATTEMPTS;
+    let unlockMode = "password"; // "password" | "pin"
+    let unlockPin = "";
+    let pinError = "";
+
+    let showPinSetupModal = false;
+    let newPin = "";
+    let confirmPin = "";
+
+    let showRecoveryCodeModal = false;
+    let recoveryCodeToShow = "";
+
+    let showRecoverModal = false;
+    let recoverCode = "";
+    let recoverMasterPassword = "";
+
+    // Biometric is Android-only; on every other build it stays unsupported.
+    let biometricSupported = false;
+    let biometricEnabled = false;
+    let showBiometricSetupModal = false;
+    let biometricSetupPin = "";
+
+    function refreshSecurityState() {
+        deviceBindingEnabled = passwordsStore.isDeviceBindingEnabled();
+        pinEnabled = passwordsStore.isPinEnabled();
+        pinAttemptsRemaining = passwordsStore.getPinAttemptsRemaining();
+        biometricEnabled = passwordsStore.isBiometricEnabled();
+    }
     let showAddModal = false;
     let showEditModal = false;
     let showExportModal = false;
@@ -78,15 +116,31 @@ let confirmNewMasterPassword = "";
 
         passwordsStore.load();
 
-        if (!passwordsStore.hasMasterPassword()) {
-            showSetupModal = true;
-        } else if (!$isPasswordsUnlocked) {
-            if ($rememberSession && passwordsStore.isSessionValid()) {
-                passwordsStore.restoreSession();
-            } else {
-                showUnlockModal = true;
+        (async () => {
+            deviceBindingSupported = await isDeviceBindingSupported();
+            biometricSupported = await passwordsStore.isBiometricSupported();
+            refreshSecurityState();
+
+            if (!passwordsStore.hasMasterPassword()) {
+                showSetupModal = true;
+                return;
             }
-        }
+            if ($isPasswordsUnlocked) return;
+
+            if ($rememberSession && passwordsStore.isSessionValid()) {
+                if (await passwordsStore.restoreSession()) return;
+            }
+
+            // Offer the PIN pad first when one is enrolled.
+            unlockMode = pinEnabled ? "pin" : "password";
+            showUnlockModal = true;
+
+            // With biometrics enrolled, prompt straight away so the common case is
+            // a single tap. Any failure just leaves the PIN/password form visible.
+            if (biometricEnabled && biometricSupported) {
+                await attemptBiometricUnlock({ silent: true });
+            }
+        })();
 
         return () => {
             window.removeEventListener("resize", resizeHandler);
@@ -149,7 +203,7 @@ let confirmNewMasterPassword = "";
         return decrypted;
     }
 
-    function setupMasterPassword() {
+    async function setupMasterPassword() {
         const t = getI18n(_);
         if (masterPassword.length < 8) {
             showAlert({
@@ -167,18 +221,293 @@ let confirmNewMasterPassword = "";
             });
             return;
         }
-        passwordsStore.setMasterPassword(masterPassword);
+        await passwordsStore.setMasterPassword(masterPassword);
         showSetupModal = false;
         masterPassword = "";
         confirmPassword = "";
     }
 
-    function unlockVault() {
+    async function unlockWithPin() {
         const t = getI18n(_);
-        if (passwordsStore.unlock(unlockPassword)) {
+        pinError = "";
+
+        const result = await passwordsStore.unlockWithPin(unlockPin);
+        refreshSecurityState();
+
+        if (result.success) {
+            showUnlockModal = false;
+            unlockPin = "";
+            decryptedCache = {};
+            return;
+        }
+
+        unlockPin = "";
+
+        if (result.error === "locked_out" || result.error === "not_enabled") {
+            // The wrapper is gone; only the master password can open the vault now.
+            unlockMode = "password";
+            pinError = "";
+            showAlert({
+                title: t("common.warning"),
+                message: t("passwords.pin_locked_out"),
+                variant: "danger",
+            });
+            return;
+        }
+
+        if (result.error === "no_device_key") {
+            unlockMode = "password";
+            showAlert({
+                title: t("common.warning"),
+                message: t("passwords.device_binding_unsupported"),
+                variant: "danger",
+            });
+            return;
+        }
+
+        pinError = t("passwords.pin_wrong", {
+            values: { count: result.attemptsRemaining },
+        });
+    }
+
+    function switchToPasswordUnlock() {
+        unlockMode = "password";
+        unlockPin = "";
+        pinError = "";
+    }
+
+    async function handleEnableDeviceBinding() {
+        const t = getI18n(_);
+        if (!deviceBindingSupported) {
+            showAlert({
+                title: t("common.warning"),
+                message: t("passwords.device_binding_unsupported"),
+                variant: "warning",
+            });
+            return;
+        }
+
+        const confirmed = await showConfirm({
+            title: t("passwords.device_binding"),
+            message: t("passwords.device_binding_enable_confirm"),
+        });
+        if (!confirmed) return;
+
+        const result = await passwordsStore.enableDeviceBinding();
+        refreshSecurityState();
+
+        if (!result.success) {
+            showAlert({
+                title: t("common.warning"),
+                message: result.error,
+                variant: "danger",
+            });
+            return;
+        }
+
+        decryptedCache = {};
+        recoveryCodeToShow = result.recoveryCode;
+        showRecoveryCodeModal = true;
+    }
+
+    async function handleDisableDeviceBinding() {
+        const t = getI18n(_);
+        const confirmed = await showConfirm({
+            title: t("passwords.device_binding"),
+            message: t("passwords.device_binding_disable_confirm"),
+            variant: "danger",
+        });
+        if (!confirmed) return;
+
+        const result = await passwordsStore.disableDeviceBinding();
+        refreshSecurityState();
+        decryptedCache = {};
+
+        showToast({
+            message: result.success ? t("passwords.device_binding_off") : result.error,
+            type: result.success ? "success" : "error",
+        });
+    }
+
+    async function handleRegenerateRecoveryCode() {
+        const t = getI18n(_);
+        const result = await passwordsStore.regenerateRecoveryCode();
+        if (!result.success) {
+            showAlert({
+                title: t("common.warning"),
+                message: result.error,
+                variant: "danger",
+            });
+            return;
+        }
+        recoveryCodeToShow = result.recoveryCode;
+        showRecoveryCodeModal = true;
+    }
+
+    async function copyRecoveryCode() {
+        const t = getI18n(_);
+        try {
+            await navigator.clipboard.writeText(recoveryCodeToShow);
+            showToast({ message: t("passwords.recovery_code_copied"), type: "success" });
+        } catch {
+            // Clipboard can be unavailable; the code is on screen regardless.
+        }
+    }
+
+    function openPinSetup() {
+        newPin = "";
+        confirmPin = "";
+        showPinSetupModal = true;
+    }
+
+    async function handleSetPin() {
+        const t = getI18n(_);
+
+        const format = validatePinFormat(newPin);
+        if (!format.valid) {
+            showAlert({
+                title: t("common.warning"),
+                message: format.error,
+                variant: "warning",
+            });
+            return;
+        }
+        if (newPin !== confirmPin) {
+            showAlert({
+                title: t("common.warning"),
+                message: t("passwords.pin_mismatch"),
+                variant: "warning",
+            });
+            return;
+        }
+
+        const result = await passwordsStore.enablePin(newPin);
+        refreshSecurityState();
+
+        if (!result.success) {
+            showAlert({
+                title: t("common.warning"),
+                message: result.error,
+                variant: "danger",
+            });
+            return;
+        }
+
+        showPinSetupModal = false;
+        newPin = "";
+        confirmPin = "";
+        showToast({ message: t("passwords.pin_enabled"), type: "success" });
+    }
+
+    function handleRemovePin() {
+        const t = getI18n(_);
+        passwordsStore.disablePin();
+        refreshSecurityState();
+        showToast({ message: t("passwords.pin_removed"), type: "success" });
+    }
+
+    function openBiometricSetup() {
+        biometricSetupPin = "";
+        showBiometricSetupModal = true;
+    }
+
+    async function handleEnableBiometric() {
+        const t = getI18n(_);
+        const result = await passwordsStore.enableBiometric(biometricSetupPin);
+        refreshSecurityState();
+
+        if (!result.success) {
+            showAlert({
+                title: t("common.warning"),
+                message:
+                    result.error === "wrong_pin"
+                        ? t("passwords.pin_wrong", {
+                              values: { remaining: result.attemptsRemaining ?? 0 },
+                          })
+                        : t("passwords.biometric_failed"),
+                variant: "danger",
+            });
+            return;
+        }
+
+        showBiometricSetupModal = false;
+        biometricSetupPin = "";
+        showToast({ message: t("passwords.biometric_enabled"), type: "success" });
+    }
+
+    function handleRemoveBiometric() {
+        const t = getI18n(_);
+        passwordsStore.disableBiometric();
+        refreshSecurityState();
+        showToast({ message: t("passwords.biometric_removed"), type: "success" });
+    }
+
+    /**
+     * Biometric unlock. On cancel we stay on whatever unlock form is showing so the
+     * user can fall back to PIN or the master password.
+     */
+    async function unlockWithBiometric() {
+        const t = getI18n(_);
+        biometricError = "";
+        const result = await passwordsStore.unlockWithBiometric(
+            t("passwords.biometric_unlock"),
+        );
+
+        if (result.success) {
+            showUnlockModal = false;
+            unlockPin = "";
+            unlockPassword = "";
+            decryptedCache = {};
+            refreshSecurityState();
+            return;
+        }
+
+        refreshSecurityState();
+        if (result.error === "cancelled") return;
+
+        // A lockout destroys the PIN (and with it biometric), so surface that the
+        // master password is now the only way in.
+        biometricError = pinEnabled
+            ? t("passwords.biometric_failed")
+            : t("passwords.pin_locked_out");
+        if (!pinEnabled) unlockMode = "password";
+    }
+
+    async function handleRecoverWithCode() {
+        const t = getI18n(_);
+        const result = await passwordsStore.recoverWithCode(
+            recoverCode,
+            recoverMasterPassword,
+        );
+        refreshSecurityState();
+
+        if (!result.success) {
+            showAlert({
+                title: t("passwords.recover_failed"),
+                message: result.error,
+                variant: "danger",
+            });
+            return;
+        }
+
+        showRecoverModal = false;
+        showUnlockModal = false;
+        recoverCode = "";
+        recoverMasterPassword = "";
+        decryptedCache = {};
+
+        showToast({ message: t("passwords.recover_success"), type: "success" });
+        recoveryCodeToShow = result.recoveryCode;
+        showRecoveryCodeModal = true;
+    }
+
+    async function unlockVault() {
+        const t = getI18n(_);
+        if (await passwordsStore.unlock(unlockPassword)) {
             showUnlockModal = false;
             unlockPassword = "";
             decryptedCache = {};
+            refreshSecurityState();
         } else {
             showAlert({
                 title: t('common.warning'),
@@ -470,6 +799,7 @@ async function handleChangeMasterPassword() {
                 const result = await exportToCSV(data, `passwords_${timestamp}.csv`, {
                     showToast,
                 });
+                if (result.cancelled) return;
                 if (!result.success) throw new Error(result.error);
             } else if (format === "json") {
                 const result = await exportToEncryptedJSON(
@@ -478,6 +808,7 @@ async function handleChangeMasterPassword() {
                     masterPass,
                     { showToast },
                 );
+                if (result.cancelled) return;
                 if (!result.success) throw new Error(result.error);
             }
             if (selectMode) {
@@ -931,6 +1262,61 @@ async function handleChangeMasterPassword() {
                                 {$_('passwords.change_master')}
                             </button>
                             <hr class="my-1 border-slate-100" />
+                            {#if deviceBindingSupported}
+                                <button
+                                    on:click={deviceBindingEnabled
+                                        ? handleDisableDeviceBinding
+                                        : handleEnableDeviceBinding}
+                                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                                >
+                                    <i
+                                        class="ph {deviceBindingEnabled
+                                            ? 'ph-check-square'
+                                            : 'ph-square'} text-lg text-emerald-600"
+                                    ></i>
+                                    {$_('passwords.device_binding')}
+                                </button>
+                                {#if deviceBindingEnabled}
+                                    <button
+                                        on:click={handleRegenerateRecoveryCode}
+                                        class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                                    >
+                                        <i class="ph ph-key text-lg text-emerald-600"></i>
+                                        {$_('passwords.recovery_code_regenerate')}
+                                    </button>
+                                    <button
+                                        on:click={pinEnabled ? handleRemovePin : openPinSetup}
+                                        class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                                    >
+                                        <i
+                                            class="ph {pinEnabled
+                                                ? 'ph-check-square'
+                                                : 'ph-square'} text-lg text-amber-600"
+                                        ></i>
+                                        {pinEnabled
+                                            ? $_('passwords.pin_remove')
+                                            : $_('passwords.pin_set')}
+                                    </button>
+                                    {#if biometricSupported && pinEnabled}
+                                        <button
+                                            on:click={biometricEnabled
+                                                ? handleRemoveBiometric
+                                                : openBiometricSetup}
+                                            class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                                        >
+                                            <i
+                                                class="ph {biometricEnabled
+                                                    ? 'ph-check-square'
+                                                    : 'ph-square'} text-lg text-cyan-600"
+                                            ></i>
+                                            {biometricEnabled
+                                                ? $_('passwords.biometric_disable')
+                                                : $_('passwords.biometric_enable')}
+                                        </button>
+                                    {/if}
+                                {/if}
+                                <hr class="my-1 border-slate-100" />
+                            {/if}
                             <button
                                 on:click={toggleRememberSession}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
@@ -1416,35 +1802,276 @@ async function handleChangeMasterPassword() {
             >
                 <i class="ph-fill ph-lock text-amber-600"></i> {$_('passwords.unlock_title')}
             </h3>
-            <div class="space-y-3">
-                <div>
-                    <label
-                        for="password-unlock-input"
-                        class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >{$_('passwords.label_password')}</label
-                    >
-                    <input
-                        id="password-unlock-input"
-                        type="password"
-                        bind:value={unlockPassword}
-                        on:keydown={(e) => e.key === "Enter" && unlockVault()}
-                        placeholder={$_('passwords.master_placeholder')}
-                        class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-amber-400"
-                    />
+            {#if unlockMode === "pin" && pinEnabled}
+                <div class="space-y-3">
+                    <div>
+                        <label
+                            for="password-unlock-pin"
+                            class="text-xs font-bold text-slate-500 uppercase mb-1 block"
+                            >{$_('passwords.pin_title')}</label
+                        >
+                        <input
+                            id="password-unlock-pin"
+                            type="password"
+                            inputmode="numeric"
+                            autocomplete="off"
+                            maxlength="12"
+                            bind:value={unlockPin}
+                            on:keydown={(e) => e.key === "Enter" && unlockWithPin()}
+                            placeholder={$_('passwords.pin_placeholder')}
+                            class="w-full border border-slate-200 rounded-lg px-3 py-2.5 tracking-[0.4em] text-center focus:outline-none focus:border-amber-400"
+                        />
+                        {#if pinError}
+                            <p class="text-xs text-red-600 mt-1.5 font-medium">{pinError}</p>
+                        {/if}
+                    </div>
                 </div>
+                <button
+                    on:click={unlockWithPin}
+                    class="w-full mt-4 py-3 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
+                >
+                    {$_('passwords.pin_unlock')}
+                </button>
+                {#if biometricEnabled}
+                    <button
+                        on:click={handleBiometricUnlock}
+                        disabled={biometricBusy}
+                        class="w-full mt-3 py-2.5 border border-amber-200 text-amber-700 rounded-lg font-bold text-sm hover:bg-amber-50 disabled:opacity-60 flex items-center justify-center gap-2"
+                    >
+                        <i class="ph {biometricBusy ? 'ph-spinner animate-spin' : 'ph-fingerprint'} text-lg"></i>
+                        {$_('passwords.biometric_unlock')}
+                    </button>
+                {/if}
+                <button
+                    on:click={switchToPasswordUnlock}
+                    class="w-full mt-3 py-2 text-slate-500 hover:text-amber-700 text-sm font-bold"
+                >
+                    {$_('passwords.use_master_instead')}
+                </button>
+            {:else}
+                <div class="space-y-3">
+                    <div>
+                        <label
+                            for="password-unlock-input"
+                            class="text-xs font-bold text-slate-500 uppercase mb-1 block"
+                            >{$_('passwords.label_password')}</label
+                        >
+                        <input
+                            id="password-unlock-input"
+                            type="password"
+                            bind:value={unlockPassword}
+                            on:keydown={(e) => e.key === "Enter" && unlockVault()}
+                            placeholder={$_('passwords.master_placeholder')}
+                            class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-amber-400"
+                        />
+                    </div>
+                </div>
+                <button
+                    on:click={unlockVault}
+                    class="w-full mt-4 py-3 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
+                >
+                    {$_('passwords.unlock')}
+                </button>
+                {#if pinEnabled}
+                    <button
+                        on:click={() => { unlockMode = "pin"; pinError = ""; }}
+                        class="w-full mt-3 py-2 text-slate-500 hover:text-amber-700 text-sm font-bold"
+                    >
+                        {$_('passwords.pin_unlock')}
+                    </button>
+                {/if}
+                {#if deviceBindingEnabled}
+                    <button
+                        on:click={() => (showRecoverModal = true)}
+                        class="w-full mt-2 py-2 text-slate-500 hover:text-amber-700 text-sm font-bold"
+                    >
+                        {$_('passwords.recover_title')}
+                    </button>
+                {/if}
+                <button
+                    on:click={handleForgotPassword}
+                    class="w-full mt-3 py-2 text-slate-500 hover:text-red-600 text-sm font-bold"
+                >
+                    {$_('passwords.forgot_password')}
+                </button>
+            {/if}
+        </div>
+    </div>
+{/if}
+
+{#if showRecoveryCodeModal}
+    <div
+        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <i class="ph-fill ph-key text-emerald-600"></i>
+                {$_('passwords.recovery_code_title')}
+            </h3>
+            <p class="text-sm text-slate-600 mb-4">
+                {$_('passwords.recovery_code_desc')}
+            </p>
+            <div
+                class="bg-slate-50 border-2 border-dashed border-emerald-300 rounded-lg p-4 text-center"
+            >
+                <code class="text-lg font-bold tracking-wider text-slate-800 break-all">
+                    {recoveryCodeToShow}
+                </code>
             </div>
             <button
-                on:click={unlockVault}
-                class="w-full mt-4 py-3 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
+                on:click={copyRecoveryCode}
+                class="w-full mt-3 py-2.5 border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-2"
             >
-                {$_('passwords.unlock')}
+                <i class="ph ph-copy"></i>
+                {$_('common.copy')}
             </button>
             <button
-                on:click={handleForgotPassword}
-                class="w-full mt-3 py-2 text-slate-500 hover:text-red-600 text-sm font-bold"
+                on:click={() => {
+                    showRecoveryCodeModal = false;
+                    recoveryCodeToShow = "";
+                }}
+                class="w-full mt-3 py-3 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700"
             >
-                {$_('passwords.forgot_password')}
+                {$_('passwords.recovery_code_saved')}
             </button>
+        </div>
+    </div>
+{/if}
+
+{#if showPinSetupModal}
+    <div
+        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <i class="ph-fill ph-number-square-four text-amber-600"></i>
+                {$_('passwords.pin_set')}
+            </h3>
+            <p class="text-sm text-slate-600 mb-4">{$_('passwords.pin_desc')}</p>
+            <div class="space-y-3">
+                <input
+                    type="password"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    maxlength="12"
+                    bind:value={newPin}
+                    placeholder={$_('passwords.pin_placeholder')}
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2.5 tracking-[0.3em] text-center focus:outline-none focus:border-amber-400"
+                />
+                <input
+                    type="password"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    maxlength="12"
+                    bind:value={confirmPin}
+                    on:keydown={(e) => e.key === "Enter" && handleSetPin()}
+                    placeholder={$_('passwords.pin_confirm_placeholder')}
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2.5 tracking-[0.3em] text-center focus:outline-none focus:border-amber-400"
+                />
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button
+                    on:click={() => (showPinSetupModal = false)}
+                    class="flex-1 py-2.5 border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50"
+                >
+                    {$_('common.cancel')}
+                </button>
+                <button
+                    on:click={handleSetPin}
+                    class="flex-1 py-2.5 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
+                >
+                    {$_('common.confirm')}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+{#if showBiometricSetupModal}
+    <div
+        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <i class="ph-fill ph-fingerprint text-teal-600"></i>
+                {$_('passwords.biometric_title')}
+            </h3>
+            <p class="text-sm text-slate-600 mb-4">{$_('passwords.biometric_desc')}</p>
+            <div class="space-y-3">
+                <label
+                    for="password-biometric-pin"
+                    class="text-xs font-bold text-slate-500 uppercase block"
+                    >{$_('passwords.biometric_confirm_pin')}</label
+                >
+                <input
+                    id="password-biometric-pin"
+                    type="password"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    maxlength="12"
+                    bind:value={biometricSetupPin}
+                    on:keydown={(e) => e.key === "Enter" && handleEnableBiometric()}
+                    placeholder={$_('passwords.pin_placeholder')}
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2.5 tracking-[0.3em] text-center focus:outline-none focus:border-teal-400"
+                />
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button
+                    on:click={() => (showBiometricSetupModal = false)}
+                    class="flex-1 py-2.5 border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50"
+                >
+                    {$_('common.cancel')}
+                </button>
+                <button
+                    on:click={handleEnableBiometric}
+                    class="flex-1 py-2.5 bg-teal-600 text-white rounded-lg font-bold hover:bg-teal-700"
+                >
+                    {$_('common.confirm')}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+{#if showRecoverModal}
+    <div
+        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <i class="ph-fill ph-lifebuoy text-emerald-600"></i>
+                {$_('passwords.recover_title')}
+            </h3>
+            <p class="text-sm text-slate-600 mb-4">{$_('passwords.recover_desc')}</p>
+            <div class="space-y-3">
+                <input
+                    type="text"
+                    bind:value={recoverCode}
+                    placeholder={$_('passwords.recover_placeholder')}
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2.5 font-mono uppercase focus:outline-none focus:border-emerald-400"
+                />
+                <input
+                    type="password"
+                    bind:value={recoverMasterPassword}
+                    on:keydown={(e) => e.key === "Enter" && handleRecoverWithCode()}
+                    placeholder={$_('passwords.master_placeholder')}
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-emerald-400"
+                />
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button
+                    on:click={() => (showRecoverModal = false)}
+                    class="flex-1 py-2.5 border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50"
+                >
+                    {$_('common.cancel')}
+                </button>
+                <button
+                    on:click={handleRecoverWithCode}
+                    class="flex-1 py-2.5 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700"
+                >
+                    {$_('passwords.recover_btn')}
+                </button>
+            </div>
         </div>
     </div>
 {/if}

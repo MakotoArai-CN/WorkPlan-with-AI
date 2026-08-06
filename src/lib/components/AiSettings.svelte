@@ -17,7 +17,7 @@
         hydrateCurrentProviderConfigWithDefaults,
     } from "../stores/ai.js";
     import { settingsStore } from "../stores/settings.js";
-    import { openclawConfig } from "../stores/openclaw.js";
+    import { connectorConfig } from "../stores/connector.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { onMount } from "svelte";
     import { _ } from 'svelte-i18n';
@@ -27,7 +27,7 @@
         getValidatedExternalUrl,
         openExternalUrl,
     } from "../utils/open-external.js";
-    import { getOpenClawGatewayEndpoint, getOpenClawWebSocketUrl } from "../utils/openclaw-client.js";
+    import { getConnectorBaseUrl, getConnectorWebSocketUrl, resolveConnectorTransport, getConnectorHttpChatEndpoint } from "../utils/connector-client.js";
     import { isAndroidRuntime, isWebDemo } from "../utils/runtime.js";
 
     function t(key, opts) { return get(_)(key, opts); }
@@ -65,11 +65,11 @@
     async function loadCurrentProviderModels() {
         const requestId = ++modelLoadRequestId;
         const providerId = $aiConfig.provider;
-        const apiKey = providerId === "openclaw"
-            ? ($openclawConfig.apiKey || $aiConfig.apiKey || "")
+        const apiKey = providerId === "webhook"
+            ? ($connectorConfig.apiKey || $aiConfig.apiKey || "")
             : ($aiConfig.apiKey || "");
-        const endpoint = providerId === "openclaw"
-            ? (getOpenClawGatewayEndpoint($openclawConfig) || $aiConfig.customEndpoint || "")
+        const endpoint = providerId === "webhook"
+            ? (getConnectorBaseUrl($connectorConfig) || $aiConfig.customEndpoint || "")
             : ($aiConfig.customEndpoint || "");
         const loadKey = getAutoFetchKey(providerId, apiKey, endpoint);
         const initialModel = $aiConfig.model || "";
@@ -133,7 +133,7 @@
         try {
             await hydrateCurrentProviderConfigWithDefaults();
             if (!isCurrentInit()) return;
-            if (isWebDemo && $aiConfig.provider === "openclaw") {
+            if (isWebDemo && $aiConfig.provider === "webhook") {
                 await switchProvider("g4f-default");
                 if (!isCurrentInit()) return;
             }
@@ -151,8 +151,8 @@
                     const providerId = $aiConfig.provider;
                     lastAutoFetchKey = getAutoFetchKey(
                         providerId,
-                        providerId === "openclaw" ? ($openclawConfig.apiKey || $aiConfig.apiKey) : $aiConfig.apiKey,
-                        providerId === "openclaw" ? getOpenClawGatewayEndpoint($openclawConfig) : $aiConfig.customEndpoint,
+                        providerId === "webhook" ? ($connectorConfig.apiKey || $aiConfig.apiKey) : $aiConfig.apiKey,
+                        providerId === "webhook" ? getConnectorBaseUrl($connectorConfig) : $aiConfig.customEndpoint,
                     );
                 }
             }
@@ -323,8 +323,8 @@
 
     $: scheduleAutoFetchModels(
         $aiConfig.provider,
-        $aiConfig.provider === "openclaw" ? ($openclawConfig.apiKey || $aiConfig.apiKey) : $aiConfig.apiKey,
-        $aiConfig.provider === "openclaw" ? openclawGatewayEndpoint : $aiConfig.customEndpoint,
+        $aiConfig.provider === "webhook" ? ($connectorConfig.apiKey || $aiConfig.apiKey) : $aiConfig.apiKey,
+        $aiConfig.provider === "webhook" ? connectorGatewayEndpoint : $aiConfig.customEndpoint,
     );
 
     function scheduleAutoFetchModels(providerId, apiKey, customEndpoint) {
@@ -336,11 +336,11 @@
         autoFetchTimer = setTimeout(() => {
             autoFetchTimer = null;
             const currentProviderId = $aiConfig.provider;
-            const currentApiKey = currentProviderId === "openclaw"
-                ? ($openclawConfig.apiKey || $aiConfig.apiKey)
+            const currentApiKey = currentProviderId === "webhook"
+                ? ($connectorConfig.apiKey || $aiConfig.apiKey)
                 : $aiConfig.apiKey;
-            const currentEndpoint = currentProviderId === "openclaw"
-                ? getOpenClawGatewayEndpoint($openclawConfig)
+            const currentEndpoint = currentProviderId === "webhook"
+                ? getConnectorBaseUrl($connectorConfig)
                 : $aiConfig.customEndpoint;
             if (
                 !$showAiSettings ||
@@ -351,7 +351,7 @@
             if (key === modelsLoadedForKey) return;
             if (providerId === "custom") {
                 if (!customEndpoint) return;
-            } else if (providerId !== "openclaw" && currentProvider && currentProvider.authType !== "none" && !apiKey) {
+            } else if (providerId !== "webhook" && currentProvider && currentProvider.authType !== "none" && !apiKey) {
                 return;
             }
             loadCurrentProviderModels().catch(() => {});
@@ -362,7 +362,7 @@
         if (
             $aiConfig.provider === "ollama" ||
             $aiConfig.provider === "lmstudio" ||
-            $aiConfig.provider === "openclaw"
+            $aiConfig.provider === "webhook"
         )
             return false;
         if (isCustomProvider) return true; // custom provider: show API Key field (optional)
@@ -383,19 +383,22 @@
     })();
     $: currentProviderDocUrl = getValidatedExternalUrl(currentProvider?.docUrl || "");
     $: currentProviderApiUrl = getValidatedExternalUrl(currentProvider?.apiUrl || "");
-    $: openclawGatewayEndpoint = getOpenClawGatewayEndpoint($openclawConfig);
-    $: openclawWebSocketEndpoint = (() => {
+    $: connectorGatewayEndpoint = getConnectorBaseUrl($connectorConfig);
+    $: connectorWebSocketEndpoint = (() => {
         try {
-            return getOpenClawWebSocketUrl($openclawConfig);
+            return getConnectorWebSocketUrl($connectorConfig);
         } catch {
             return "";
         }
     })();
+    $: connectorDisplayEndpoint = resolveConnectorTransport($connectorConfig) === 'http'
+        ? getConnectorHttpChatEndpoint($connectorConfig)
+        : (connectorWebSocketEndpoint || connectorGatewayEndpoint);
     $: localProviderIds = [
         "ollama",
         "lmstudio",
         "custom",
-        ...(!isWebDemo && ($openclawConfig.enabled || $aiConfig.provider === "openclaw") ? ["openclaw"] : []),
+        ...(!isWebDemo && ($connectorConfig.enabled || $aiConfig.provider === "webhook") ? ["webhook"] : []),
     ];
 </script>
 
@@ -652,24 +655,24 @@
                                 </div>
                             {/if}
                         </div>
-                    {:else if $aiConfig.provider === "openclaw"}
+                    {:else if $aiConfig.provider === "webhook"}
                         <div>
                             <label
-                                for="ai-openclaw-endpoint"
+                                for="ai-connector-endpoint"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                             >
                                 {$_('ai_settings_page.local_addr')}
                             </label>
                             <input
-                                id="ai-openclaw-endpoint"
-                                value={openclawWebSocketEndpoint || openclawGatewayEndpoint}
+                                id="ai-connector-endpoint"
+                                value={connectorDisplayEndpoint}
                                 readonly
                                 type="url"
                                 placeholder="ws://127.0.0.1:18789"
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 font-mono"
                             />
                             <div class="text-[10px] text-slate-400 mt-1">
-                                {isAndroid ? $_('ai_settings_page.local_hint_openclaw_android') : $_('ai_settings_page.local_hint_openclaw')}
+                                {isAndroid ? $_('ai_settings_page.local_hint_connector_android') : $_('ai_settings_page.local_hint_connector')}
                             </div>
                         </div>
                     {:else if $aiConfig.provider === "ollama" || $aiConfig.provider === "lmstudio"}
