@@ -6,10 +6,7 @@ import {
     isG4FProvider,
     streamChatWithG4F
 } from './g4f-client.js';
-import {
-    chatWithOpenClawGateway,
-    fetchOpenClawGatewayModels
-} from './openclaw-client.js';
+import { chatViaWebSocketConnector } from './connector-client.js';
 import { isTauriRuntime } from './runtime.js';
 
 const PROVIDER_CONFIGS = {
@@ -365,15 +362,16 @@ const PROVIDER_CONFIGS = {
         docUrl: 'https://lmstudio.ai/',
         apiUrl: ''
     },
-    openclaw: {
-        name: 'OpenClaw',
-        endpoint: 'http://127.0.0.1:18789',
+    webhook: {
+        name: 'Webhook / WebSocket',
+        endpoint: '',
         modelsEndpoint: '',
-        defaultModels: ['openclaw/default'],
-        defaultModel: 'openclaw/default',
+        defaultModels: ['nanobot/default'],
+        defaultModel: 'auto',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
+        supportsCustomModel: true,
         supportsCustomEndpoint: true,
         docUrl: '',
         apiUrl: ''
@@ -397,6 +395,20 @@ let baiduTokenCache = { token: null, expireTime: 0 };
 let modelCache = {};
 const ALLOWED_ENDPOINT_PROTOCOLS = new Set(['http:', 'https:']);
 const NATIVE_TOOL_BODY_FORMATS = new Set(['openai']);
+
+function resolveWebhookTransport(config = {}) {
+    const explicit = String(config.connectorTransport || config.transport || '').toLowerCase();
+    if (explicit === 'ws' || explicit === 'http') return explicit;
+    const endpoint = String(config.customEndpoint || config.connectorBaseUrl || '').toLowerCase();
+    if (endpoint.startsWith('ws')) return 'ws';
+    return 'http';
+}
+
+// 是否走 WebSocket 连接器：取决于 webhook 的传输方式（auto/ws/http）。
+function isWsConnector(providerId, config = {}) {
+    if (providerId === 'webhook') return resolveWebhookTransport(config) === 'ws';
+    return false;
+}
 
 function normalizeHttpEndpoint(url) {
     const value = String(url || '').trim();
@@ -504,18 +516,23 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         return await fetchCustomProviderModels(customEndpoint, apiKey);
     }
 
-    if (providerId === 'openclaw') {
+    if (providerId === 'webhook') {
+        const endpoint = customEndpoint || '';
+        const defaults = PROVIDER_CONFIGS.webhook.defaultModels;
+        const isWs = String(endpoint).toLowerCase().startsWith('ws');
+        if (isWs || !endpoint) {
+            // WebSocket channel 不枚举模型，直接用默认模型。
+            return defaults;
+        }
         try {
-            const models = await fetchOpenClawGatewayModels({
-                baseUrl: customEndpoint || PROVIDER_CONFIGS.openclaw.endpoint,
-                apiKey
-            });
-            const mergedModels = [...new Set([...(models || []), ...PROVIDER_CONFIGS.openclaw.defaultModels])];
+            // HTTP（OpenAI 兼容，如 nanobot）：从 chat 端点推导 /models。
+            const models = await fetchCustomProviderModels(endpoint, apiKey);
+            const mergedModels = [...new Set([...(models || []), ...defaults])];
             modelCache[cacheKey] = { models: mergedModels, expireTime: Date.now() + 300000 };
             return mergedModels;
         } catch (e) {
-            console.error('Failed to fetch OpenClaw models:', e);
-            return PROVIDER_CONFIGS.openclaw.defaultModels;
+            console.error('Failed to fetch connector models:', e);
+            return defaults;
         }
     }
 
@@ -530,11 +547,6 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
             modelsEndpoint = customEndpoint.replace('/api/chat', '/api/tags');
         } else if (providerId === 'lmstudio') {
             modelsEndpoint = customEndpoint.replace('/v1/chat/completions', '/v1/models');
-        } else if (providerId === 'openclaw') {
-            const derived = customEndpoint.replace(/\/(chat\/completions|responses|messages)\/?$/i, '/models');
-            modelsEndpoint = derived === customEndpoint
-                ? customEndpoint.replace(/\/+$/, '') + '/models'
-                : derived;
         }
     }
 
@@ -642,6 +654,17 @@ export async function fetchCustomProviderModels(customEndpoint, apiKey = '') {
     } catch (e) {
         return [];
     }
+}
+
+// 探测 HTTP（OpenAI 兼容）连接器可达性：服务返回任意 HTTP 响应即视为可达（含 401/404）；
+// 仅当网络层失败时 fetchWithTauri 会抛错，借此让「测试连接」区分真实可达性，避免误报成功。
+export async function pingHttpConnector(chatEndpoint, apiKey = '') {
+    const url = deriveCustomModelsEndpoint(chatEndpoint) || String(chatEndpoint || '').trim();
+    if (!url) throw new Error('未配置 HTTP 服务地址');
+    const headers = { 'Accept': 'application/json' };
+    if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+    const response = await fetchWithTauri(url, { method: 'GET', headers });
+    return { ok: true, status: response.status };
 }
 
 function getCachedModels(providerId) {
@@ -816,12 +839,17 @@ function parseStreamChunk(provider, chunk) {
 }
 
 function isLocalProvider(providerId) {
-    return providerId === 'ollama' || providerId === 'lmstudio' || providerId === 'openclaw';
+    return providerId === 'ollama' || providerId === 'lmstudio';
 }
 
-export function canProviderUseNativeTools(providerId) {
-    if (isG4FProvider(providerId) || providerId === 'openclaw') {
+export function canProviderUseNativeTools(providerId, config = {}) {
+    if (isG4FProvider(providerId)) {
         return false;
+    }
+
+    if (providerId === 'webhook') {
+        // 仅 HTTP（OpenAI 兼容）传输支持原生工具调用；WebSocket 传输不支持。
+        return resolveWebhookTransport(config) === 'http';
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
@@ -854,16 +882,16 @@ export async function callAI(config, userMessage, systemPrompt) {
         });
     }
 
-    if (providerId === 'openclaw') {
+    if (isWsConnector(providerId, config)) {
         const messages = [];
         if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
         messages.push({ role: 'user', content: userMessage });
-        return await chatWithOpenClawGateway(config, messages);
+        return await chatViaWebSocketConnector(config, messages);
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom';
+    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
@@ -932,7 +960,7 @@ export async function callAI(config, userMessage, systemPrompt) {
 export async function callAIWithMessagesAndTools(config, messages, tools = [], options = {}) {
     const providerId = config.provider || 'g4f-default';
 
-    if (!canProviderUseNativeTools(providerId)) {
+    if (!canProviderUseNativeTools(providerId, config)) {
         const error = new Error('当前 AI 提供商不支持原生工具调用');
         error.nativeToolUnsupported = true;
         throw error;
@@ -940,7 +968,7 @@ export async function callAIWithMessagesAndTools(config, messages, tools = [], o
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom';
+    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
@@ -1020,13 +1048,13 @@ export async function callAIWithMessages(config, messages) {
         });
     }
 
-    if (providerId === 'openclaw') {
-        return await chatWithOpenClawGateway(config, messages);
+    if (isWsConnector(providerId, config)) {
+        return await chatViaWebSocketConnector(config, messages);
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom';
+    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
@@ -1106,13 +1134,13 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
         );
     }
 
-    if (providerId === 'openclaw') {
-        return await chatWithOpenClawGateway(config, messages, onChunk, { signal });
+    if (isWsConnector(providerId, config)) {
+        return await chatViaWebSocketConnector(config, messages, onChunk, { signal });
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom';
+    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;

@@ -8,6 +8,7 @@ import {
     deleteLocalFile,
     pickLocalTextFiles,
     readSelectedTextFiles,
+    readPastedFilesAsAttachments,
     isContentUri,
     pickMediaFiles,
     readSelectedMediaFiles,
@@ -22,15 +23,16 @@ import {
     fetchWebContent
 } from '../utils/web-search.js';
 import { settingsStore } from './settings.js';
-import { openclawConfig } from './openclaw.js';
+import { connectorConfig } from './connector.js';
 import { notesStore } from './notes.js';
-import { getOpenClawGatewayEndpoint } from '../utils/openclaw-client.js';
+import { getConnectorBaseUrl, resolveConnectorTransport, getConnectorHttpChatEndpoint } from '../utils/connector-client.js';
+import { TASK_STATUSES, TASK_PRIORITIES, resolveStatus, resolvePriority, normalizeStatus, normalizePriority } from '../utils/task-vocabulary.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
 const AI_CHAT_HISTORY_KEY = 'planpro_ai_chat_history';
 const AI_CHAT_SESSIONS_KEY = 'planpro_ai_chat_sessions';
 const PROVIDER_CONFIG_FIELDS = ['apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
-const OPTIONAL_API_KEY_PROVIDERS = new Set(['ollama', 'lmstudio', 'custom', 'openclaw']);
+const OPTIONAL_API_KEY_PROVIDERS = new Set(['ollama', 'lmstudio', 'custom', 'webhook']);
 const USER_CHAT_AVATARS = [
     '/avatars/user-orbit-1.svg',
     '/avatars/user-orbit-2.svg',
@@ -127,9 +129,9 @@ function providerNeedsApiKey(providerId) {
     return !isG4FProvider(providerId) && !OPTIONAL_API_KEY_PROVIDERS.has(providerId);
 }
 
-function applyOpenClawRuntimeConfig(config) {
-    if (config.provider !== 'openclaw') return config;
-    const cfg = get(openclawConfig);
+function applyConnectorRuntimeConfig(config) {
+    if (config.provider !== 'webhook') return config;
+    const cfg = get(connectorConfig);
     if (!cfg.enabled) {
         return {
             ...config,
@@ -137,14 +139,31 @@ function applyOpenClawRuntimeConfig(config) {
             customEndpoint: ''
         };
     }
-    const gatewayEndpoint = getOpenClawGatewayEndpoint(cfg);
-    return {
+    const transport = resolveConnectorTransport(cfg);
+    const base = {
         ...config,
         apiKey: cfg.apiKey || config.apiKey || '',
-        customEndpoint: gatewayEndpoint || config.customEndpoint || '',
-        openclawGatewayUrl: gatewayEndpoint || config.customEndpoint || '',
-        openclawSessionKey: cfg.sessionKey || '',
-        openclawTimeoutMs: cfg.timeoutMs || 180000
+        connectorTransport: transport,
+        connectorPreset: cfg.preset || 'nanobot',
+        sessionKey: cfg.sessionKey || '',
+        clientId: cfg.clientId || '',
+        connectorTimeoutMs: cfg.timeoutMs || 180000,
+        timeoutMs: cfg.timeoutMs || 180000,
+        baseUrl: cfg.baseUrl || '',
+        customHeaders: { ...(config.customHeaders || {}), ...(cfg.headers || {}) }
+    };
+    if (transport === 'http') {
+        const httpEndpoint = getConnectorHttpChatEndpoint(cfg);
+        return {
+            ...base,
+            customEndpoint: httpEndpoint || config.customEndpoint || ''
+        };
+    }
+    const wsBaseUrl = getConnectorBaseUrl(cfg);
+    return {
+        ...base,
+        customEndpoint: wsBaseUrl || config.customEndpoint || '',
+        connectorBaseUrl: wsBaseUrl || config.customEndpoint || ''
     };
 }
 
@@ -195,11 +214,11 @@ function resetAiChatRuntimeCapabilities() {
     aiChatRuntimeCapabilities.set(getDefaultAiChatRuntimeCapabilities());
 }
 export const aiChatCapabilities = derived(
-    [settingsStore, aiConfig, aiChatRuntimeCapabilities, openclawConfig],
-    ([$settings, $config, $runtime, $openclawConfig]) => {
+    [settingsStore, aiConfig, aiChatRuntimeCapabilities, connectorConfig],
+    ([$settings, $config, $runtime, $connectorConfig]) => {
         const needsApiKey = providerNeedsApiKey($config.provider);
-        const openclawReady = $config.provider !== 'openclaw' ||
-            ($openclawConfig.enabled && Boolean(getOpenClawGatewayEndpoint($openclawConfig)));
+        const connectorReady = $config.provider !== 'webhook' ||
+            ($connectorConfig.enabled && Boolean($connectorConfig.baseUrl));
         const toolRouterEnabled = $settings.enableAiChatTools ?? true;
         const localFileEnabled = $settings.localFileConfig?.enabled ?? false;
 
@@ -219,7 +238,7 @@ export const aiChatCapabilities = derived(
 
         return {
             mode: toolRouterEnabled ? 'internal_router' : 'chat_only',
-            connectionReady: openclawReady && (!needsApiKey || Boolean($config.apiKey)),
+            connectionReady: connectorReady && (!needsApiKey || Boolean($config.apiKey)),
             toolRouterEnabled,
             projectToolsAvailable: toolRouterEnabled && toolCallAvailable,
             nativeToolCallAvailable: toolRouterEnabled && nativeToolCallAvailable === true,
@@ -289,7 +308,7 @@ export async function probeAiCapabilities() {
         try {
             const config = getEffectiveConfig();
             const { canProviderUseNativeTools, callAIWithMessagesAndTools } = await import('../utils/ai-providers.js');
-            if (!canProviderUseNativeTools(config.provider)) {
+            if (!canProviderUseNativeTools(config.provider, config)) {
                 nativeToolCallOk = false;
             } else {
                 const probeTools = [{
@@ -475,6 +494,18 @@ function normalizeConnectionProfile(profile, index = 0) {
         ...getDefaultConnectionProfile(`连接 ${index + 1}`),
         ...(profile || {})
     };
+
+    // 兼容旧存档：OpenClaw provider 已移除，把 localStorage 里残留的 'openclaw'
+    // 及其缓存的 providerConfigs 迁移到通用 webhook 连接器。仅为升级旧配置而存在。
+    if (normalized.provider === 'openclaw') {
+        normalized.provider = 'webhook';
+    }
+    if (normalized.providerConfigs?.openclaw && !normalized.providerConfigs.webhook) {
+        normalized.providerConfigs = {
+            ...normalized.providerConfigs,
+            webhook: normalized.providerConfigs.openclaw
+        };
+    }
 
     normalized.id = normalized.id || createId('profile');
     normalized.name = normalized.name || `连接 ${index + 1}`;
@@ -986,7 +1017,8 @@ export async function attachFilesToAiChatComposer() {
 
     const files = normalizeChatAttachments(await readSelectedTextFiles({
         paths: selectedPaths,
-        maxBytes: 96000
+        maxBytes: 96000,
+        trustedDirectories: get(settingsStore).localFileConfig?.trustedDirectories || []
     }));
 
     aiChatComposerAttachments.update((current) => {
@@ -1005,7 +1037,8 @@ export async function attachMediaToAiChatComposer() {
 
     const mediaFiles = await readSelectedMediaFiles({
         paths: selectedPaths,
-        maxBytes: 10_000_000
+        maxBytes: 10_000_000,
+        trustedDirectories: get(settingsStore).localFileConfig?.trustedDirectories || []
     });
 
     const files = normalizeChatAttachments(
@@ -1029,6 +1062,23 @@ export async function attachMediaToAiChatComposer() {
             };
         })
     );
+
+    aiChatComposerAttachments.update((current) => {
+        const merged = normalizeChatAttachments([...(current || []), ...files]);
+        return merged.slice(0, 8);
+    });
+
+    return files;
+}
+
+export async function attachPastedFilesToAiChatComposer(fileList) {
+    const files = normalizeChatAttachments(await readPastedFilesAsAttachments(fileList, {
+        textMaxBytes: 96000,
+        mediaMaxBytes: 10_000_000
+    }));
+    if (!files.length) {
+        return [];
+    }
 
     aiChatComposerAttachments.update((current) => {
         const merged = normalizeChatAttachments([...(current || []), ...files]);
@@ -1195,7 +1245,7 @@ export function getModelsForProvider(providerId) {
 export function getEffectiveConfig() {
     const config = get(aiConfig);
     const isCustom = config.provider === 'custom';
-    return applyOpenClawRuntimeConfig({
+    return applyConnectorRuntimeConfig({
         provider: config.provider,
         apiKey: config.apiKey,
         secretKey: config.secretKey,
@@ -1345,8 +1395,8 @@ function normalizeTemplateEntity(template, index = 0) {
     return {
         id: template.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 6)}`,
         title: template.title || '未命名模板',
-        status: template.status || 'todo',
-        priority: ['normal', 'urgent', 'critical'].includes(template.priority) ? template.priority : 'normal',
+        status: normalizeStatus(template.status),
+        priority: normalizePriority(template.priority),
         date: '',
         deadline: '',
         note: template.note || '',
@@ -1375,6 +1425,13 @@ const QUERY_KEYWORDS = [
     'query', 'search', 'find', 'list', 'show', 'what'
 ];
 const CREATE_KEYWORDS = ['新增', '添加', '创建', '新建', '加个', '帮我加', 'add', 'create', 'new'];
+// 内容/变更动词（不含查询动词）。用于判断一句话是否在罗列"要做/已做的多项工作内容"，
+// 从而与"对现有任务的批量增删改命令"区分开。
+const MULTI_ACTION_VERBS = [
+    '修改', '更改', '更新', '删除', '删掉', '去掉', '移除', '整理', '撰写', '编写',
+    '提交', '发布', '发表', '上线', '核对', '检查', '联系', '跟进', '处理', '制作',
+    '完成', '搞定', '录入', '添加'
+];
 const TASK_LOOKUP_QUESTION_REGEX = /(什么时候|何时|哪天|哪日|哪月|哪一年|做了什么|干了什么|什么时候做|什么时候干)/;
 
 const SUBTASK_KEYWORDS = [
@@ -1493,12 +1550,58 @@ function getAssistantMetaBySource(source = 'tasks') {
     };
 }
 
+// "强信号"判断：消息是否在指代已存在的任务（而非描述要新建/记录的工作内容）。
+// 避免把"今天需要修改文章状态、删除某文章信息"这类工作描述误判为对任务列表的增删改。
+function referencesExistingTask(text = '') {
+    return /任务|待办|todo|task/i.test(text) ||
+        /(这个|那个|这些|那些|这条|那条|这项|那项|上面|下面|前面|刚才|刚刚|第[一二三四五六七八九十百\d]+\s*(个|条|项)?)/.test(text) ||
+        /(把|将|给)\s*\S{0,16}?(删除|删掉|去掉|移除|取消|改成|改为|标记|完成|调整|推迟|延期)/.test(text);
+}
+
+// "强信号"判断：消息是否在用计划/安排语气描述"要去做的新工作"，
+// 其中的"修改/删除/完成"等是工作内容，而非对现有任务的命令。
+function looksLikePlannedWorkCreate(text = '') {
+    return /(需要|要|打算|计划|准备|安排)\s*\S{0,12}?(做|处理|完成|搞定|修改|删除|删掉|更新|整理|撰写|编写|写|改|提交|发布|发表|上线|核对|检查|联系|跟进)/.test(text);
+}
+
+// 统计文本中出现的不同内容动词数量（重复同一动词只计一次）。
+function countDistinctActionVerbs(text = '') {
+    const lower = String(text || '').toLowerCase();
+    let count = 0;
+    for (const verb of MULTI_ACTION_VERBS) {
+        if (lower.includes(verb.toLowerCase())) count += 1;
+    }
+    return count;
+}
+
+// "强信号"判断：消息是否在补录/记录"已经做完的工作"（应新建为已完成任务，而非修改现有任务）。
+function isRetroactiveLogIntent(text = '') {
+    return /(补录|补记|记录一下|录入|补上|补一下|登记)/i.test(text) ||
+        (/(补充|新增|添加|创建|记录|登记)[^，。；、\n]{0,10}(任务|待办|工作|事项|事情|内容|项)/.test(text) &&
+         /(已经?完成|完成了|做完|搞定|已搞定|已做完)/.test(text)) ||
+        (/(昨天|前天|上周|上个月|之前|刚才|刚刚)\S{0,6}(完成|搞定|做完|结束|弄好|修改|处理|提交|写完|发布)/i.test(text) &&
+         !/(哪个|哪些|什么|查|找|列出|显示|把|将|标记)/.test(text));
+}
+
 function detectOperationType(text) {
     const lowerText = text.toLowerCase();
     const hasCreateIntent = CREATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
         /(安排|提醒|记得|帮我安排|请安排|schedule|remind)/i.test(text);
+    const isRetroactiveLog = isRetroactiveLogIntent(text);
+    if (isRetroactiveLog) {
+        return 'create';
+    }
     if (!hasCreateIntent && looksLikeTaskAnalysisRequest(text)) {
         return 'query';
+    }
+    // 计划语气描述的新工作（且未指代已有任务）→ 视为新建，
+    // 避免"修改/删除/完成"等内容动词被误判为对任务列表的批量操作。
+    if (looksLikePlannedWorkCreate(text) && !referencesExistingTask(text)) {
+        return 'create';
+    }
+    // 一句话罗列 >=2 个不同内容动词且未指代现有任务 → 视为"工作清单/记录"而非对现有任务的批量增删改。
+    if (countDistinctActionVerbs(text) >= 2 && !referencesExistingTask(text)) {
+        return 'create';
     }
     let deleteScore = 0;
     let updateScore = 0;
@@ -1798,8 +1901,14 @@ function getTaskSearchText(task = {}) {
 
 function looksLikeTaskAnalysisRequest(text = '') {
     const lowerText = String(text || '').toLowerCase();
-    return PROJECT_ANALYSIS_KEYWORDS.some(keyword => lowerText.includes(keyword)) ||
-        /(分析|总结|汇总|统计|复盘|日报|周报|月报|报告|趋势|占比|完成率|进展|report|summary|analysis|review|progress)/i.test(lowerText);
+    // 真正的"分析/汇总/复盘"意图动词。
+    const hasAnalysisVerb = /(分析|总结|汇总|统计|复盘|趋势|占比|完成率|完成情况|report|summary|analysis|review|progress)/i.test(lowerText);
+    if (hasAnalysisVerb) return true;
+    // 日报/周报/月报/报告/进展 等常作为任务主体的名词，单独出现不算分析意图，
+    // 需配合"看看/查询/有哪些/情况"等查阅意图，才视为分析查询（避免"删除周报任务""把周报改成下周"被误判为 query）。
+    const hasReportNoun = /(日报|周报|月报|报告|进展)/.test(lowerText);
+    const hasViewIntent = /(看看|查看|看一下|查一下|查询|有哪些|多少|情况|进度|怎么样|如何|是否)/.test(lowerText);
+    return hasReportNoun && hasViewIntent;
 }
 
 function looksLikeSingleTaskLookup(text = '', operationType = '') {
@@ -2382,7 +2491,12 @@ function formatFileSize(size = 0) {
 
 function buildAttachmentContext(attachments = []) {
     const items = normalizeChatAttachments(attachments);
-    const textItems = items.filter((item) => !item.mediaType || item.mediaType === 'text');
+    const textItems = items.filter((item) =>
+        !item.mediaType ||
+        item.mediaType === 'text' ||
+        item.mediaType === 'file' ||
+        (item.truncated && item.content)
+    );
     if (textItems.length === 0) {
         return '';
     }
@@ -2982,12 +3096,15 @@ function parseNativeToolArguments(value = '') {
         return JSON.parse(raw);
     } catch {
         const match = raw.match(/\{[\s\S]*\}/);
-        if (!match) return {};
-        try {
-            return JSON.parse(match[0]);
-        } catch {
-            return {};
+        if (match) {
+            try {
+                return JSON.parse(match[0]);
+            } catch {
+                // Unbalanced JSON — the model's output was almost certainly cut
+                // off by the token limit. Flag it so callers can say so.
+            }
         }
+        return { __parseFailed: true };
     }
 }
 
@@ -3017,7 +3134,40 @@ async function shouldAttemptNativeToolCalling(config) {
     return true;
 }
 
-function buildNativeToolDefinitions() {
+// `updates` was declared as a bare `type: 'object'`, so the model got no field
+// names or enums and guessed — which is where the off-vocabulary priority and
+// status values came from. Declared once and reused by both `updates` and the
+// per-item `operations[].updates`.
+const NATIVE_UPDATE_FIELDS_SCHEMA = {
+    type: 'object',
+    description: '要修改的字段，只填需要变更的项。',
+    properties: {
+        title: { type: 'string' },
+        date: { type: 'string', description: '格式 YYYY-MM-DDTHH:mm。' },
+        deadline: { type: 'string', description: '格式 YYYY-MM-DDTHH:mm。' },
+        priority: { type: 'string', enum: TASK_PRIORITIES },
+        status: { type: 'string', enum: TASK_STATUSES },
+        note: { type: 'string' },
+        repeatDays: {
+            type: 'array',
+            description: '定时任务重复星期，周日为 0，周一到周六为 1-6。',
+            items: { type: 'integer', minimum: 0, maximum: 6 }
+        },
+        enabled: { type: 'boolean' },
+        subtasks: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string' },
+                    status: { type: 'string', enum: ['todo', 'done'] }
+                }
+            }
+        }
+    }
+};
+
+function buildNativeToolDefinitions(allowLocalFiles = true) {
     const settings = get(settingsStore);
     const tools = [
         {
@@ -3047,8 +3197,8 @@ function buildNativeToolDefinitions() {
                                     title: { type: 'string' },
                                     date: { type: 'string', description: '普通任务时间，格式 YYYY-MM-DDTHH:mm。模板通常留空。' },
                                     deadline: { type: 'string', description: '截止时间，格式 YYYY-MM-DDTHH:mm。' },
-                                    priority: { type: 'string', enum: ['normal', 'urgent', 'critical'] },
-                                    status: { type: 'string', enum: ['todo', 'doing', 'done'] },
+                                    priority: { type: 'string', enum: TASK_PRIORITIES },
+                                    status: { type: 'string', enum: TASK_STATUSES },
                                     note: { type: 'string' },
                                     repeatDays: {
                                         type: 'array',
@@ -3069,10 +3219,19 @@ function buildNativeToolDefinitions() {
                                 }
                             }
                         },
+                        title: {
+                            type: 'string',
+                            description: 'create 单个任务时的标题简写，等价于 tasks 里只有一项。'
+                        },
                         task_id: { type: 'string', description: '单个目标 ID。' },
                         task_ids: {
                             type: 'array',
                             description: 'query/delete 时匹配到的完整 ID 列表。',
+                            items: { type: 'string' }
+                        },
+                        matched_task_ids: {
+                            type: 'array',
+                            description: 'query 时匹配到的完整 ID 列表，与 task_ids 等价。',
                             items: { type: 'string' }
                         },
                         delete_task_ids: {
@@ -3080,10 +3239,7 @@ function buildNativeToolDefinitions() {
                             description: 'delete/mixed 时要删除的完整 ID 列表。',
                             items: { type: 'string' }
                         },
-                        updates: {
-                            type: 'object',
-                            description: '单个 update 的字段。允许 title/date/deadline/priority/status/note/repeatDays/enabled/subtasks。'
-                        },
+                        updates: NATIVE_UPDATE_FIELDS_SCHEMA,
                         operations: {
                             type: 'array',
                             description: '批量 update 的操作列表。',
@@ -3091,7 +3247,7 @@ function buildNativeToolDefinitions() {
                                 type: 'object',
                                 properties: {
                                     task_id: { type: 'string' },
-                                    updates: { type: 'object' }
+                                    updates: NATIVE_UPDATE_FIELDS_SCHEMA
                                 }
                             }
                         },
@@ -3138,7 +3294,7 @@ function buildNativeToolDefinitions() {
         }
     ];
 
-    if (settings.localFileConfig?.enabled) {
+    if (allowLocalFiles && settings.localFileConfig?.enabled) {
         tools.push({
             type: 'function',
             function: {
@@ -3188,7 +3344,7 @@ function formatNativeProjectItemsForAI(assistantContext = {}) {
     ].join('\n');
 }
 
-function buildNativeToolMessages(userText, assistantContext = {}, intentHint = null) {
+function buildNativeToolMessages(userText, assistantContext = {}, intentHint = null, allowLocalFiles = true) {
     const settings = get(settingsStore);
     const nowStr = getFormattedDateTime();
     const dateInfo = getDateInfo();
@@ -3214,6 +3370,8 @@ function buildNativeToolMessages(userText, assistantContext = {}, intentHint = n
 5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。
 6. 普通任务时间使用 YYYY-MM-DDTHH:mm；定时任务 repeatDays 中周日=0，周一至周六=1-6。
 7. 普通任务的可操作数据已按时间范围过滤；用户未明确提到过去/历史时，不要操作未列出的历史任务。
+8. 用户描述要做/已做的工作内容（即使含"修改/删除/完成"等动词），若对象不在上面列出的任务中，应使用 operation=create 新建任务记录该工作，而非 update/delete 已有任务。
+9. 描述"已经完成的工作"（如"补充已完成的任务""昨天完成了X"）时，operation=create 且 status=done。
 ${hintText}
 
 【当前页面】
@@ -3224,7 +3382,7 @@ ${hintText}
 ${formatNativeProjectItemsForAI(assistantContext)}
 
 【本地文件权限】
-- 本地文件工具: ${localFileConfig.enabled ? '已开启' : '未开启'}
+- 本地文件工具: ${(allowLocalFiles && localFileConfig.enabled) ? '已开启' : '未开启（当前对话不可用）'}
 - 工作目录: ${settings.workspaceRoot || '未设置'}
 - 受信任目录: ${trustedDirectories.length ? trustedDirectories.join(' | ') : '无'}`
         },
@@ -3233,33 +3391,6 @@ ${formatNativeProjectItemsForAI(assistantContext)}
             content: userText
         }
     ];
-}
-
-function normalizePriority(value = 'normal') {
-    const map = {
-        '普通': 'normal',
-        '紧急': 'urgent',
-        '重要': 'urgent',
-        '特急': 'critical',
-        normal: 'normal',
-        urgent: 'urgent',
-        critical: 'critical'
-    };
-    return map[String(value || '').toLowerCase()] || map[value] || 'normal';
-}
-
-function normalizeStatus(value = 'todo') {
-    const map = {
-        '未开始': 'todo',
-        '待办': 'todo',
-        '进行中': 'doing',
-        '已完成': 'done',
-        '完成': 'done',
-        todo: 'todo',
-        doing: 'doing',
-        done: 'done'
-    };
-    return map[String(value || '').toLowerCase()] || map[value] || 'todo';
 }
 
 function normalizeNativeSubtasks(subtasks = []) {
@@ -3292,12 +3423,17 @@ function cleanNativeUpdates(updates = {}, source = 'tasks', task = {}) {
     if (typeof updates.title === 'string' && updates.title.trim()) cleanUpdates.title = updates.title.trim();
     if (updates.note !== undefined) cleanUpdates.note = String(updates.note || '');
 
-    if (updates.priority) {
-        cleanUpdates.priority = normalizePriority(updates.priority);
+    // These are *partial* updates, so an unrecognized value must be dropped
+    // rather than normalized. normalizePriority/normalizeStatus fall back to
+    // 'normal'/'todo', which would silently reset a field the model only
+    // misspelled — e.g. status:"blocked" would mark a done task as todo.
+    const priority = resolvePriority(updates.priority);
+    if (priority) {
+        cleanUpdates.priority = priority;
     }
 
-    if (updates.status) {
-        const status = normalizeStatus(updates.status);
+    const status = resolveStatus(updates.status);
+    if (status) {
         cleanUpdates.status = status;
         if (source !== 'templates') {
             if (status === 'done') {
@@ -3341,12 +3477,64 @@ async function getNativeProjectItems(source, assistantContext = {}) {
     return taskState.tasks || [];
 }
 
+// Models routinely echo a shortened id, so a suffix match is kept as a fallback.
+// A bare `endsWith` was far too loose though: ids are `${Date.now()}_${random}`,
+// so a one-character id like "7" matched every task whose id happened to end in
+// 7 — and the update/mixed/subtask paths then silently operated on the first of
+// them. Require enough characters for the suffix to be meaningfully unique.
+const MIN_SUFFIX_ID_LENGTH = 6;
+
+function matchNativeItemsBySingleId(items, id) {
+    const exact = items.filter(item => item.id === id);
+    if (exact.length) return exact;
+    if (id.length < MIN_SUFFIX_ID_LENGTH) return [];
+    return items.filter(item => String(item.id || '').endsWith(id));
+}
+
 function findNativeItemsByIds(items = [], ids = []) {
     const idList = (Array.isArray(ids) ? ids : [ids])
         .map(id => String(id || '').trim())
         .filter(Boolean);
     if (!idList.length) return [];
-    return items.filter(item => idList.some(id => item.id === id || item.id?.endsWith(id)));
+    const matched = [];
+    for (const id of idList) {
+        for (const item of matchNativeItemsBySingleId(items, id)) {
+            if (!matched.includes(item)) matched.push(item);
+        }
+    }
+    return matched;
+}
+
+/**
+ * Single-item lookup for the update/mixed/subtask paths.
+ * Returns `{ task, reason }` where reason explains a miss ('missing' or
+ * 'ambiguous'); an ambiguous id must not resolve to an arbitrary match, because
+ * the caller is about to stage a mutation against it.
+ */
+function findOneNativeItemById(items, ids) {
+    const matched = findNativeItemsByIds(items, ids);
+    if (!matched.length) return { task: null, reason: 'missing' };
+    if (matched.length > 1) return { task: null, reason: 'ambiguous' };
+    return { task: matched[0], reason: '' };
+}
+
+const SKIP_REASON_LABELS = {
+    missing: '未找到对应项目',
+    ambiguous: 'ID 不唯一，匹配到多个项目',
+    no_changes: '没有可应用的字段变更'
+};
+
+/**
+ * Operations dropped during matching used to vanish from the count, so the model
+ * would report "已修改 5 个任务" after 2 were staged. Append what was skipped and
+ * why to the confirmation message.
+ */
+function describeSkippedOperations(message, skipped = []) {
+    if (!skipped.length) return message;
+    const details = skipped
+        .map(({ id, reason }) => `${id || '(缺少 ID)'}：${SKIP_REASON_LABELS[reason] || reason}`)
+        .join('；');
+    return `${message}\n\n⚠️ 已跳过 ${skipped.length} 项操作 —— ${details}`;
 }
 
 async function runNativeProjectAction(args = {}, userText = '', assistantContext = {}) {
@@ -3361,7 +3549,13 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
             ? args.tasks
             : (args.title ? [args] : []);
         if (!rawTasks.length) {
-            return { role: 'assistant', type: 'text', content: '没有获得可创建的任务内容，请描述标题和必要字段。' };
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: args.__parseFailed
+                    ? '模型返回的任务数据不完整（输出被截断），没有创建任何任务。请拆成多批创建，或在 AI 设置里提高最大输出长度后重试。'
+                    : '没有获得可创建的任务内容，请描述标题和必要字段。'
+            };
         }
 
         const entities = rawTasks.map((task, index) => {
@@ -3418,20 +3612,31 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
             ? args.operations
             : [{ task_id: args.task_id || args.task_ids?.[0], updates: args.updates || {} }];
         const updateOperations = [];
+        const skipped = [];
         for (const operationItem of operations) {
-            const task = findNativeItemsByIds(items, operationItem.task_id || operationItem.task_ids || [])[0];
-            if (!task) continue;
-            const updates = cleanNativeUpdates(operationItem.updates || {}, source, task);
-            if (Object.keys(updates).length > 0) {
-                updateOperations.push({
-                    task: JSON.parse(JSON.stringify(task)),
-                    updates
-                });
+            const rawId = operationItem.task_id || operationItem.task_ids || [];
+            const { task, reason } = findOneNativeItemById(items, rawId);
+            if (!task) {
+                skipped.push({ id: String(rawId), reason });
+                continue;
             }
+            const updates = cleanNativeUpdates(operationItem.updates || {}, source, task);
+            if (Object.keys(updates).length === 0) {
+                skipped.push({ id: task.id, reason: 'no_changes' });
+                continue;
+            }
+            updateOperations.push({
+                task: JSON.parse(JSON.stringify(task)),
+                updates
+            });
         }
 
         if (!updateOperations.length) {
-            return { role: 'assistant', type: 'text', content: args.message || '未找到可修改的项目数据。' };
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: describeSkippedOperations(args.message || '未找到可修改的项目数据。', skipped)
+            };
         }
 
         if (updateOperations.length === 1) {
@@ -3440,7 +3645,7 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
                 type: 'update_confirm',
                 task: updateOperations[0].task,
                 updates: updateOperations[0].updates,
-                message: args.message || '确认修改该项目吗？'
+                message: describeSkippedOperations(args.message || '确认修改该项目吗？', skipped)
             };
         }
 
@@ -3448,27 +3653,38 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
             role: 'assistant',
             type: 'multi_update_confirm',
             operations: updateOperations,
-            message: args.message || `将修改 ${updateOperations.length} 个项目`
+            message: describeSkippedOperations(args.message || `将修改 ${updateOperations.length} 个项目`, skipped)
         };
     }
 
     if (operation === 'mixed') {
         const updateOps = [];
+        const skipped = [];
         for (const operationItem of args.operations || []) {
-            const task = findNativeItemsByIds(items, operationItem.task_id || operationItem.task_ids || [])[0];
-            if (!task) continue;
-            const updates = cleanNativeUpdates(operationItem.updates || {}, source, task);
-            if (Object.keys(updates).length > 0) {
-                updateOps.push({
-                    task: JSON.parse(JSON.stringify(task)),
-                    updates
-                });
+            const rawId = operationItem.task_id || operationItem.task_ids || [];
+            const { task, reason } = findOneNativeItemById(items, rawId);
+            if (!task) {
+                skipped.push({ id: String(rawId), reason });
+                continue;
             }
+            const updates = cleanNativeUpdates(operationItem.updates || {}, source, task);
+            if (Object.keys(updates).length === 0) {
+                skipped.push({ id: task.id, reason: 'no_changes' });
+                continue;
+            }
+            updateOps.push({
+                task: JSON.parse(JSON.stringify(task)),
+                updates
+            });
         }
         const deleteOps = findNativeItemsByIds(items, args.delete_task_ids || []);
 
         if (!updateOps.length && !deleteOps.length) {
-            return { role: 'assistant', type: 'text', content: args.message || '未找到可执行的混合操作。' };
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: describeSkippedOperations(args.message || '未找到可执行的混合操作。', skipped)
+            };
         }
 
         return {
@@ -3476,15 +3692,22 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
             type: 'mixed_confirm',
             updateOps,
             deleteOps,
-            message: args.message || '确认执行这些项目操作吗？'
+            message: describeSkippedOperations(args.message || '确认执行这些项目操作吗？', skipped)
         };
     }
 
     if (operation === 'subtask') {
-        const task = findNativeItemsByIds(items, args.task_id || args.task_ids || [])[0];
+        const { task, reason } = findOneNativeItemById(items, args.task_id || args.task_ids || []);
         const subtaskChanges = Array.isArray(args.subtask_changes) ? args.subtask_changes : [];
         if (!task || !subtaskChanges.length) {
-            return { role: 'assistant', type: 'text', content: args.message || '未找到要操作的子任务。' };
+            const detail = task ? '' : (reason === 'ambiguous'
+                ? `（ID "${args.task_id || args.task_ids}" 匹配到多个项目，无法确定目标）`
+                : '');
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: `${args.message || '未找到要操作的子任务。'}${detail}`
+            };
         }
         return {
             role: 'assistant',
@@ -3502,7 +3725,7 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
     };
 }
 
-async function executeNativeToolCall(toolCall, userText, config, assistantContext, requireFileConfirmation, progress) {
+async function executeNativeToolCall(toolCall, userText, config, assistantContext, requireFileConfirmation, progress, allowLocalFiles = true) {
     const args = parseNativeToolArguments(toolCall.arguments);
     if (toolCall.name === 'workplan_web_search') {
         progress('web_searching');
@@ -3517,6 +3740,13 @@ async function executeNativeToolCall(toolCall, userText, config, assistantContex
     }
 
     if (toolCall.name === 'workplan_local_file') {
+        if (!allowLocalFiles) {
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: '本地文件操作仅在 AI 聊天卡片中可用，当前对话无法执行文件操作。'
+            };
+        }
         progress('file_operating');
         const plan = normalizeLocalFilePlan({
             mode: 'file',
@@ -3543,21 +3773,21 @@ async function executeNativeToolCall(toolCall, userText, config, assistantContex
     };
 }
 
-async function tryResolveWithNativeTools(userText, assistantContext, config, intentHint, progress) {
+async function tryResolveWithNativeTools(userText, assistantContext, config, intentHint, progress, allowLocalFiles = true) {
     if (!await shouldAttemptNativeToolCalling(config)) {
         return null;
     }
 
-    const tools = buildNativeToolDefinitions();
+    const tools = buildNativeToolDefinitions(allowLocalFiles);
     if (!tools.length) return null;
 
     try {
         const { callAIWithMessagesAndTools } = await import('../utils/ai-providers.js');
         const response = await callAIWithMessagesAndTools(
             config,
-            buildNativeToolMessages(userText, assistantContext, intentHint),
+            buildNativeToolMessages(userText, assistantContext, intentHint, allowLocalFiles),
             tools,
-            { maxTokens: Math.min(Number(config.maxTokens) || 2048, 2048), toolChoice: 'auto' }
+            { maxTokens: Number(config.maxTokens) || 4096, toolChoice: 'auto' }
         );
 
         const toolCalls = response.toolCalls || [];
@@ -3575,7 +3805,8 @@ async function tryResolveWithNativeTools(userText, assistantContext, config, int
                 config,
                 assistantContext,
                 requireFileConfirmation,
-                progress
+                progress,
+                allowLocalFiles
             ));
         }
 
@@ -3748,6 +3979,7 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     const allowBatchExecution = options.allowBatchExecution ?? true;
     const scopedItems = assistantContext.items || [];
     const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
+    const allowLocalFiles = options.allowLocalFiles ?? true;
     const subtaskOperation = detectSubtaskOperation(text);
     const lowerText = text.toLowerCase();
     const isExplicitCreate = CREATE_KEYWORDS.some(keyword => lowerText.includes(keyword));
@@ -3766,15 +3998,16 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         ? getTaskCandidatesForAI(text, scopedItems, aiRelevantTasks, operationType, timeScope)
         : scopedItems;
     const hasWebIntent = intentHint === 'web_search' || (!intentHint && looksLikeWebSearchIntent(text));
-    const hasFileIntent = intentHint === 'file' || (!intentHint && looksLikeFileIntent(text));
+    const hasFileIntent = allowLocalFiles && (intentHint === 'file' || (!intentHint && looksLikeFileIntent(text)));
     const hasProjectIntent = intentHint === 'task' ||
         (!hasWebIntent && !hasFileIntent && (looksLikeProjectIntent(text) || assistantContext.source !== 'tasks'));
     const allowImplicitCreate = assistantContext.scope === 'dashboard' ||
         assistantContext.scope === 'project' ||
         assistantContext.source === 'templates' ||
         assistantContext.source === 'scheduled';
+    // operationType==='create' 已涵盖：显式新建、补录已完成、计划语气新工作、多动词工作清单、无动作关键词。
     const shouldHandleAsCreate = isExplicitCreate ||
-        (allowImplicitCreate && hasNoActionKeyword && operationType === 'create');
+        (allowImplicitCreate && operationType === 'create');
     const shouldUseInternalCreate = assistantContext.mode !== 'note' &&
         shouldHandleAsCreate;
 
@@ -3799,7 +4032,7 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
                     currentConfig,
                     null,
                     onProgress,
-                    { allowBatchExecution: false }
+                    { allowBatchExecution: false, allowLocalFiles }
                 );
 
                 if (stepResult?.__useStreamingChat) {
@@ -3842,7 +4075,8 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
             nativeToolContext,
             currentConfig,
             intentHint,
-            progress
+            progress,
+            allowLocalFiles
         );
         if (nativeToolResult?.__batchResults?.length) {
             return {
@@ -3855,7 +4089,9 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     }
 
     const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI, intentHint);
-    const localFilePlan = await analyzeLocalFileIntent(text, currentConfig, callAI, intentHint);
+    const localFilePlan = allowLocalFiles
+        ? await analyzeLocalFileIntent(text, currentConfig, callAI, intentHint)
+        : null;
 
     let result;
 
@@ -3967,7 +4203,7 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     lastFailedMessage.set({ text, index: retryIndex });
 
     try {
-        let result = await resolveAssistantMessage(text, existingTasks, currentConfig);
+        let result = await resolveAssistantMessage(text, existingTasks, currentConfig, null, null, { allowLocalFiles: false });
 
         // Right-side assistant doesn't support streaming — fallback to non-stream response
         if (result?.__useStreamingChat) {
@@ -4016,41 +4252,6 @@ export async function retryLastMessage(index, existingTasks = []) {
         if (originalText) {
             await sendAiMessage(originalText, existingTasks, index);
         }
-    }
-}
-
-export async function confirmLocalFileOperation(index, operation) {
-    const currentConfig = getEffectiveConfig();
-
-    chatHistory.update(history => {
-        const nextHistory = [...history];
-        if (nextHistory[index]) {
-            nextHistory[index] = {
-                role: 'assistant',
-                type: 'loading'
-            };
-        }
-        return nextHistory;
-    });
-
-    try {
-        const result = await runLocalFilePlan(operation, operation.message || '', currentConfig, false);
-        chatHistory.update(history => {
-            const nextHistory = [...history];
-            nextHistory[index] = result;
-            return nextHistory;
-        });
-    } catch (error) {
-        chatHistory.update(history => {
-            const nextHistory = [...history];
-            nextHistory[index] = {
-                role: 'assistant',
-                type: 'error',
-                content: error.message || String(error),
-                originalText: operation?.message || ''
-            };
-            return nextHistory;
-        });
     }
 }
 
@@ -4134,8 +4335,8 @@ async function analyzeScheduledCreateIntent(userText, existingTasks, dateInfo, c
         const normalizeTask = (task) => ({
             id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
             title: task.title || '未命名定时任务',
-            status: task.status || 'todo',
-            priority: ['normal', 'urgent', 'critical'].includes(task.priority) ? task.priority : 'normal',
+            status: normalizeStatus(task.status),
+            priority: normalizePriority(task.priority),
             date: task.date || '',
             deadline: task.deadline || '',
             note: task.note || '',
@@ -4234,14 +4435,15 @@ ${taskList}
 
         const updateOperations = [];
         for (const operation of parsed.operations) {
-            const task = scopedTasks.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
+            const { task } = findOneNativeItemById(scopedTasks, operation.task_id);
             if (!task || !operation.updates) continue;
 
             const updates = {};
             if (operation.updates.title) updates.title = operation.updates.title;
             if (operation.updates.note !== undefined) updates.note = operation.updates.note;
-            if (operation.updates.priority && ['normal', 'urgent', 'critical'].includes(operation.updates.priority)) {
-                updates.priority = operation.updates.priority;
+            const scheduledPriority = resolvePriority(operation.updates.priority);
+            if (scheduledPriority) {
+                updates.priority = scheduledPriority;
             }
             if (operation.updates.repeatDays !== undefined) {
                 updates.repeatDays = normalizeRepeatDays(operation.updates.repeatDays);
@@ -4363,10 +4565,7 @@ ${templateList}
     try {
         const parsed = extractJsonPayload(aiResponse);
         if (parsed.delete_task_ids && parsed.delete_task_ids.length > 0) {
-            const tasksToDelete = allTemplates.filter(item =>
-                parsed.delete_task_ids.includes(item.id) ||
-                parsed.delete_task_ids.some(id => item.id.endsWith(id))
-            );
+            const tasksToDelete = findNativeItemsByIds(allTemplates, parsed.delete_task_ids);
             if (tasksToDelete.length > 0) {
                 return {
                     role: 'assistant',
@@ -4440,17 +4639,19 @@ ${templateList}
         const updateOperations = [];
         for (const operation of parsed.operations) {
             if (!operation.updates || Object.keys(operation.updates).length === 0) continue;
-            const template = allTemplates.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
+            const { task: template } = findOneNativeItemById(allTemplates, operation.task_id);
             if (!template) continue;
 
             const updates = {};
             if (operation.updates.title) updates.title = operation.updates.title;
             if (operation.updates.note !== undefined) updates.note = operation.updates.note;
-            if (operation.updates.priority && ['normal', 'urgent', 'critical'].includes(operation.updates.priority)) {
-                updates.priority = operation.updates.priority;
+            const templatePriority = resolvePriority(operation.updates.priority);
+            if (templatePriority) {
+                updates.priority = templatePriority;
             }
-            if (operation.updates.status && ['todo', 'doing', 'done'].includes(operation.updates.status)) {
-                updates.status = operation.updates.status;
+            const templateStatus = resolveStatus(operation.updates.status);
+            if (templateStatus) {
+                updates.status = templateStatus;
             }
             if (Array.isArray(operation.updates.subtasks)) {
                 updates.subtasks = operation.updates.subtasks.map(item => ({
@@ -4537,23 +4738,22 @@ ${templateList}
     try {
         const parsed = extractJsonPayload(aiResponse);
         const updateOps = [];
-        const deleteOps = allTemplates.filter(item =>
-            (parsed.delete_task_ids || []).includes(item.id) ||
-            (parsed.delete_task_ids || []).some(id => item.id.endsWith(id))
-        );
+        const deleteOps = findNativeItemsByIds(allTemplates, parsed.delete_task_ids || []);
 
         for (const operation of parsed.update_operations || []) {
-            const template = allTemplates.find(item => item.id === operation.task_id || item.id.endsWith(operation.task_id));
+            const { task: template } = findOneNativeItemById(allTemplates, operation.task_id);
             if (!template || !operation.updates) continue;
 
             const updates = {};
             if (operation.updates.title) updates.title = operation.updates.title;
             if (operation.updates.note !== undefined) updates.note = operation.updates.note;
-            if (operation.updates.priority && ['normal', 'urgent', 'critical'].includes(operation.updates.priority)) {
-                updates.priority = operation.updates.priority;
+            const mixedPriority = resolvePriority(operation.updates.priority);
+            if (mixedPriority) {
+                updates.priority = mixedPriority;
             }
-            if (operation.updates.status && ['todo', 'doing', 'done'].includes(operation.updates.status)) {
-                updates.status = operation.updates.status;
+            const mixedStatus = resolveStatus(operation.updates.status);
+            if (mixedStatus) {
+                updates.status = mixedStatus;
             }
             if (Array.isArray(operation.updates.subtasks)) {
                 updates.subtasks = operation.updates.subtasks.map(item => ({
@@ -4629,10 +4829,7 @@ ${templateList}
     try {
         const parsed = extractJsonPayload(aiResponse);
         if (parsed.matched_task_ids && parsed.matched_task_ids.length > 0) {
-            const matchedTemplates = allTemplates.filter(item =>
-                parsed.matched_task_ids.includes(item.id) ||
-                parsed.matched_task_ids.some(id => item.id.endsWith(id))
-            );
+            const matchedTemplates = findNativeItemsByIds(allTemplates, parsed.matched_task_ids);
             if (matchedTemplates.length > 0) {
                 return {
                     role: 'assistant',
@@ -4652,19 +4849,30 @@ ${templateList}
 }
 
 function normalizeCreatedTask(task = {}, fallbackDate = '', index = 0) {
-    return {
+    const status = normalizeStatus(task.status);
+    const subtaskStatusFromParent = status === 'done' ? 'done' : 'todo';
+    const result = {
         id: task.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 7)}`,
         title: task.title || '未命名任务',
         date: task.date || fallbackDate,
         deadline: task.deadline || '',
-        status: 'todo',
-        priority: task.priority || 'normal',
-        subtasks: (task.subtasks || []).map(s => ({
-            title: typeof s === 'string' ? s : (s.title || ''),
-            status: 'todo'
-        })),
+        status,
+        priority: normalizePriority(task.priority),
+        subtasks: (task.subtasks || []).map(s => {
+            const subStatus = typeof s === 'object'
+                ? (resolveStatus(s.status) || subtaskStatusFromParent)
+                : subtaskStatusFromParent;
+            return {
+                title: typeof s === 'string' ? s : (s.title || ''),
+                status: subStatus
+            };
+        }),
         note: task.note || ''
     };
+    if (status === 'done') {
+        result.completedDate = task.completedDate || task.date || fallbackDate;
+    }
+    return result;
 }
 
 function splitCreateIntentSegments(userText = '') {
@@ -4709,25 +4917,70 @@ async function analyzeCreateIntentWithAI(userText, dateInfo, config, callAI) {
 4. 即使用户描述的任务与现有任务完全相同，也必须创建新任务
 5. 输出格式必须是创建任务的JSON格式
 
+【补录已完成任务识别 - 重要】
+当用户描述的是"已经做完的事"（即补录历史任务），必须把任务的 status 设为 "done"，并把 completedDate 设为对应的完成时间（YYYY-MM-DDTHH:mm）。
+判断信号包括：
+- 出现过去时间词："昨天"、"前天"、"上周"、"上个月"、"之前"、"刚才"等
+- 配合完成动词："已完成"、"已经完成"、"完成了"、"做完了"、"搞定了"、"已经做完"、"刚做完"
+- 显式补录词："补录"、"补记"、"补登记"、"记录一下"、"录入"
+示例：
+- "昨天修改了错别字，昨天16时已经完成" → date 和 completedDate 都用昨天16:00，status="done"
+- "刚才补录一下：今天上午10点处理了客户投诉" → date 和 completedDate 用今天10:00，status="done"
+- "上周三下午写完了周报" → 算出上周三日期，时间用14:00，status="done"
+如果用户没说完成时间但说了"已完成"，completedDate 用任务的 date 字段值兜底。
+如果是未来要做的任务，status 不要写 done，省略 completedDate 字段或留空。
+
 【任务拆分规则】
 1. 如果用户描述包含多个不同的任务（不同时间或不同事项），必须拆分成多个独立任务对象
 2. 如果单个任务较复杂（包含多个步骤），需要创建子任务（subtasks）
 3. "下周一到下周五" 表示需要创建5个任务，每天一个
 
+【子任务生成指引 - 主动推理】
+对每个任务都要主动思考："这件事要做完，需要哪几步？"，而不是只在用户明确列出步骤时才拆。
+- 显式信号（必拆）：用户用"先...再...""包括""步骤是""分几步"或顿号/逗号串联多个动作 → 按用户给的动作直接拆
+- 隐式推理（应拆）：任务本身是常识性多步骤工作时，主动推断标准子步骤。例如：
+  · "准备季度汇报" → 收集数据 / 撰写大纲 / 制作PPT / 内部review / 正式汇报
+  · "上线新功能" → 代码合并 / 部署预发 / 冒烟测试 / 切换生产流量 / 观察监控
+  · "面试候选人小王" → 阅读简历 / 准备问题清单 / 进行面试 / 写评估反馈
+  · "搬家" → 打包物品 / 联系搬家公司 / 搬运 / 拆箱整理
+- 子任务标题用动作短语（动词开头），不要重复主任务名
+- 单一原子动作（"修改一个错别字""回复一条微信"）不需要子任务
+- 拿不准时倾向于拆出 2-4 个子任务，帮用户提前看清工作量；但不要为了凑数生造无意义的步骤
+- 补录已完成任务时，子任务的 status 跟随父任务设为 "done"
+
+【备注（note）生成指引 - 主动推理】
+对每个任务都要扫一遍用户原话："除了任务名和时间，他还说了什么有用信息？" 这些信息应当进 note，避免丢失。
+应当写进 note 的内容包括但不限于：
+- 对接人、参与者："和张总开会" → note 写"参与人：张总"
+- 地点、链接、单据号、文件路径："去财务报销 5月差旅" → note 写"报销内容：5月差旅"
+- 目的、背景、约束："改 README 里的错别字，老板说下午 review" → note 写"老板下午 review，需在此之前完成"
+- 用户口语化的补充说明、注意事项、参考资料
+- 完成方式、交付物的描述
+原则：
+- note 是给未来的用户自己看的提示，写人话，不要写"备注："这种前缀
+- 不要把已经放进 title/date/deadline/priority 的内容再抄一遍到 note
+- 用户原话信息全部已经映射到结构化字段，确实没有额外细节时，note 才用空字符串 ""
+
 【时间解析规则】
 - "上午" = 09:00, "中午" = 12:00, "下午" = 14:00, "傍晚" = 17:00, "晚上" = 19:00
 - 如果用户说"8点到10点"，date设为开始时间，deadline设为结束时间
 - 默认创建的是当前时间往后的任务，除非用户明确提到过去的时间
+- 用户明确提到过去时间时（如"昨天"、"上周"），date 必须使用过去日期，不要平移到未来
 
 【输出格式】
 严格只返回纯 JSON 格式，不要包含任何 markdown 标记或解释文字
-单任务: {"title":"任务标题","date":"YYYY-MM-DDTHH:mm","deadline":"YYYY-MM-DDTHH:mm或空字符串","priority":"normal|urgent|critical","note":"备注","subtasks":[{"title":"子任务名","status":"todo"}]}
+单任务: {"title":"任务标题","date":"YYYY-MM-DDTHH:mm","deadline":"YYYY-MM-DDTHH:mm或空字符串","priority":"normal|urgent|critical","status":"todo|doing|done","completedDate":"YYYY-MM-DDTHH:mm或空字符串","note":"备注","subtasks":[{"title":"子任务名","status":"todo|done"}]}
 多任务: {"tasks":[{...},{...}]}
 
 【priority说明】
 - normal: 普通任务
 - urgent: 用户强调"紧急"、"重要"、"优先"
-- critical: 用户强调"特急"、"非常紧急"、"最优先"`;
+- critical: 用户强调"特急"、"非常紧急"、"最优先"
+
+【status说明】
+- todo: 默认值，未开始
+- doing: 用户表示"在做"、"进行中"、"已经在弄了"
+- done: 补录已完成任务时使用`;
 
     const aiResponse = await callAI(config, userText, systemPrompt);
     if (!aiResponse) return [];
@@ -4856,9 +5109,15 @@ ${taskList}
             return { role: 'assistant', type: 'text', content: parsed.message || '未找到匹配的任务或子任务。' };
         }
 
-        const task = relevantTasks.find(t => t.id === parsed.task_id || t.id.endsWith(parsed.task_id));
+        const { task, reason } = findOneNativeItemById(relevantTasks, parsed.task_id);
         if (!task) {
-            return { role: 'assistant', type: 'text', content: '未找到指定的任务。' };
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: reason === 'ambiguous'
+                    ? `ID "${parsed.task_id}" 匹配到多个任务，无法确定要操作哪一个，请提供完整 ID。`
+                    : '未找到指定的任务。'
+            };
         }
 
         return {
@@ -4884,6 +5143,10 @@ async function analyzeDeleteIntent(userText, allTasks, relevantTasks, dateInfo, 
         };
     }
     if (relevantTasks.length === 0) {
+        // 未指代现有任务（无 任务/这个那个/把…删除 等）→ 视为描述新工作，自动新建。
+        if (!referencesExistingTask(userText)) {
+            return await analyzeCreateIntent(userText, allTasks, dateInfo, config, callAI);
+        }
         return {
             role: 'assistant',
             type: 'text',
@@ -4925,10 +5188,7 @@ ${taskList}
         const jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleanJsonStr);
         if (parsed.delete_task_ids && parsed.delete_task_ids.length > 0) {
-            const tasksToDelete = relevantTasks.filter(t =>
-                parsed.delete_task_ids.includes(t.id) ||
-                parsed.delete_task_ids.some(id => t.id.endsWith(id))
-            );
+            const tasksToDelete = findNativeItemsByIds(relevantTasks, parsed.delete_task_ids);
             if (tasksToDelete.length > 0) {
                 return {
                     role: 'assistant',
@@ -4955,6 +5215,9 @@ async function analyzeUpdateIntent(userText, allTasks, relevantTasks, dateInfo, 
         };
     }
     if (!relevantTasks || relevantTasks.length === 0) {
+        if (!referencesExistingTask(userText)) {
+            return await analyzeCreateIntent(userText, allTasks, dateInfo, config, callAI);
+        }
         return {
             role: 'assistant',
             type: 'text',
@@ -5016,7 +5279,7 @@ ${taskList}
             if (parsed.operations && parsed.operations.length > 0) {
                 const updateOperations = [];
                 for (const op of parsed.operations) {
-                    const task = relevantTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
+                    const { task } = findOneNativeItemById(relevantTasks, op.task_id);
                     if (task) {
                         const updates = { status: detectedStatus };
                         if (detectedStatus === 'done') {
@@ -5088,17 +5351,9 @@ ${taskList}
         const parsed = JSON.parse(jsonMatch[0]);
         if (parsed.operations && parsed.operations.length > 0) {
             const updateOperations = [];
-            const priorityMap = {
-                '普通': 'normal', '紧急': 'urgent', '特急': 'critical',
-                'normal': 'normal', 'urgent': 'urgent', 'critical': 'critical'
-            };
-            const statusMap = {
-                '未开始': 'todo', '进行中': 'doing', '已完成': 'done',
-                'todo': 'todo', 'doing': 'doing', 'done': 'done'
-            };
             for (const op of parsed.operations) {
                 if (!op.updates || Object.keys(op.updates).length === 0) continue;
-                const task = relevantTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
+                const { task } = findOneNativeItemById(relevantTasks, op.task_id);
                 if (!task) continue;
                 const taskSnapshot = {
                     id: task.id, title: task.title, date: task.date,
@@ -5111,14 +5366,14 @@ ${taskList}
                 if (op.updates.deadline) cleanUpdates.deadline = op.updates.deadline;
                 if (op.updates.note !== undefined) cleanUpdates.note = op.updates.note;
                 if (op.updates.priority) {
-                    const normalized = priorityMap[op.updates.priority] || op.updates.priority;
-                    if (['normal', 'urgent', 'critical'].includes(normalized)) {
+                    const normalized = resolvePriority(op.updates.priority);
+                    if (normalized) {
                         cleanUpdates.priority = normalized;
                     }
                 }
                 if (op.updates.status) {
-                    const normalized = statusMap[op.updates.status] || op.updates.status;
-                    if (['todo', 'doing', 'done'].includes(normalized)) {
+                    const normalized = resolveStatus(op.updates.status);
+                    if (normalized) {
                         cleanUpdates.status = normalized;
                         if (normalized === 'done') {
                             cleanUpdates.completedDate = new Date().toISOString().slice(0, 16);
@@ -5166,6 +5421,9 @@ async function analyzeMixedIntent(userText, allTasks, relevantTasks, dateInfo, c
         };
     }
     if (!relevantTasks || relevantTasks.length === 0) {
+        if (!referencesExistingTask(userText)) {
+            return await analyzeCreateIntent(userText, allTasks, dateInfo, config, callAI);
+        }
         return {
             role: 'assistant',
             type: 'text',
@@ -5219,24 +5477,18 @@ ${taskList}
         const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleanJsonStr);
         if (parsed.operations && parsed.operations.length > 0) {
             const updateOperations = [];
-            const priorityMap = {
-                '普通': 'normal',
-                '紧急': 'urgent',
-                '特急': 'critical',
-                'normal': 'normal',
-                'urgent': 'urgent',
-                'critical': 'critical'
-            };
             for (const op of parsed.operations) {
-                const task = relevantTasks.find(t => t.id === op.task_id || t.id.endsWith(op.task_id));
+                const { task } = findOneNativeItemById(relevantTasks, op.task_id);
                 if (task && op.updates && Object.keys(op.updates).length > 0) {
                     const taskSnapshot = JSON.parse(JSON.stringify(task));
                     if (op.updates.priority) {
-                        const normalizedPriority = priorityMap[op.updates.priority] || op.updates.priority;
-                        if (!['normal', 'urgent', 'critical'].includes(normalizedPriority)) {
-                            op.updates.priority = 'normal';
-                        } else {
+                        // Drop an unrecognized priority instead of forcing 'normal',
+                        // which would demote a task the user never asked to change.
+                        const normalizedPriority = resolvePriority(op.updates.priority);
+                        if (normalizedPriority) {
                             op.updates.priority = normalizedPriority;
+                        } else {
+                            delete op.updates.priority;
                         }
                     }
                     updateOperations.push({
@@ -5317,10 +5569,7 @@ ${taskList}
         const jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleanJsonStr);
         if (parsed.matched_task_ids && parsed.matched_task_ids.length > 0) {
-            const matchedTasks = relevantTasks.filter(t =>
-                parsed.matched_task_ids.includes(t.id) ||
-                parsed.matched_task_ids.some(id => t.id.endsWith(id))
-            );
+            const matchedTasks = findNativeItemsByIds(relevantTasks, parsed.matched_task_ids);
             if (matchedTasks.length > 0) {
                 return {
                     role: 'assistant',
@@ -5575,7 +5824,10 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
                 _streamAbortController?.signal.addEventListener('abort', abortHandler);
 
                 await executePlan(plan, {
-                    getConfig: () => currentConfig,
+                    getConfig: () => ({
+                        ...currentConfig,
+                        trustedDirectories: get(settingsStore).localFileConfig?.trustedDirectories || []
+                    }),
                     userMessage: effectiveText,
                     onStepStart: (step) => {
                         aiChatHistory.update(h => {
@@ -5671,7 +5923,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             const assistantPayload = await buildAiChatAssistantPayload(effectiveText);
             if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            const assistantResult = await resolveAssistantMessage(effectiveText, assistantPayload, currentConfig, intentHint, updateToolProgress);
+            const assistantResult = await resolveAssistantMessage(effectiveText, assistantPayload, currentConfig, intentHint, updateToolProgress, { allowLocalFiles: true });
             // If resolveAssistantMessage signals no tool action matched, fall through to streaming chat
             if (assistantResult?.__batchResults?.length) {
                 aiChatHistory.update(h => {

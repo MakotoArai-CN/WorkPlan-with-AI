@@ -7,7 +7,7 @@
     import { _, locale } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { setLocale, supportedLocales } from '../i18n/index.js';
-    import { exportToJSON } from "../utils/export.js";
+    import { exportToJSON, describeSavedLocation } from "../utils/export.js";
     import { pickTrustedDirectory } from "../utils/local-file-tools.js";
     import {
         DATABASE_PROVIDER_CATALOG,
@@ -15,27 +15,42 @@
         getDatabaseProviderMeta,
     } from "../utils/database-providers.js";
     import {
-        openclawConfig,
-        openclawStatus,
-        updateOpenClawConfig,
-        testConnection as testOpenClawConnection
-    } from "../stores/openclaw.js";
+        connectorConfig,
+        connectorStatus,
+        updateConnectorConfig,
+        testConnection
+    } from "../stores/connector.js";
     import { isAndroidRuntime, isWebDemo } from "../utils/runtime.js";
 
-    let openclawTestLoading = false;
-    let openclawShowAdvanced = false;
+    let connectorTestLoading = false;
+    let connectorShowAdvanced = false;
     let isAndroid = false;
 
-    async function handleOpenClawTest() {
-        openclawTestLoading = true;
+    async function handleConnectorTest() {
+        connectorTestLoading = true;
         try {
-            await testOpenClawConnection();
-            showToast({ message: get(_)('settings.openclaw_test_ok') || 'OpenClaw 连接成功', variant: 'success' });
+            await testConnection();
+            showToast({ message: get(_)('settings.connector_test_ok') || '连接成功', variant: 'success' });
         } catch (e) {
-            showToast({ message: (get(_)('settings.openclaw_test_fail') || 'OpenClaw 连接失败') + ': ' + (e?.message || String(e)), variant: 'error' });
+            showToast({ message: (get(_)('settings.connector_test_fail') || '连接失败') + ': ' + (e?.message || String(e)), variant: 'error' });
         } finally {
-            openclawTestLoading = false;
+            connectorTestLoading = false;
         }
+    }
+
+    // 将 headers 对象与"每行 Key: Value"文本互转，供高级配置里的自定义请求头编辑使用（仅 HTTP 传输生效）。
+    function headersToText(headers = {}) {
+        return Object.entries(headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+    }
+    function textToHeaders(text = '') {
+        const out = {};
+        for (const line of String(text).split('\n')) {
+            const idx = line.indexOf(':');
+            if (idx <= 0) continue;
+            const key = line.slice(0, idx).trim();
+            if (key) out[key] = line.slice(idx + 1).trim();
+        }
+        return out;
     }
 
     let checkingUpdate = false;
@@ -122,8 +137,11 @@
             state,
             `planpro_backup_${new Date().toISOString().split('T')[0]}.json`
         );
-        if (result?.success) {
-            showToast({ message: result.path ? `${t('settings.backup_success')}: ${result.path}` : t('settings.backup_success'), type: 'success' });
+        if (result?.cancelled) {
+            showToast({ message: t('common.cancel'), type: 'info' });
+        } else if (result?.success) {
+            const location = describeSavedLocation(result.path);
+            showToast({ message: location ? `${t('settings.backup_success')}: ${location}` : t('settings.backup_success'), type: 'success', duration: 6000 });
         } else {
             showToast({ message: String(result?.error || t('common.error')), type: 'error' });
         }
@@ -459,106 +477,127 @@
                     <div class="flex items-start justify-between gap-4">
                         <div class="min-w-0 flex-1">
                             <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base flex items-center gap-2 flex-wrap">
-                                {$_('settings.openclaw')}
+                                {$_('settings.connector')}
                                 <span class="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
                                     {$_('settings.experimental')}
                                 </span>
-                                {#if $openclawConfig.enabled}
-                                    {#if $openclawStatus.connected}
+                                {#if $connectorConfig.enabled}
+                                    {#if $connectorStatus.connected}
                                         <span class="text-[10px] text-green-600 dark:text-green-400 flex items-center gap-1">
-                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.openclaw_connected')}
+                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.connector_connected')}
                                         </span>
                                     {:else}
                                         <span class="text-[10px] text-rose-500 dark:text-rose-400 flex items-center gap-1">
-                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.openclaw_disconnected')}
+                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.connector_disconnected')}
                                         </span>
                                     {/if}
                                 {/if}
                             </div>
                             <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 leading-6">
-                                {$_('settings.openclaw_desc')}
+                                {$_('settings.connector_desc')}
                             </div>
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer shrink-0">
                             <input
                                 type="checkbox"
-                                checked={$openclawConfig.enabled}
-                                on:change={(e) => updateOpenClawConfig({ enabled: e.target.checked })}
+                                checked={$connectorConfig.enabled}
+                                on:change={(e) => updateConnectorConfig({ enabled: e.target.checked })}
                                 class="sr-only peer"
                             />
                             <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
                         </label>
                     </div>
 
-                    {#if $openclawConfig.enabled}
+                    {#if $connectorConfig.enabled}
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label for="connector-preset" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_preset')}</label>
+                                <select id="connector-preset" value={$connectorConfig.preset || 'nanobot'} on:change={(e) => updateConnectorConfig({ preset: e.target.value })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400">
+                                    <option value="nanobot">nanobot</option>
+                                    <option value="custom">{$_('settings.connector_preset_custom')}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="connector-transport" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_transport')}</label>
+                                <select id="connector-transport" value={$connectorConfig.transport || 'auto'} on:change={(e) => updateConnectorConfig({ transport: e.target.value })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400">
+                                    <option value="auto">{$_('settings.connector_transport_auto')}</option>
+                                    <option value="ws">WebSocket</option>
+                                    <option value="http">HTTP</option>
+                                </select>
+                            </div>
+                        </div>
                         <div>
-                            <label for="openclaw-base-url" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.openclaw_base_url')}</label>
+                            <label for="connector-base-url" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_base_url')}</label>
                             <input
-                                id="openclaw-base-url"
+                                id="connector-base-url"
                                 type="url"
-                                value={$openclawConfig.baseUrl}
-                                on:change={(e) => updateOpenClawConfig({ baseUrl: e.target.value })}
+                                value={$connectorConfig.baseUrl}
+                                on:change={(e) => updateConnectorConfig({ baseUrl: e.target.value })}
                                 placeholder={isAndroid ? "http://192.168.1.100:18789" : "http://127.0.0.1:18789"}
                                 class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
                             />
                             {#if isAndroid}
                                 <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1 leading-5">
-                                    {$_('settings.openclaw_android_hint')}
+                                    {$_('settings.connector_android_hint')}
                                 </div>
                             {/if}
                         </div>
 
                         <div>
-                            <label for="openclaw-api-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.openclaw_api_key')}</label>
+                            <label for="connector-api-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_api_key')}</label>
                             <input
-                                id="openclaw-api-key"
+                                id="connector-api-key"
                                 type="password"
-                                value={$openclawConfig.apiKey}
-                                on:change={(e) => updateOpenClawConfig({ apiKey: e.target.value })}
-                                placeholder={$_('settings.openclaw_api_key_ph')}
+                                value={$connectorConfig.apiKey}
+                                on:change={(e) => updateConnectorConfig({ apiKey: e.target.value })}
+                                placeholder={$_('settings.connector_api_key_ph')}
                                 class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
                             />
                         </div>
 
                         <div>
-                            <label for="openclaw-session-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.openclaw_session_key')}</label>
+                            <label for="connector-session-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_session_key')}</label>
                             <input
-                                id="openclaw-session-key"
+                                id="connector-session-key"
                                 type="text"
-                                value={$openclawConfig.sessionKey}
-                                on:change={(e) => updateOpenClawConfig({ sessionKey: e.target.value })}
-                                placeholder={$_('settings.openclaw_session_key_ph')}
+                                value={$connectorConfig.sessionKey}
+                                on:change={(e) => updateConnectorConfig({ sessionKey: e.target.value })}
+                                placeholder={$_('settings.connector_session_key_ph')}
                                 class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
                             />
                         </div>
 
                         <button
-                            on:click={handleOpenClawTest}
-                            disabled={openclawTestLoading}
+                            on:click={handleConnectorTest}
+                            disabled={connectorTestLoading}
                             class="w-full px-3 py-2 bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800 rounded-lg text-xs font-bold hover:bg-orange-100 dark:hover:bg-orange-900/50 transition disabled:opacity-50"
                         >
-                            {openclawTestLoading ? $_('settings.openclaw_testing') : $_('settings.openclaw_test_connection')}
+                            {connectorTestLoading ? $_('settings.connector_testing') : $_('settings.connector_test_connection')}
                         </button>
 
                         <button
-                            on:click={() => openclawShowAdvanced = !openclawShowAdvanced}
+                            on:click={() => connectorShowAdvanced = !connectorShowAdvanced}
                             class="text-[10px] text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400"
                         >
-                            <i class="ph ph-caret-{openclawShowAdvanced ? 'down' : 'right'}"></i> {$_('settings.openclaw_advanced')}
+                            <i class="ph ph-caret-{connectorShowAdvanced ? 'down' : 'right'}"></i> {$_('settings.connector_advanced')}
                         </button>
 
-                        {#if openclawShowAdvanced}
+                        {#if connectorShowAdvanced}
                             <div class="space-y-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3 border border-slate-100 dark:border-slate-700">
                                 <div>
-                                    <label for="openclaw-timeout-ms" class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">{$_('settings.openclaw_timeout_ms')}</label>
-                                    <input id="openclaw-timeout-ms" type="number" min="30000" step="1000" value={$openclawConfig.timeoutMs} on:change={(e) => updateOpenClawConfig({ timeoutMs: Number(e.target.value) || 180000 })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded px-2 py-1 text-xs font-mono" />
+                                    <label for="connector-timeout-ms" class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">{$_('settings.connector_timeout_ms')}</label>
+                                    <input id="connector-timeout-ms" type="number" min="30000" step="1000" value={$connectorConfig.timeoutMs} on:change={(e) => updateConnectorConfig({ timeoutMs: Number(e.target.value) || 180000 })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded px-2 py-1 text-xs font-mono" />
+                                </div>
+                                <div>
+                                    <label for="connector-headers" class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">{$_('settings.connector_headers')}</label>
+                                    <textarea id="connector-headers" rows="3" value={headersToText($connectorConfig.headers)} on:change={(e) => updateConnectorConfig({ headers: textToHeaders(e.target.value) })} placeholder={$_('settings.connector_headers_ph')} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded px-2 py-1 text-xs font-mono resize-y"></textarea>
                                 </div>
                             </div>
                         {/if}
 
-                        {#if $openclawStatus.lastError}
+                        {#if $connectorStatus.lastError}
                             <div class="text-[10px] text-rose-500 dark:text-rose-400 break-words">
-                                <i class="ph ph-warning"></i> {$openclawStatus.lastError}
+                                <i class="ph ph-warning"></i> {$connectorStatus.lastError}
                             </div>
                         {/if}
                     {/if}

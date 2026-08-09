@@ -23,6 +23,7 @@
         deleteAiChatSession,
         attachFilesToAiChatComposer,
         attachMediaToAiChatComposer,
+        attachPastedFilesToAiChatComposer,
         removeAiChatComposerAttachment,
         clearAiChatDraft,
         saveAiChatHistory,
@@ -37,7 +38,11 @@
     } from "../stores/navigation.js";
     import { openExternalUrl } from "../utils/open-external.js";
     import { resizeTextarea } from "../utils/textarea-autosize.js";
-    import { exportToMarkdown } from "../utils/export.js";
+    import { exportToMarkdown, describeSavedLocation } from "../utils/export.js";
+    import {
+        normalizeStatus,
+        normalizePriority,
+    } from "../utils/task-vocabulary.js";
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
     import { _ } from "svelte-i18n";
     import { get } from "svelte/store";
@@ -212,6 +217,56 @@
         }
     }
 
+    function getClipboardFiles(event) {
+        const clipboardData = event?.clipboardData;
+        if (!clipboardData) return [];
+
+        const files = [];
+        const seen = new Set();
+        const addFile = (file) => {
+            if (!file) return;
+            const key = `${file.name || "clipboard-file"}:${file.type || ""}:${file.size || 0}:${file.lastModified || 0}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            files.push(file);
+        };
+
+        Array.from(clipboardData.files || []).forEach(addFile);
+        Array.from(clipboardData.items || []).forEach((item) => {
+            if (item?.kind === "file") {
+                addFile(item.getAsFile());
+            }
+        });
+
+        return files;
+    }
+
+    async function handlePaste(event) {
+        const files = getClipboardFiles(event);
+        if (!files.length) return;
+
+        event.preventDefault();
+        if ($isAiLoading) return;
+
+        try {
+            const attached = await attachPastedFilesToAiChatComposer(files);
+            if (attached.length > 0) {
+                showToast({
+                    message: `已接收 ${attached.length} 个粘贴文件`,
+                    type: "success",
+                    duration: 1600,
+                });
+            }
+            syncComposerHeight();
+        } catch (error) {
+            console.error("Paste files failed:", error);
+            showToast({
+                message: String(error?.message || error || "粘贴文件失败"),
+                type: "error",
+            });
+        }
+    }
+
     async function handleSaveGeneratedMedia(msg) {
         try {
             const { invoke } = await import("@tauri-apps/api/core");
@@ -353,11 +408,17 @@
             const session = $aiChatSessions.find(s => s.id === $activeAiChatSessionId);
             const filename = `chat-${session?.title || 'export'}-${new Date().toISOString().slice(0, 10)}.md`;
             const result = await exportToMarkdown(md, filename);
+            if (result?.cancelled) {
+                return;
+            }
             if (result?.success) {
-                const msg = result.path
-                    ? `${$_("ai_chat.export_success")}: ${result.path}`
+                const location = describeSavedLocation(result.path);
+                const msg = location
+                    ? `${$_("ai_chat.export_success")}: ${location}`
                     : $_("ai_chat.export_success");
-                showToast({ message: msg, type: 'success' });
+                showToast({ message: msg, type: 'success', duration: 6000 });
+            } else {
+                showToast({ message: String(result?.error || $_("common.error")), type: 'error' });
             }
         } else {
             showToast({ message: $_("ai_chat.export_empty"), type: 'warning' });
@@ -417,16 +478,30 @@
         });
     }
 
-    function addScopedItem(data, source = "tasks") {
-        const normalized = {
+    // `index` disambiguates ids inside a batch: a bare Date.now() collides when a
+    // whole confirmation card is committed within the same millisecond.
+    function normalizeScopedItem(data, index = 0) {
+        return {
             ...data,
-            id: data.id || Date.now().toString(),
-            status: data.status || "todo",
+            id: data.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 7)}`,
+            status: normalizeStatus(data.status),
+            priority: normalizePriority(data.priority),
             subtasks: (data.subtasks || []).map((item) => ({
                 title: typeof item === "string" ? item : item.title,
-                status: item.status || "todo",
+                // Subtasks are binary in the UI, so anything that is not 'done'
+                // collapses to 'todo'.
+                status:
+                    normalizeStatus(
+                        typeof item === "object" ? item.status : "",
+                    ) === "done"
+                        ? "done"
+                        : "todo",
             })),
         };
+    }
+
+    function addScopedItem(data, source = "tasks") {
+        const normalized = normalizeScopedItem(data);
 
         if (source === "templates") {
             taskStore.addTemplate(normalized);
@@ -569,16 +644,21 @@
 
     async function handleConfirmMultiTask(msg, index) {
         const pendingTasks = msg.tasks.filter((_, taskIndex) => !(msg.confirmedIndexes || []).includes(taskIndex));
-        pendingTasks.forEach((task, taskIndex) => {
-            addScopedItem({
-                ...task,
-                id: task.id || (Date.now() + taskIndex).toString(),
-            }, getMessageSource(msg));
-        });
+        const source = getMessageSource(msg);
+        const normalized = pendingTasks.map((task, taskIndex) => normalizeScopedItem(task, taskIndex));
+
+        if (source === "tasks") {
+            // Single store write. addScopedItem in a loop re-serializes the entire
+            // task list once per item, which stalls the UI on large batches.
+            taskStore.addTasks(normalized);
+        } else {
+            normalized.forEach((task) => addScopedItem(task, source));
+        }
+
         replaceChatMessage(index, {
             role: "assistant",
             type: "text",
-            content: get(_)("ai_panel.tasks_added_msg", { values: { count: pendingTasks.length } }),
+            content: get(_)("ai_panel.tasks_added_msg", { values: { count: normalized.length } }),
         });
     }
 
@@ -1095,7 +1175,7 @@
                                 />
                             </div>
                         {/if}
-                        <div class="min-w-0 max-w-[85%] md:max-w-[80%] group">
+                        <div class="min-w-0 max-w-[85%] md:max-w-[80%] group chat-message-content">
                             {#if msg.role === "user"}
                                 <div
                                     class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-blue-600 text-white rounded-tr-none markdown-message user-markdown break-words overflow-hidden"
@@ -1382,6 +1462,26 @@
                                                     <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                                         {getRelativeDate(task.date)} {formatTimeOnly(task.date)}
                                                     </div>
+                                                {/if}
+                                                {#if task.status || task.priority || (task.subtasks && task.subtasks.length > 0)}
+                                                    <div class="mt-1.5 flex items-center gap-2 flex-wrap text-xs">
+                                                        {#if task.status && task.status !== 'todo'}
+                                                            <span class={`px-2 py-0.5 rounded-full ${getStatusBgColor(task.status)}`}>
+                                                                {formatStatus(task.status)}
+                                                            </span>
+                                                        {/if}
+                                                        {#if task.priority && task.priority !== 'normal'}
+                                                            <span class={getPriorityColor(task.priority)}>
+                                                                {formatPriority(task.priority)}
+                                                            </span>
+                                                        {/if}
+                                                        {#if task.subtasks && task.subtasks.length > 0}
+                                                            <span class="text-slate-400 dark:text-slate-500">{$_("ai_panel.contains_subtasks", { values: { count: task.subtasks.length } })}</span>
+                                                        {/if}
+                                                    </div>
+                                                {/if}
+                                                {#if task.note}
+                                                    <div class="mt-1.5 text-xs text-slate-400 dark:text-slate-500 truncate">{task.note}</div>
                                                 {/if}
                                             </div>
                                         {/each}
@@ -1972,6 +2072,7 @@
                     bind:this={composerTextarea}
                     bind:value={inputText}
                     on:input={syncComposerHeight}
+                    on:paste={handlePaste}
                     on:keydown={(e) =>
                         e.key === "Enter" &&
                         !e.shiftKey &&
@@ -2041,6 +2142,22 @@
         padding-bottom: max(5.25rem, env(safe-area-inset-bottom) + 0.5rem);
     }
 
+    .chat-message-content {
+        min-width: 0;
+    }
+
+    .chat-message-content > div {
+        min-width: 0;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .chat-message-content :global(*) {
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
     @media (min-width: 768px) {
         .safe-top,
         .safe-top-panel {
@@ -2056,9 +2173,11 @@
     .markdown-message :global(.markdown-content) {
         font-size: 0.875rem;
         max-width: 100%;
+        min-width: 0;
     }
 
     .markdown-message :global(.markdown-content),
+    .markdown-message :global(.whitespace-pre-wrap),
     .markdown-message :global(.markdown-content p),
     .markdown-message :global(.markdown-content li),
     .markdown-message :global(.markdown-content blockquote),
@@ -2076,13 +2195,30 @@
         word-break: break-all;
     }
 
+    .markdown-message :global(.code-block-wrapper),
+    .markdown-message :global(.markdown-content .table-wrapper),
+    .markdown-message :global(.markdown-content .katex-display) {
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+    }
+
     .markdown-message :global(.markdown-content pre) {
         max-width: 100%;
+        min-width: 0;
+        white-space: pre-wrap;
+        overflow-x: auto;
     }
 
     .markdown-message :global(.markdown-content pre code) {
-        overflow-wrap: normal;
-        word-break: normal;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .markdown-message :global(.markdown-content table) {
+        max-width: 100%;
+        table-layout: fixed;
     }
 
     .user-markdown :global(.markdown-content a) {

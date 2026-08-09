@@ -90,22 +90,6 @@ detect_os() {
     echo "$OS"
 }
 
-check_node() {
-    if check_command node; then
-        NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-        if [ "$NODE_VERSION" -ge 16 ]; then
-            log_success "Node.js $(node -v) 已安装"
-            return 0
-        else
-            log_error "Node.js 版本过低，需要 16+"
-            return 1
-        fi
-    else
-        log_error "未安装 Node.js"
-        return 1
-    fi
-}
-
 check_rust() {
     if check_command rustc && check_command cargo; then
         log_success "Rust $(rustc --version | awk '{print $2}') 已安装"
@@ -121,8 +105,8 @@ check_bun() {
         log_success "Bun $(bun --version) 已安装"
         return 0
     else
-        log_warning "未安装 Bun，将使用 npm"
-        return 1
+        log_error "未安装 Bun。本项目仅支持 Bun，请先安装：https://bun.sh"
+        exit 1
     fi
 }
 
@@ -218,11 +202,8 @@ check_ios_env() {
 install_dependencies() {
     log_info "安装项目依赖..."
     
-    if check_bun; then
-        bun install
-    else
-        npm install
-    fi
+    check_bun
+    bun install
     
     log_success "依赖安装完成"
 }
@@ -230,11 +211,8 @@ install_dependencies() {
 build_frontend() {
     log_info "构建前端..."
     
-    if check_bun; then
-        bun run build
-    else
-        npm run build
-    fi
+    check_bun
+    bun run build
     
     log_success "前端构建完成"
 }
@@ -243,11 +221,8 @@ build_desktop() {
     local OS=$(detect_os)
     log_info "构建桌面应用 ($OS)..."
     
-    if check_bun; then
-        bun run tauri build
-    else
-        npm run tauri build
-    fi
+    check_bun
+    bun run tauri build
     
     log_success "桌面应用构建完成"
 }
@@ -255,11 +230,8 @@ build_desktop() {
 build_android() {
     log_info "构建 Android 应用..."
     
-    if check_bun; then
-        bun run tauri android build
-    else
-        npm run tauri android build
-    fi
+    check_bun
+    bun run tauri android build
     
     log_success "Android APK 构建完成"
     
@@ -272,11 +244,8 @@ build_android() {
 build_ios() {
     log_info "构建 iOS 应用..."
     
-    if check_bun; then
-        bun run tauri ios build
-    else
-        npm run tauri ios build
-    fi
+    check_bun
+    bun run tauri ios build
     
     log_success "iOS 应用构建完成"
 }
@@ -292,11 +261,6 @@ main() {
     log_info "当前操作系统: $OS"
     
     log_info "检查基础环境..."
-    
-    if ! check_node; then
-        log_error "请先安装 Node.js 16+"
-        exit 1
-    fi
     
     if ! check_rust; then
         log_error "请先安装 Rust"
