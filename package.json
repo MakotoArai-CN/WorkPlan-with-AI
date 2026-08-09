@@ -20,7 +20,6 @@
   },
   "license": "AGPL-3.0",
   "dependencies": {
-    "@kingsword/tauri-plugin-mobile-onbackpressed-listener": "npm:@jsr/kingsword__tauri-plugin-mobile-onbackpressed-listener",
     "@milkdown/core": "^7.21.3",
     "@milkdown/plugin-listener": "^7.21.3",
     "@milkdown/preset-commonmark": "^7.21.3",

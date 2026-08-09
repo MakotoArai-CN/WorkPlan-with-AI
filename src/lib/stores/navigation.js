@@ -142,11 +142,19 @@ export async function setupAndroidBackHandler(closeToQuit, callbacks) {
         setTimeout(handler, index * 50);
     }
 
+    // Inlined rather than depending on @kingsword/tauri-plugin-mobile-onbackpressed-listener:
+    // that package is published only to JSR, which `bun audit` silently skips, so it was the
+    // one dependency in the tree with no vulnerability coverage. Its whole JS half was these
+    // two calls. The Rust crate stays — it carries the Android native glue, and crates.io is
+    // covered by Dependabot.
     try {
-        const { registerBackEvent } = await import(
-            '@kingsword/tauri-plugin-mobile-onbackpressed-listener'
+        const { invoke, addPluginListener } = await import('@tauri-apps/api/core');
+        await invoke('plugin:mobile-onbackpressed-listener|register_back_event');
+        const pluginListener = await addPluginListener(
+            'mobile-onbackpressed-listener',
+            'mobile-onbackpressed-goback',
+            () => handler()
         );
-        const pluginListener = await registerBackEvent(handler);
         cleanups.push(() => pluginListener.unregister());
     } catch (e) {
         console.warn('Tauri back-press plugin not available:', e);
