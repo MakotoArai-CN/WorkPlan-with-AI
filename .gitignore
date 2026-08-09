@@ -176,3 +176,7 @@ htmlcov/
 bower_components/
 jspm_packages/
 web_modules/
+
+# Playwright artifacts
+.playwright-cli/
+.playwright-mcp/

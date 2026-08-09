@@ -2,6 +2,12 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import CryptoJS from 'crypto-js';
 import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from './runtime.js';
+import { stripDataUrlPrefix, describeSavedLocation } from './export-payload.js';
+
+// Components format their save toasts with this, and reach it through the export
+// module they already import.
+export { describeSavedLocation };
 
 function sanitizeDownloadFilename(filename = 'export') {
     const value = String(filename || 'export').trim();
@@ -24,37 +30,66 @@ function sanitizeDownloadFilename(filename = 'export') {
     return `${cleanBase}${cleanExtension}`;
 }
 
+function isUserCancel(error) {
+    const message = String(error?.message ?? error ?? '');
+    return message.includes('CANCELLED:') || message.includes('用户取消了保存');
+}
+
+function withLocation(message, result) {
+    const location = describeSavedLocation(result?.path);
+    return location ? `${message}（${location}）` : message;
+}
+
 /**
  * Platform-aware file download helper.
- * Prefers Tauri backend (save_file_to_downloads / save_file_via_dialog).
+ * Prefers Tauri backend (save_file_via_dialog / save_file_to_downloads).
  * Falls back to browser <a download>.click() for pure web environments.
- * @returns {{ success: boolean, path?: string }}
+ * @returns {{ success: boolean, path?: string, cancelled?: boolean }}
  */
-async function downloadFile(content, filename, options = {}) {
+async function downloadFile(rawContent, filename, options = {}) {
     const {
         useSaveDialog = false,
-        filters = []
+        filters = [],
+        base64 = false
     } = options;
     const safeFilename = sanitizeDownloadFilename(filename);
+    const content = base64 ? stripDataUrlPrefix(rawContent) : rawContent;
 
-    try {
-        if (window.__TAURI__) {
-            if (useSaveDialog) {
-                const savedPath = await invoke('save_file_via_dialog', { filename: safeFilename, content, filters });
+    if (isTauriRuntime) {
+        if (useSaveDialog) {
+            try {
+                const savedPath = await invoke('save_file_via_dialog', {
+                    filename: safeFilename,
+                    content,
+                    filters,
+                    base64
+                });
                 if (savedPath) {
                     return { success: true, path: savedPath };
                 }
+            } catch (e) {
+                if (isUserCancel(e)) {
+                    return { success: false, cancelled: true };
+                }
+                console.warn('save_file_via_dialog failed, writing to the downloads directory:', e);
             }
-
-            const savedPath = await invoke('save_file_to_downloads', { filename: safeFilename, content });
-            return { success: true, path: savedPath };
         }
-    } catch (e) {
-        console.warn('Tauri save failed, falling back to browser download:', e);
+
+        // Let this one throw: on Android the browser fallback below cannot write
+        // anything, so swallowing the error is what produced "export succeeded"
+        // toasts for files that were never created.
+        const savedPath = await invoke('save_file_to_downloads', {
+            filename: safeFilename,
+            content,
+            base64
+        });
+        return { success: true, path: savedPath };
     }
 
     // Fallback: browser-based download
-    const blob = new Blob([content], { type: 'application/octet-stream' });
+    const blob = base64
+        ? await (await fetch(`data:application/octet-stream;base64,${content}`)).blob()
+        : new Blob([content], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -162,12 +197,22 @@ export async function exportToPDF(element, filename = 'export.pdf', options = {}
             }
         }
 
-        // PDF uses binary output — jsPDF.save() works on desktop but may not on Android WebView
-        // For now, use jsPDF.save() which handles blob download internally
-        pdf.save(sanitizeDownloadFilename(filename));
+        // jsPDF.save() drops a blob download, which silently no-ops in the Android
+        // WebView. Route the bytes through the same save path as every other export.
+        const pdfFilename = sanitizeDownloadFilename(filename);
+        const result = await downloadFile(pdf.output('datauristring'), pdfFilename, {
+            useSaveDialog: isTauriRuntime,
+            filters: [{ name: 'PDF', extensions: ['pdf'] }],
+            base64: true
+        });
 
-        if (showToast) showToast({ message: 'PDF导出成功', type: 'success' });
-        return { success: true };
+        if (result.cancelled) {
+            if (showToast) showToast({ message: '已取消导出', type: 'info' });
+            return result;
+        }
+
+        if (showToast) showToast({ message: withLocation('PDF导出成功', result), type: 'success', duration: 6000 });
+        return result;
     } catch (e) {
         console.error('PDF export failed:', e);
         if (showToast) showToast({ message: 'PDF导出失败: ' + e.message, type: 'error' });
@@ -182,11 +227,16 @@ export async function exportToMarkdown(content, filename = 'export.md', options 
         if (showToast) showToast({ message: '正在导出Markdown...', type: 'info', duration: 1500 });
 
         const result = await downloadFile(content, filename, {
-            useSaveDialog: Boolean(window.__TAURI__),
+            useSaveDialog: isTauriRuntime,
             filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }]
         });
 
-        if (showToast) showToast({ message: 'Markdown导出成功', type: 'success' });
+        if (result.cancelled) {
+            if (showToast) showToast({ message: '已取消导出', type: 'info' });
+            return result;
+        }
+
+        if (showToast) showToast({ message: withLocation('Markdown导出成功', result), type: 'success', duration: 6000 });
         return result;
     } catch (e) {
         console.error('Markdown export failed:', e);
@@ -220,11 +270,16 @@ export async function exportToHTML(content, filename = 'export.html', title = 'E
 <body>${content}</body>
 </html>`;
         const result = await downloadFile(html, filename, {
-            useSaveDialog: Boolean(window.__TAURI__),
+            useSaveDialog: isTauriRuntime,
             filters: [{ name: 'HTML', extensions: ['html', 'htm'] }]
         });
 
-        if (showToast) showToast({ message: 'HTML导出成功', type: 'success' });
+        if (result.cancelled) {
+            if (showToast) showToast({ message: '已取消导出', type: 'info' });
+            return result;
+        }
+
+        if (showToast) showToast({ message: withLocation('HTML导出成功', result), type: 'success', duration: 6000 });
         return result;
     } catch (e) {
         console.error('HTML export failed:', e);
@@ -257,11 +312,16 @@ export async function exportToCSV(data, filename = 'export.csv', options = {}) {
 
         const BOM = '\uFEFF';
         const result = await downloadFile(BOM + csvContent, filename, {
-            useSaveDialog: Boolean(window.__TAURI__),
+            useSaveDialog: isTauriRuntime,
             filters: [{ name: 'CSV', extensions: ['csv'] }]
         });
 
-        if (showToast) showToast({ message: 'CSV导出成功', type: 'success' });
+        if (result.cancelled) {
+            if (showToast) showToast({ message: '已取消导出', type: 'info' });
+            return result;
+        }
+
+        if (showToast) showToast({ message: withLocation('CSV导出成功', result), type: 'success', duration: 6000 });
         return result;
     } catch (e) {
         console.error('CSV export failed:', e);
@@ -291,11 +351,16 @@ export async function exportToEncryptedJSON(data, filename = 'export.json', pass
         }
 
         const result = await downloadFile(content, filename, {
-            useSaveDialog: Boolean(window.__TAURI__),
+            useSaveDialog: isTauriRuntime,
             filters: [{ name: 'JSON', extensions: ['json'] }]
         });
 
-        if (showToast) showToast({ message: '数据导出成功' + (password ? '（已加密）' : ''), type: 'success' });
+        if (result.cancelled) {
+            if (showToast) showToast({ message: '已取消导出', type: 'info' });
+            return result;
+        }
+
+        if (showToast) showToast({ message: withLocation('数据导出成功' + (password ? '（已加密）' : ''), result), type: 'success', duration: 6000 });
         return result;
     } catch (e) {
         console.error('JSON export failed:', e);
@@ -312,11 +377,16 @@ export async function exportToJSON(data, filename = 'export.json', options = {})
 
         const content = JSON.stringify(data, null, 2);
         const result = await downloadFile(content, filename, {
-            useSaveDialog: Boolean(window.__TAURI__),
+            useSaveDialog: isTauriRuntime,
             filters: [{ name: 'JSON', extensions: ['json'] }]
         });
 
-        if (showToast) showToast({ message: '数据导出成功', type: 'success' });
+        if (result.cancelled) {
+            if (showToast) showToast({ message: '已取消导出', type: 'info' });
+            return result;
+        }
+
+        if (showToast) showToast({ message: withLocation('数据导出成功', result), type: 'success', duration: 6000 });
         return result;
     } catch (e) {
         console.error('JSON export failed:', e);

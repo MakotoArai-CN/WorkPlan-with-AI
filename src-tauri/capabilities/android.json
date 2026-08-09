@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schemas.tauri.app/config/2/capability",
+  "identifier": "android-biometric",
+  "description": "Biometric unlock for the password vault (Android only)",
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "android"
+  ],
+  "permissions": [
+    "biometric:default"
+  ]
+}

@@ -22,6 +22,15 @@ export default {
         }),
         alias: {
             '$lib': 'src/lib'
+        },
+        // Emit sha256 hashes for SvelteKit's inline bootstrap scripts so the app's CSP
+        // can drop script-src 'unsafe-inline' — without this, any XSS in rendered AI
+        // output or notes would execute freely.
+        csp: {
+            mode: 'hash',
+            directives: {
+                'script-src': ['self']
+            }
         }
     },
     onwarn: (warning, handler) => {

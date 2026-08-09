@@ -10,8 +10,11 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::net::{IpAddr, ToSocketAddrs};
+use std::path::{Component, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 use tauri_plugin_opener::OpenerExt;
@@ -21,8 +24,88 @@ use base64::Engine;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod autostart;
+mod device;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
+
+/// Paths the user explicitly selected through a native file dialog in this session.
+///
+/// The dialog pick *is* the authorization grant, so the grant has to be recorded on
+/// the side that owns the dialog. Previously the frontend picked the files and then
+/// handed arbitrary paths back to `read_selected_text_files`, which meant anything
+/// able to call that command — including a model-generated execution plan — could read
+/// any file on disk. The backend now only reads back what it handed out.
+static PICKED_FILE_GRANTS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn grant_picked_paths<I: IntoIterator<Item = String>>(paths: I) {
+    let Ok(mut guard) = PICKED_FILE_GRANTS.lock() else {
+        return;
+    };
+    let grants = guard.get_or_insert_with(HashSet::new);
+    for path in paths {
+        grants.insert(path);
+    }
+}
+
+fn is_path_granted(label: &str) -> bool {
+    PICKED_FILE_GRANTS
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|grants| grants.contains(label)))
+        .unwrap_or(false)
+}
+
+/// Authorize a path for reading: either the user picked it from a dialog this session,
+/// or it lives under the workspace / a directory the user explicitly trusted.
+fn ensure_readable_path(label: &str, path: &str, trusted_dirs: &[String]) -> Result<(), String> {
+    if is_path_granted(label) {
+        return Ok(());
+    }
+    ensure_local_path_allowed(path, trusted_dirs).map(|_| ())
+}
+
+/// Reduce an arbitrary caller-supplied filename to a single safe path segment.
+///
+/// `Path::join` replaces the whole base path when given an absolute path, and does not
+/// collapse `..`, so an unsanitized filename here is a write-anywhere primitive.
+fn sanitize_download_filename(filename: &str) -> Result<String, String> {
+    // Reject rather than strip NUL: a name containing one is malformed, and silently
+    // rewriting it could turn a rejected name into an accepted different one.
+    if filename.contains('\0') {
+        return Err("文件名无效".to_string());
+    }
+    let candidate = filename.trim();
+
+    // Take the last segment under either separator; Windows accepts both.
+    let basename = candidate
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches('.')
+        .trim();
+
+    if basename.is_empty()
+        || basename == "."
+        || basename == ".."
+        || basename.contains(':')
+        || basename.chars().any(|c| c.is_control())
+    {
+        return Err("文件名无效".to_string());
+    }
+
+    // Defense in depth: reject anything that still parses as more than one plain segment.
+    let as_path = PathBuf::from(basename);
+    let mut components = as_path.components();
+    let Some(Component::Normal(only)) = components.next() else {
+        return Err("文件名无效".to_string());
+    };
+    if components.next().is_some() {
+        return Err("文件名无效".to_string());
+    }
+
+    Ok(only.to_string_lossy().to_string())
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,10 +199,11 @@ fn normalize_path(path: &str) -> Result<PathBuf, String> {
     normalize_pathbuf(PathBuf::from(path))
 }
 
-fn allowed_write_roots(trusted_dirs: &[String]) -> Result<Vec<PathBuf>, String> {
+fn allowed_local_roots(trusted_dirs: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut roots = vec![normalize_pathbuf(current_workspace_root()?)?];
     for dir in trusted_dirs {
-        if dir.trim().is_empty() {
+        let dir = dir.trim();
+        if dir.is_empty() || dir.starts_with("content://") {
             continue;
         }
         roots.push(normalize_path(dir)?);
@@ -127,17 +211,106 @@ fn allowed_write_roots(trusted_dirs: &[String]) -> Result<Vec<PathBuf>, String> 
     Ok(roots)
 }
 
-fn ensure_mutation_allowed(path: &str, trusted_dirs: &[String]) -> Result<PathBuf, String> {
+fn ensure_local_path_allowed(path: &str, trusted_dirs: &[String]) -> Result<PathBuf, String> {
     let normalized = normalize_path(path)?;
-    let roots = allowed_write_roots(trusted_dirs)?;
+    let roots = allowed_local_roots(trusted_dirs)?;
     if roots.iter().any(|root| normalized.starts_with(root)) {
         return Ok(normalized);
     }
 
     Err(format!(
-        "拒绝操作未授权路径：{}。仅允许工作目录和用户授权目录。",
+        "拒绝访问未授权路径：{}。仅允许工作目录和用户授权目录。",
         normalized.to_string_lossy()
     ))
+}
+
+fn ensure_mutation_allowed(path: &str, trusted_dirs: &[String]) -> Result<PathBuf, String> {
+    ensure_local_path_allowed(path, trusted_dirs)
+}
+
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(addr) => {
+            let octets = addr.octets();
+            addr.is_loopback()
+                || addr.is_private()
+                || addr.is_link_local()
+                || addr.is_multicast()
+                || addr.is_broadcast()
+                || addr.is_unspecified()
+                || octets[0] == 0
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
+        }
+        IpAddr::V6(addr) => {
+            if let Some(mapped) = addr.to_ipv4_mapped() {
+                return is_blocked_ip(IpAddr::V4(mapped));
+            }
+            let segments = addr.segments();
+            addr.is_loopback()
+                || addr.is_unspecified()
+                || addr.is_multicast()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+fn is_blocked_host_name(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "localhost" || host.ends_with(".localhost")
+}
+
+/// Validate a URL and return it alongside the addresses it resolved to.
+///
+/// The caller must pin the connection to these addresses. Validating a hostname and
+/// then letting the HTTP client resolve it again leaves a DNS-rebinding window in
+/// which the second lookup can return an internal address.
+fn validate_public_http_url_resolved(raw_url: &str) -> Result<(Url, Vec<std::net::SocketAddr>), String> {
+    let parsed = Url::parse(raw_url).map_err(|e| format!("URL 无效: {}", e))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("仅支持 http/https URL".to_string());
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL 缺少主机名".to_string())?
+        .to_string();
+    if is_blocked_host_name(&host) {
+        return Err("拒绝访问本机地址".to_string());
+    }
+
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "URL 缺少端口信息".to_string())?;
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(ip) {
+            return Err("拒绝访问内网或本机地址".to_string());
+        }
+        return Ok((parsed, vec![std::net::SocketAddr::new(ip, port)]));
+    }
+
+    let mut resolved = Vec::new();
+    for address in (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|e| format!("解析主机失败: {}", e))?
+    {
+        if is_blocked_ip(address.ip()) {
+            return Err("拒绝访问解析到内网或本机地址的 URL".to_string());
+        }
+        resolved.push(address);
+    }
+
+    if resolved.is_empty() {
+        return Err("主机未解析到可用地址".to_string());
+    }
+
+    Ok((parsed, resolved))
+}
+
+fn validate_public_http_url(raw_url: &str) -> Result<Url, String> {
+    validate_public_http_url_resolved(raw_url).map(|(url, _)| url)
 }
 
 fn extract_duckduckgo_url(raw_url: &str) -> String {
@@ -270,9 +443,13 @@ fn search_local_files(
     root: Option<String>,
     query: String,
     max_results: Option<usize>,
+    trusted_dirs: Option<Vec<String>>,
 ) -> Result<Vec<LocalFileEntry>, String> {
+    let trusted_dirs = trusted_dirs.unwrap_or_default();
     let root_path = match root {
-        Some(value) if !value.trim().is_empty() => normalize_path(&value)?,
+        Some(value) if !value.trim().is_empty() => {
+            ensure_local_path_allowed(&value, &trusted_dirs)?
+        }
         _ => normalize_pathbuf(current_workspace_root()?)?,
     };
     if !root_path.exists() {
@@ -319,13 +496,22 @@ fn search_local_files(
 }
 
 #[tauri::command]
-fn read_local_file(path: String, max_bytes: Option<usize>) -> Result<LocalFileReadResult, String> {
-    let normalized = normalize_path(&path)?;
+fn read_local_file(
+    path: String,
+    max_bytes: Option<usize>,
+    trusted_dirs: Option<Vec<String>>,
+) -> Result<LocalFileReadResult, String> {
+    let trusted_dirs = trusted_dirs.unwrap_or_default();
+    let normalized = ensure_local_path_allowed(&path, &trusted_dirs)?;
     let bytes = fs::read(&normalized)
         .map_err(|e| format!("读取文件失败 {}: {}", normalized.to_string_lossy(), e))?;
     let limit = max_bytes.unwrap_or(16_000).clamp(512, 256_000);
     let truncated = bytes.len() > limit;
-    let slice = if truncated { &bytes[..limit] } else { bytes.as_slice() };
+    let slice = if truncated {
+        &bytes[..limit]
+    } else {
+        bytes.as_slice()
+    };
     let content = String::from_utf8_lossy(slice).to_string();
 
     Ok(LocalFileReadResult {
@@ -463,29 +649,48 @@ async fn search_web(
 }
 
 #[tauri::command]
-async fn fetch_web_content(
-    url: String,
-    max_chars: Option<usize>,
-) -> Result<String, String> {
+async fn fetch_web_content(url: String, max_chars: Option<usize>) -> Result<String, String> {
     let url = url.trim().to_string();
     if url.is_empty() {
         return Err("URL 不能为空".to_string());
     }
+    let (url, resolved) = validate_public_http_url_resolved(&url)?;
 
     let limit = max_chars.unwrap_or(4000).clamp(200, 12000);
-    let client = reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .user_agent(concat!(
             "Mozilla/5.0 (compatible; WorkPlan/",
             env!("CARGO_PKG_VERSION"),
             "; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)"
         ))
-        .timeout(std::time::Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::limited(5))
+        .timeout(std::time::Duration::from_secs(10));
+
+    // Pin the host to the addresses we just validated, closing the DNS-rebinding
+    // window between validation and the client's own lookup.
+    if let Some(host) = url.host_str() {
+        if host.parse::<IpAddr>().is_err() && !resolved.is_empty() {
+            builder = builder.resolve_to_addrs(host, &resolved);
+        }
+    }
+
+    let client = builder
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                return attempt.error(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "重定向次数过多",
+                ));
+            }
+            if let Err(error) = validate_public_http_url(attempt.url().as_str()) {
+                return attempt.error(std::io::Error::new(std::io::ErrorKind::Other, error));
+            }
+            attempt.follow()
+        }))
         .build()
         .map_err(|e| e.to_string())?;
 
     let response = client
-        .get(&url)
+        .get(url)
         .send()
         .await
         .map_err(|e| format!("请求失败: {}", e))?;
@@ -505,10 +710,23 @@ async fn fetch_web_content(
         return Err(format!("不支持的内容类型: {}", content_type));
     }
 
-    let html = response
-        .text()
+    // Cap the body: the URL can come from AI-generated plans, and an endpoint that
+    // streams indefinitely would otherwise exhaust memory.
+    const MAX_BODY_BYTES: usize = 5 * 1024 * 1024;
+    let mut body = Vec::new();
+    let mut stream = response;
+    while let Some(chunk) = stream
+        .chunk()
         .await
-        .map_err(|e| format!("读取内容失败: {}", e))?;
+        .map_err(|e| format!("读取内容失败: {}", e))?
+    {
+        body.extend_from_slice(&chunk);
+        if body.len() >= MAX_BODY_BYTES {
+            body.truncate(MAX_BODY_BYTES);
+            break;
+        }
+    }
+    let html = String::from_utf8_lossy(&body).to_string();
 
     // Parse HTML and extract text content
     let document = Html::parse_document(&html);
@@ -578,16 +796,36 @@ async fn fetch_web_content(
     Ok(result)
 }
 
+/// Exports send text as-is, but binary formats (PDF) can only cross the IPC
+/// boundary as base64, optionally still wrapped in a `data:` URL by the producer.
+fn decode_save_payload(content: &str, is_base64: bool) -> Result<Vec<u8>, String> {
+    if !is_base64 {
+        return Ok(content.as_bytes().to_vec());
+    }
+
+    let payload = if content.starts_with("data:") {
+        match content.find(',') {
+            Some(idx) => &content[idx + 1..],
+            None => return Err("无效的 data URL".to_string()),
+        }
+    } else {
+        content
+    };
+
+    base64::engine::general_purpose::STANDARD
+        .decode(payload.trim())
+        .map_err(|e| format!("解码文件内容失败: {}", e))
+}
+
 #[tauri::command]
 async fn save_file_to_downloads(
     app: tauri::AppHandle,
     filename: String,
     content: String,
+    base64: Option<bool>,
 ) -> Result<String, String> {
-    let filename = filename.trim().to_string();
-    if filename.is_empty() {
-        return Err("文件名不能为空".to_string());
-    }
+    let filename = sanitize_download_filename(&filename)?;
+    let bytes = decode_save_payload(&content, base64.unwrap_or(false))?;
 
     // Determine downloads directory based on platform
     let download_dir = {
@@ -632,7 +870,7 @@ async fn save_file_to_downloads(
         }
     }
 
-    fs::write(&target, content.as_bytes())
+    fs::write(&target, &bytes)
         .map_err(|e| format!("写入文件失败: {}", e))?;
 
     Ok(target.to_string_lossy().to_string())
@@ -644,11 +882,12 @@ async fn save_file_via_dialog(
     filename: String,
     content: String,
     filters: Option<Vec<serde_json::Value>>,
+    base64: Option<bool>,
 ) -> Result<String, String> {
-    let filename = filename.trim().to_string();
-    if filename.is_empty() {
-        return Err("文件名不能为空".to_string());
-    }
+    // The user confirms the final location in the save dialog, but the suggested name
+    // still goes through sanitization so a crafted default cannot smuggle in separators.
+    let filename = sanitize_download_filename(&filename)?;
+    let bytes = decode_save_payload(&content, base64.unwrap_or(false))?;
 
     let mut dialog_builder = app.dialog().file().set_file_name(&filename);
 
@@ -677,7 +916,9 @@ async fn save_file_via_dialog(
     }
 
     let Some(file_path) = dialog_builder.blocking_save_file() else {
-        return Err("用户取消了保存".to_string());
+        // Machine-readable prefix: the frontend must tell a deliberate cancel apart
+        // from a real failure, otherwise it reports a phantom "export succeeded".
+        return Err("CANCELLED:用户取消了保存".to_string());
     };
     let target_label = file_path.to_string();
 
@@ -689,18 +930,66 @@ async fn save_file_via_dialog(
                 .fs()
                 .open(file_path, options)
                 .map_err(|e| format!("写入文件失败: {}", e))?;
-            file.write_all(content.as_bytes())
+            file.write_all(&bytes)
                 .map_err(|e| format!("写入文件失败: {}", e))?;
         }
         FilePath::Path(target) => {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
             }
-            fs::write(&target, content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+            fs::write(&target, &bytes).map_err(|e| format!("写入文件失败: {}", e))?;
         }
     }
 
     Ok(target_label)
+}
+
+/// Open a native file picker and record every selection as an authorized read.
+///
+/// Runs in the backend so the grant is recorded where the user actually consents,
+/// rather than trusting a path list that came back through the webview.
+#[tauri::command]
+async fn pick_files_for_read(
+    app: tauri::AppHandle,
+    filters: Option<Vec<serde_json::Value>>,
+) -> Result<Vec<String>, String> {
+    let mut dialog_builder = app.dialog().file();
+
+    if let Some(items) = filters {
+        for item in items {
+            let name = item
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Files")
+                .to_string();
+            let extensions = item
+                .get("extensions")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            if !extensions.is_empty() {
+                let ext_refs = extensions.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+                dialog_builder = dialog_builder.add_filter(&name, &ext_refs);
+            }
+        }
+    }
+
+    let Some(selected) = dialog_builder.blocking_pick_files() else {
+        return Ok(Vec::new());
+    };
+
+    let labels = selected
+        .into_iter()
+        .map(|file_path| file_path.to_string())
+        .collect::<Vec<_>>();
+    grant_picked_paths(labels.clone());
+
+    Ok(labels)
 }
 
 #[tauri::command]
@@ -708,7 +997,9 @@ fn read_selected_text_files(
     app: tauri::AppHandle,
     paths: Vec<String>,
     max_bytes: Option<usize>,
+    trusted_dirs: Option<Vec<String>>,
 ) -> Result<Vec<LocalTextFilePayload>, String> {
+    let trusted_dirs = trusted_dirs.unwrap_or_default();
     let limit = max_bytes.unwrap_or(128_000).clamp(1_024, 512_000);
     let mut items = Vec::new();
 
@@ -719,12 +1010,17 @@ fn read_selected_text_files(
         let label = file_path.to_string();
 
         let bytes = match &file_path {
-            FilePath::Url(_) => app
-                .fs()
-                .read(file_path.clone())
-                .map_err(|e| format!("读取文件失败 {}: {}", label, e))?,
+            FilePath::Url(_) => {
+                if !is_path_granted(&label) {
+                    return Err(format!("拒绝访问未授权路径：{}", label));
+                }
+                app.fs()
+                    .read(file_path.clone())
+                    .map_err(|e| format!("读取文件失败 {}: {}", label, e))?
+            }
             FilePath::Path(path) => {
                 let normalized = normalize_pathbuf(path.clone())?;
+                ensure_readable_path(&label, &normalized.to_string_lossy(), &trusted_dirs)?;
                 let metadata = fs::metadata(&normalized)
                     .map_err(|e| format!("读取文件元数据失败 {}: {}", normalized.to_string_lossy(), e))?;
                 if metadata.is_dir() {
@@ -792,7 +1088,9 @@ fn read_binary_files(
     app: tauri::AppHandle,
     paths: Vec<String>,
     max_bytes: Option<usize>,
+    trusted_dirs: Option<Vec<String>>,
 ) -> Result<Vec<MediaFilePayload>, String> {
+    let trusted_dirs = trusted_dirs.unwrap_or_default();
     let limit = max_bytes.unwrap_or(10_000_000).clamp(1_024, 50_000_000);
     let mut items = Vec::new();
 
@@ -803,12 +1101,17 @@ fn read_binary_files(
         let label = file_path.to_string();
 
         let bytes = match &file_path {
-            FilePath::Url(_) => app
-                .fs()
-                .read(file_path.clone())
-                .map_err(|e| format!("读取文件失败 {}: {}", label, e))?,
+            FilePath::Url(_) => {
+                if !is_path_granted(&label) {
+                    return Err(format!("拒绝访问未授权路径：{}", label));
+                }
+                app.fs()
+                    .read(file_path.clone())
+                    .map_err(|e| format!("读取文件失败 {}: {}", label, e))?
+            }
             FilePath::Path(path) => {
                 let normalized = normalize_pathbuf(path.clone())?;
+                ensure_readable_path(&label, &normalized.to_string_lossy(), &trusted_dirs)?;
                 let metadata = fs::metadata(&normalized)
                     .map_err(|e| format!("读取文件元数据失败 {}: {}", normalized.to_string_lossy(), e))?;
                 if metadata.is_dir() {
@@ -878,6 +1181,122 @@ fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_download_filename_keeps_plain_names() {
+        assert_eq!(sanitize_download_filename("report.md").unwrap(), "report.md");
+        assert_eq!(
+            sanitize_download_filename("  generated_123.png  ").unwrap(),
+            "generated_123.png"
+        );
+        assert_eq!(sanitize_download_filename("报告 2026.csv").unwrap(), "报告 2026.csv");
+    }
+
+    #[test]
+    fn sanitize_download_filename_strips_traversal() {
+        // Relative escapes collapse to their final segment.
+        assert_eq!(sanitize_download_filename("../../evil.bat").unwrap(), "evil.bat");
+        assert_eq!(
+            sanitize_download_filename("..\\..\\Startup\\evil.bat").unwrap(),
+            "evil.bat"
+        );
+        assert_eq!(sanitize_download_filename("sub/dir/note.txt").unwrap(), "note.txt");
+    }
+
+    #[test]
+    fn sanitize_download_filename_reduces_absolute_paths_to_basename() {
+        // Absolute paths would otherwise replace the download dir entirely via
+        // Path::join; they must collapse to a bare name inside Downloads.
+        assert_eq!(
+            sanitize_download_filename("C:\\Windows\\System32\\evil.exe").unwrap(),
+            "evil.exe"
+        );
+        assert_eq!(
+            sanitize_download_filename("C:/Windows/evil.exe").unwrap(),
+            "evil.exe"
+        );
+        assert_eq!(sanitize_download_filename("/etc/cron.d/evil").unwrap(), "evil");
+    }
+
+    #[test]
+    fn sanitize_download_filename_rejects_unusable_names() {
+        // Drive-relative names like "C:evil.exe" resolve against the process CWD
+        // on Windows rather than Downloads, so they are refused outright.
+        assert!(sanitize_download_filename("C:evil.exe").is_err());
+        assert!(sanitize_download_filename("").is_err());
+        assert!(sanitize_download_filename("   ").is_err());
+        assert!(sanitize_download_filename("..").is_err());
+        assert!(sanitize_download_filename("/").is_err());
+        assert!(sanitize_download_filename("evil\0.txt").is_err());
+    }
+
+    #[test]
+    fn ungranted_paths_are_rejected_outside_trusted_roots() {
+        // A path the user never picked, outside workspace and trusted dirs, must fail.
+        let outside = if cfg!(windows) {
+            "C:\\Windows\\System32\\drivers\\etc\\hosts"
+        } else {
+            "/etc/passwd"
+        };
+        assert!(!is_path_granted(outside));
+        assert!(ensure_readable_path(outside, outside, &[]).is_err());
+    }
+
+    #[test]
+    fn granted_paths_bypass_root_check_only_after_being_picked() {
+        let label = "/tmp/workplan-test-grant-fixture.txt";
+        assert!(!is_path_granted(label));
+        assert!(ensure_readable_path(label, label, &[]).is_err());
+
+        grant_picked_paths([label.to_string()]);
+
+        assert!(is_path_granted(label));
+        // Once granted, authorization succeeds without touching the filesystem roots.
+        assert!(ensure_readable_path(label, label, &[]).is_ok());
+    }
+
+    #[test]
+    fn workspace_paths_remain_readable_without_a_grant() {
+        let workspace = normalize_pathbuf(current_workspace_root().unwrap()).unwrap();
+        let inside = workspace.join("Cargo.toml");
+        let label = inside.to_string_lossy().to_string();
+        assert!(ensure_readable_path(&label, &label, &[]).is_ok());
+    }
+
+    #[test]
+    fn blocked_ips_cover_loopback_and_private_ranges() {
+        for addr in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "172.16.0.1",
+            "169.254.169.254", // cloud metadata endpoint
+            "0.0.0.0",
+            "100.64.0.1",
+        ] {
+            assert!(
+                is_blocked_ip(addr.parse().unwrap()),
+                "expected {addr} to be blocked"
+            );
+        }
+        assert!(!is_blocked_ip("8.8.8.8".parse().unwrap()));
+        assert!(is_blocked_ip("::1".parse().unwrap()));
+        assert!(is_blocked_ip("::ffff:127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn validate_public_http_url_rejects_local_and_non_http() {
+        assert!(validate_public_http_url("http://localhost:8080/x").is_err());
+        assert!(validate_public_http_url("http://127.0.0.1/x").is_err());
+        assert!(validate_public_http_url("http://169.254.169.254/latest/meta-data").is_err());
+        assert!(validate_public_http_url("file:///etc/passwd").is_err());
+        assert!(validate_public_http_url("ftp://example.com").is_err());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -901,13 +1320,16 @@ pub fn run() {
             fetch_web_content,
             save_file_to_downloads,
             save_file_via_dialog,
+            pick_files_for_read,
             read_selected_text_files,
             read_binary_files,
             open_github,
             open_releases,
             set_close_to_quit,
             get_close_to_quit,
-            exit_app
+            exit_app,
+            device::get_device_key,
+            device::reset_device_key
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1017,6 +1439,10 @@ pub fn run() {
     let builder = builder.setup(|app| {
         app.handle()
             .plugin(tauri_plugin_mobile_onbackpressed_listener::init())?;
+        // Android-only: the plugin has no desktop implementation, so it is registered
+        // here rather than alongside the cross-platform plugins above.
+        #[cfg(target_os = "android")]
+        app.handle().plugin(tauri_plugin_biometric::init())?;
         Ok(())
     });
 

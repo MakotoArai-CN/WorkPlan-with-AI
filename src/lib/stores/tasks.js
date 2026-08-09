@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
 
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -266,6 +266,15 @@ function createTaskStore() {
     });
 
     let saveTimer = null;
+    // 用户最近一次"任务相关操作"的时间戳，用于心跳空闲检测。
+    // 仅记录用户主动的数据变更；自动生成（checkScheduled）不计入。
+    let lastActivityAt = Date.now();
+    let lastHeartbeatAt = 0;
+    let heartbeatRunning = false;
+
+    function markActivity() {
+        lastActivityAt = Date.now();
+    }
 
     function getTableName() {
         return readDatabaseConfig().tableName || DEFAULT_TABLE_NAME;
@@ -339,7 +348,10 @@ function createTaskStore() {
 
         if (currentPureStr === state.lastCloudStr) return;
 
-        update(s => ({ ...s, syncStatus: 'syncing' }));
+        // Every mutator calls saveData() from inside its own update() callback, so a
+        // synchronous update() here would be clobbered by the outer callback's return
+        // value and the syncing indicator would never light. Defer past that return.
+        queueMicrotask(() => update(s => ({ ...s, syncStatus: 'syncing' })));
 
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(async () => {
@@ -354,6 +366,72 @@ function createTaskStore() {
                 update(s => ({ ...s, syncStatus: 'error' }));
             }
         }, 2000);
+    }
+
+    // 心跳同步：用户空闲时由 +layout 定时调用。先推（本地未保存改动）后拉（其他设备的更新）。
+    // 沿用现有"单 blob、最后写入胜出"模型，不做字段级合并。
+    async function heartbeatSync() {
+        if (heartbeatRunning) return;
+
+        const databaseConfig = readDatabaseConfig();
+        if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) return;
+
+        const state = get({ subscribe });
+        if (!state.accessKey) return;
+
+        heartbeatRunning = true;
+        // 取消等待中的防抖保存，避免与心跳推送竞态。
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = null;
+        }
+
+        try {
+            const localPureStr = getPureDataString({
+                tasks: state.tasks,
+                templates: state.templates,
+                scheduledTasks: state.scheduledTasks
+            });
+
+            // 1) 先推：本地有未同步改动时上传。
+            if (localPureStr !== state.lastCloudStr) {
+                update(s => ({ ...s, syncStatus: 'syncing' }));
+                const rawData = JSON.parse(localPureStr);
+                await saveCloudRecord(state.accessKey, rawData, Date.now());
+                update(s => ({ ...s, syncStatus: 'done', lastCloudStr: localPureStr }));
+                setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
+                lastHeartbeatAt = Date.now();
+                return;
+            }
+
+            // 2) 后拉：本地已是最新，检查远端是否被其他设备更新。
+            const data = await loadCloudRecord(state.accessKey);
+            if (data && data.content) {
+                const json = data.content;
+                const cloudStr = getPureDataString({
+                    tasks: json.tasks || [],
+                    templates: json.templates || [],
+                    scheduledTasks: json.scheduledTasks || []
+                });
+                if (cloudStr !== localPureStr) {
+                    update(s => ({
+                        ...s,
+                        tasks: json.tasks || [],
+                        templates: json.templates || [],
+                        scheduledTasks: json.scheduledTasks || [],
+                        syncStatus: 'done',
+                        lastCloudStr: cloudStr
+                    }));
+                    setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
+                }
+            }
+            lastHeartbeatAt = Date.now();
+        } catch (e) {
+            console.error('Heartbeat sync error:', e);
+            update(s => ({ ...s, syncStatus: 'error' }));
+        } finally {
+            heartbeatRunning = false;
+        }
     }
 
     function checkScheduledTasks(state) {
@@ -419,49 +497,72 @@ function createTaskStore() {
             }
         },
         addTask: (task) => update(s => {
+            markActivity();
             const newState = { ...s, tasks: [...s.tasks, task] };
             saveData(newState);
             return newState;
         }),
+        // Bulk insert. Calling addTask() in a loop re-serializes the whole task list
+        // once per item, which is O(n²) and blocks the UI when the AI confirms a
+        // large batch. This does one update and one saveData for the entire list.
+        addTasks: (tasks) => {
+            const list = Array.isArray(tasks) ? tasks.filter(Boolean) : [];
+            if (!list.length) return 0;
+            update(s => {
+                markActivity();
+                const newState = { ...s, tasks: [...s.tasks, ...list] };
+                saveData(newState);
+                return newState;
+            });
+            return list.length;
+        },
         updateTask: (id, updates) => update(s => {
+            markActivity();
             const tasks = s.tasks.map(t => t.id === id ? { ...t, ...updates } : t);
             const newState = { ...s, tasks };
             saveData(newState);
             return newState;
         }),
         deleteTask: (id) => update(s => {
+            markActivity();
             const newState = { ...s, tasks: s.tasks.filter(t => t.id !== id) };
             saveData(newState);
             return newState;
         }),
         addTemplate: (template) => update(s => {
+            markActivity();
             const newState = { ...s, templates: [...s.templates, template] };
             saveData(newState);
             return newState;
         }),
         updateTemplate: (id, updates) => update(s => {
+            markActivity();
             const templates = s.templates.map(t => t.id === id ? { ...t, ...updates } : t);
             const newState = { ...s, templates };
             saveData(newState);
             return newState;
         }),
         deleteTemplate: (id) => update(s => {
+            markActivity();
             const newState = { ...s, templates: s.templates.filter(t => t.id !== id) };
             saveData(newState);
             return newState;
         }),
         addScheduledTask: (task) => update(s => {
+            markActivity();
             const newState = { ...s, scheduledTasks: [...s.scheduledTasks, task] };
             saveData(newState);
             return newState;
         }),
         updateScheduledTask: (id, updates) => update(s => {
+            markActivity();
             const scheduledTasks = s.scheduledTasks.map(t => t.id === id ? { ...t, ...updates } : t);
             const newState = { ...s, scheduledTasks };
             saveData(newState);
             return newState;
         }),
         deleteScheduledTask: (id) => update(s => {
+            markActivity();
             const newState = { ...s, scheduledTasks: s.scheduledTasks.filter(t => t.id !== id) };
             saveData(newState);
             return newState;
@@ -492,6 +593,7 @@ function createTaskStore() {
             try {
                 const json = JSON.parse(jsonStr);
                 update(s => {
+                    markActivity();
                     const newState = {
                         ...s,
                         tasks: json.tasks || s.tasks,
@@ -505,6 +607,15 @@ function createTaskStore() {
             } catch (e) {
                 return { success: false, error: e.message };
             }
+        },
+        markActivity,
+        heartbeatSync,
+        // 心跳入口：用户空闲达到 idleMs 且距上次心跳达到 minIntervalMs 时才同步。
+        maybeHeartbeat: ({ idleMs = 300000, minIntervalMs = 300000 } = {}) => {
+            const now = Date.now();
+            if (now - lastActivityAt < idleMs) return;
+            if (now - lastHeartbeatAt < minIntervalMs) return;
+            heartbeatSync();
         }
     };
 }
