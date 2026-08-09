@@ -55,8 +55,15 @@ function getChatAvatarVariant(index = 0) {
     };
 }
 
+// Chat session / profile ids end up being compared for identity and persisted, so
+// they are generated from the platform CSPRNG rather than Math.random(): the latter
+// is both predictable and prone to collisions when several ids are created in the
+// same millisecond.
 function createId(prefix = 'id') {
-    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const words = new Uint32Array(2);
+    crypto.getRandomValues(words);
+    const random = `${words[0].toString(36)}${words[1].toString(36)}`.slice(0, 12);
+    return `${prefix}_${Date.now()}_${random}`;
 }
 
 function getDefaultProviderConfig() {
