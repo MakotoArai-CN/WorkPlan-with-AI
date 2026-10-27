@@ -5,12 +5,13 @@
     import { secureSyncStatus, syncNotesNow, syncPasswordsNow } from "../utils/secure-sync.js";
     import { invoke } from "@tauri-apps/api/core";
     import { showAlert, showConfirm, showToast } from "../stores/modal.js";
-    import { onMount } from "svelte";
+    import { onMount, onDestroy, tick } from "svelte";
     import { _, locale } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { setLocale, supportedLocales } from '../i18n/index.js';
     import { exportToJSON, describeSavedLocation } from "../utils/export.js";
     import { pickTrustedDirectory } from "../utils/local-file-tools.js";
+    import VaultwardenImport from "./VaultwardenImport.svelte";
     import {
         DATABASE_PROVIDER_CATALOG,
         DATABASE_SETUP_SQL,
@@ -21,6 +22,49 @@
     let isAndroid = false;
 
     let checkingUpdate = false;
+    let showVaultwardenImport = false;
+    let themeGridEl;
+    let languageGridEl;
+    let themePill = { left: 0, top: 0, width: 0, height: 0, ready: false };
+    let languagePill = { left: 0, top: 0, width: 0, height: 0, ready: false };
+
+    function measurePill(container, attribute, value) {
+        if (!container) return { left: 0, top: 0, width: 0, height: 0, ready: false };
+        const target = container.querySelector(`[data-${attribute}="${value}"]`);
+        if (!target) return { left: 0, top: 0, width: 0, height: 0, ready: false };
+        return {
+            left: target.offsetLeft,
+            top: target.offsetTop,
+            width: target.offsetWidth,
+            height: target.offsetHeight,
+            ready: true
+        };
+    }
+
+    function updateAppearancePills() {
+        themePill = measurePill(themeGridEl, 'theme-id', get(settingsStore).theme);
+        languagePill = measurePill(languageGridEl, 'language', get(locale));
+    }
+
+    $: if (themeGridEl) {
+        $settingsStore.theme;
+        tick().then(updateAppearancePills);
+    }
+
+    $: if (languageGridEl) {
+        $locale;
+        tick().then(updateAppearancePills);
+    }
+
+    onMount(() => {
+        window.addEventListener('resize', updateAppearancePills);
+        tick().then(updateAppearancePills);
+        return () => window.removeEventListener('resize', updateAppearancePills);
+    });
+
+    onDestroy(() => {
+        window.removeEventListener('resize', updateAppearancePills);
+    });
     let isMobile = false;
     let fileInput;
     let trustedDirectoryInput = '';
@@ -102,6 +146,15 @@
         } else {
             showToast({ message: t('settings.sync_done'), type: 'success' });
         }
+    }
+
+    function handleVaultwardenImported(items) {
+        const count = passwordsStore.addPasswordsBatch(items);
+        showVaultwardenImport = false;
+        showToast({
+            message: get(_)('passwords.vaultwarden_imported', { values: { count } }),
+            type: count > 0 ? 'success' : 'warning'
+        });
     }
 
     async function manualSyncPasswords() {
@@ -357,11 +410,14 @@
                 <div>
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.theme_mode')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.theme_desc')}</div>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div bind:this={themeGridEl} class="relative grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div data-pill="theme" class="pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30 transition-all duration-300 ease-out"
+                            style={`left:${themePill.left}px;top:${themePill.top}px;width:${themePill.width}px;height:${themePill.height}px;opacity:${themePill.ready ? 1 : 0}`}></div>
                         {#each themeOptions as theme}
                             <button
+                                data-theme-id={theme.id}
                                 on:click={() => handleThemeChange(theme.id)}
-                                class="flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all {$settingsStore.theme === theme.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
+                                class="relative z-10 flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-colors duration-300 {$settingsStore.theme === theme.id ? 'border-blue-500 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
                             >
                                 <div class={`w-10 h-10 rounded-lg flex items-center justify-center shadow-sm ${theme.preview}`}>
                                     <i class={`ph ${theme.icon} text-xl ${theme.accent}`}></i>
@@ -380,11 +436,14 @@
                 <i class="ph ph-translate text-lg"></i> {$_('settings.language')}
             </div>
             <div class="p-4 md:p-6">
-                <div class="grid grid-cols-3 gap-2">
+                <div bind:this={languageGridEl} class="relative grid grid-cols-3 gap-2">
+                    <div data-pill="language" class="pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30 transition-all duration-300 ease-out"
+                        style={`left:${languagePill.left}px;top:${languagePill.top}px;width:${languagePill.width}px;height:${languagePill.height}px;opacity:${languagePill.ready ? 1 : 0}`}></div>
                     {#each supportedLocales as lang}
                         <button
+                            data-language={lang.code}
                             on:click={() => setLocale(lang.code)}
-                            class="flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all {$locale === lang.code ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
+                            class="relative z-10 flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-colors duration-300 {$locale === lang.code ? 'border-blue-500 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
                         >
                             <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{lang.label}</span>
                         </button>
@@ -569,6 +628,14 @@
                                 disabled={!$passwordsStore.isUnlocked || $secureSyncStatus.passwords === 'syncing'}
                                 class="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-indigo-50 text-indigo-600 disabled:opacity-50">
                                 {$_('settings.sync_now')}
+                            </button>
+                        </div>
+                        <div class="pl-3 border-l-2 border-indigo-100 dark:border-indigo-800">
+                            <button on:click={() => showVaultwardenImport = true}
+                                disabled={!$passwordsStore.isUnlocked}
+                                class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-[11px] font-bold disabled:opacity-50">
+                                <i class="ph ph-key"></i>
+                                {$_('passwords.vaultwarden_import')}
                             </button>
                         </div>
                     {/if}
@@ -1120,6 +1187,12 @@
                 </button>
             </div>
         </div>
+
+        <VaultwardenImport
+            bind:show={showVaultwardenImport}
+            onClose={() => showVaultwardenImport = false}
+            onImported={handleVaultwardenImported}
+        />
 
         <div class="text-center text-[10px] md:text-xs text-slate-400 dark:text-slate-500 py-4">
             Powered by ❤️ MakotoArai-CN

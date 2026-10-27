@@ -15,7 +15,6 @@
         MAX_PIN_ATTEMPTS,
     } from "../utils/device-auth.js";
     import { exportToCSV, exportToEncryptedJSON } from "../utils/export.js";
-    import VaultwardenImport from "./VaultwardenImport.svelte";
     import { onMount, onDestroy, tick } from "svelte";
     import CryptoJS from "crypto-js";
     import { _ } from 'svelte-i18n';
@@ -24,6 +23,7 @@
     let masterPassword = "";
     let confirmPassword = "";
     let unlockPassword = "";
+    let unlockPasswordInput;
     let showSetupModal = false;
     let showUnlockModal = false;
 
@@ -80,7 +80,6 @@
     let importData = null;
     let isImporting = false;
     let showImportPasswordModal = false;
-    let showVaultwardenImport = false;
     let importProgress = 0;
     let importTotal = 0;
     let showImportProgress = false;
@@ -138,6 +137,8 @@ let confirmNewMasterPassword = "";
             // Offer the PIN pad first when one is enrolled.
             unlockMode = pinEnabled ? "pin" : "password";
             showUnlockModal = true;
+            await tick();
+            unlockPasswordInput?.focus();
 
             // With biometrics enrolled, prompt straight away so the common case is
             // a single tap. Any failure just leaves the PIN/password form visible.
@@ -279,6 +280,7 @@ let confirmNewMasterPassword = "";
         unlockMode = "password";
         unlockPin = "";
         pinError = "";
+        tick().then(() => unlockPasswordInput?.focus());
     }
 
     async function handleEnableDeviceBinding() {
@@ -560,6 +562,7 @@ let confirmNewMasterPassword = "";
         // the vault area blank with no way to unlock it.
         unlockMode = pinEnabled ? "pin" : "password";
         showUnlockModal = true;
+        tick().then(() => unlockPasswordInput?.focus());
         selectedPasswordIds.clear();
         selectMode = false;
         decryptedCache = {};
@@ -717,20 +720,6 @@ let confirmNewMasterPassword = "";
     function triggerImport() {
         closeExportMenu();
         importFileInput?.click();
-    }
-
-    function openVaultwardenImport() {
-        closeExportMenu();
-        showVaultwardenImport = true;
-    }
-
-    function handleVaultwardenImported(items) {
-        const count = passwordsStore.addPasswordsBatch(items);
-        showVaultwardenImport = false;
-        showToast({
-            message: getI18n(_)('passwords.vaultwarden_imported', { values: { count } }),
-            type: count > 0 ? 'success' : 'warning'
-        });
     }
 
     function closeExportMenu() {
@@ -1314,12 +1303,6 @@ async function handleChangeMasterPassword() {
                                 <i class="ph ph-download text-lg text-purple-600"></i> {$_('passwords.import_passwords')}
                             </button>
                             <button
-                                on:click={openVaultwardenImport}
-                                class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
-                            >
-                                <i class="ph ph-key text-lg text-amber-600"></i> {$_('passwords.vaultwarden_import')}
-                            </button>
-                            <button
                                 on:click={openChangeMasterPasswordModal}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
                             >
@@ -1712,12 +1695,6 @@ async function handleChangeMasterPassword() {
     {/if}
 </div>
 
-<VaultwardenImport
-    bind:show={showVaultwardenImport}
-    onClose={() => showVaultwardenImport = false}
-    onImported={handleVaultwardenImported}
-/>
-
 {#if showImportPasswordModal}
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
@@ -1933,6 +1910,7 @@ async function handleChangeMasterPassword() {
                         <input
                             id="password-unlock-input"
                             type="password"
+                            bind:this={unlockPasswordInput}
                             bind:value={unlockPassword}
                             on:keydown={(e) => e.key === "Enter" && unlockVault()}
                             placeholder={$_('passwords.master_placeholder')}
