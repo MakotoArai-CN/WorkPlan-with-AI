@@ -444,6 +444,57 @@ function createPasswordsStore() {
                 categories: state.categories
             };
         },
+        /**
+         * Plaintext entries for the portable v2 envelope. The outer envelope is
+         * encrypted by secure-sync-v2; local storage keeps its own encryption.
+         */
+        getPortableSyncPayload: () => {
+            if (!vaultSecret) return null;
+            const state = get({ subscribe });
+            const passwords = state.passwords.map(entry => {
+                if (!entry.password) return { ...entry, password: '' };
+                const plain = decrypt(entry.password, vaultSecret);
+                if (plain === null) {
+                    throw new Error(`无法解密密码条目“${entry.title || entry.id}”`);
+                }
+                return { ...entry, password: plain };
+            });
+            return { passwords, categories: [...state.categories] };
+        },
+        /** Convert a legacy v1 payload (local ciphertext) into plaintext. */
+        decryptSyncPayload: (payload) => {
+            if (!vaultSecret || !payload || !Array.isArray(payload.passwords)) return null;
+            const passwords = payload.passwords.map(entry => {
+                if (!entry.password) return { ...entry, password: '' };
+                const plain = decrypt(entry.password, vaultSecret);
+                if (plain === null) {
+                    throw new Error(`无法解密旧云端条目“${entry.title || entry.id}”`);
+                }
+                return { ...entry, password: plain };
+            });
+            return { passwords, categories: payload.categories || [] };
+        },
+        /** Write a plaintext v2 payload back using this device's local vault key. */
+        replaceFromPortableSync: (payload) => {
+            if (!vaultSecret || !payload || !Array.isArray(payload.passwords)) {
+                return { success: false, error: '密码库未解锁或同步数据无效' };
+            }
+            const passwords = payload.passwords
+                .filter(entry => entry && typeof entry.id === 'string' && typeof entry.password === 'string')
+                .map(entry => ({
+                    ...entry,
+                    password: entry.password ? encrypt(entry.password, vaultSecret) : ''
+                }));
+            const categories = Array.isArray(payload.categories) && payload.categories.length > 0
+                ? payload.categories
+                : get({ subscribe }).categories;
+            update(s => {
+                const next = { ...s, passwords, categories };
+                saveImmediate(next);
+                return next;
+            });
+            return { success: true, count: passwords.length };
+        },
         /** Replace local entries with a decrypted remote snapshot (same vault secret). */
         replaceFromSync: (payload) => {
             if (!vaultSecret || !payload || !Array.isArray(payload.passwords)) {
@@ -583,7 +634,21 @@ function createPasswordsStore() {
                 saveSession(newPassword);
             }
 
-            return { success: true };
+            let syncWarning = '';
+            try {
+                const accessKey = typeof localStorage !== 'undefined'
+                    ? localStorage.getItem('planpro_access_key')
+                    : '';
+                if (accessKey) {
+                    const { rewrapAccountKey } = await import('../utils/secure-sync-v2.js');
+                    await rewrapAccountKey({ accessKey, oldPassword, newPassword });
+                }
+            } catch (error) {
+                syncWarning = `主密码已修改，但云端同步密钥未能重新包裹：${error.message || error}`;
+                console.warn(syncWarning);
+            }
+
+            return syncWarning ? { success: true, syncWarning } : { success: true };
         },
         getDecryptedPasswords: (ids = null) => {
             const state = get({ subscribe });
