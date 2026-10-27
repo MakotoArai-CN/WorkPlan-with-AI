@@ -1,5 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { isG4FProvider, normalizeG4FProviderId } from '../utils/g4f-client.js';
+import { pruneProviderConfigs } from '../utils/ai-config.js';
 import {
     looksLikeFileIntent,
     searchLocalFiles,
@@ -882,8 +883,13 @@ export function deleteConnectionProfile(profileId) {
             return current;
         }
         const nextActiveId = current.activeProfileId === profileId ? profiles[0].id : current.activeProfileId;
+        // Provider configs are a shared cache keyed by provider. Drop entries that
+        // no remaining connection uses so a deleted custom endpoint cannot leave
+        // its API key behind.
+        const providerConfigs = pruneProviderConfigs(current.providerConfigs, profiles);
         return applyProfileToState({
             ...current,
+            providerConfigs,
             connectionProfiles: profiles,
             activeProfileId: nextActiveId
         }, nextActiveId);
