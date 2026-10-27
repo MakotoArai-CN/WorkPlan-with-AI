@@ -317,7 +317,15 @@
     }
 
     function handleThemeChange(theme) {
+        // Move the highlight before the theme class swap so the transition
+        // starts on the click frame instead of waiting for a full re-render.
+        themePill = measurePill(themeGridEl, 'theme-id', theme);
         settingsStore.setTheme(theme);
+    }
+
+    function handleLanguageChange(code) {
+        languagePill = measurePill(languageGridEl, 'language', code);
+        setLocale(code);
     }
 
     function handleEditorChange(editor) {
@@ -411,13 +419,13 @@
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.theme_mode')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.theme_desc')}</div>
                     <div bind:this={themeGridEl} class="relative grid grid-cols-2 md:grid-cols-4 gap-2">
-                        <div data-pill="theme" class="pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30 transition-all duration-300 ease-out"
+                        <div data-pill="theme" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                             style={`left:${themePill.left}px;top:${themePill.top}px;width:${themePill.width}px;height:${themePill.height}px;opacity:${themePill.ready ? 1 : 0}`}></div>
                         {#each themeOptions as theme}
                             <button
                                 data-theme-id={theme.id}
                                 on:click={() => handleThemeChange(theme.id)}
-                                class="relative z-10 flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-colors duration-300 {$settingsStore.theme === theme.id ? 'border-blue-500 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
+                                class="relative z-10 flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-colors duration-500 {$settingsStore.theme === theme.id ? 'border-blue-500 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
                             >
                                 <div class={`w-10 h-10 rounded-lg flex items-center justify-center shadow-sm ${theme.preview}`}>
                                     <i class={`ph ${theme.icon} text-xl ${theme.accent}`}></i>
@@ -437,13 +445,13 @@
             </div>
             <div class="p-4 md:p-6">
                 <div bind:this={languageGridEl} class="relative grid grid-cols-3 gap-2">
-                    <div data-pill="language" class="pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30 transition-all duration-300 ease-out"
+                    <div data-pill="language" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                         style={`left:${languagePill.left}px;top:${languagePill.top}px;width:${languagePill.width}px;height:${languagePill.height}px;opacity:${languagePill.ready ? 1 : 0}`}></div>
                     {#each supportedLocales as lang}
                         <button
                             data-language={lang.code}
-                            on:click={() => setLocale(lang.code)}
-                            class="relative z-10 flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-colors duration-300 {$locale === lang.code ? 'border-blue-500 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
+                            on:click={() => handleLanguageChange(lang.code)}
+                            class="relative z-10 flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-colors duration-500 {$locale === lang.code ? 'border-blue-500 shadow-sm' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
                         >
                             <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{lang.label}</span>
                         </button>
