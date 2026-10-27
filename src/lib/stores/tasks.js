@@ -515,7 +515,7 @@ function createTaskStore() {
         }
     }
 
-    async function saveData(state) {
+    async function saveData(state, { force = false } = {}) {
         if (!state.accessKey) return;
 
         // Always keep a local copy first. If the cloud write fails (offline,
@@ -547,7 +547,7 @@ function createTaskStore() {
 
         const currentPureStr = getPureDataString(cloudData(state));
 
-        if (currentPureStr === state.lastCloudStr) {
+        if (!force && currentPureStr === state.lastCloudStr) {
             localCloudSnapshotStr = currentPureStr;
             persistLocalCache(state, currentPureStr);
             return;
@@ -977,7 +977,7 @@ function createTaskStore() {
             // Rewrite the task blob without plaintext worklog fields. The
             // encrypted worklog record is uploaded separately.
             if (worklogCloudEncrypted) {
-                saveData(get({ subscribe }));
+                saveData(get({ subscribe }), { force: true });
             }
         },
         replaceWorklogRecords: (overtimeRecords, leaveRecords) => update(s => {
