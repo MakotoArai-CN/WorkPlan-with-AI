@@ -2,7 +2,7 @@
     import { settingsStore } from "../stores/settings.js";
     import { taskStore } from "../stores/tasks.js";
     import { passwordsStore } from "../stores/passwords.js";
-    import { secureSyncStatus, syncNotesNow, syncPasswordsNow } from "../utils/secure-sync.js";
+    import { secureSyncStatus, syncNotesNow, syncPasswordsNow, syncWorklogNow } from "../utils/secure-sync.js";
     import { invoke } from "@tauri-apps/api/core";
     import { showAlert, showConfirm, showToast } from "../stores/modal.js";
     import { onMount, onDestroy, tick } from "svelte";
@@ -75,6 +75,15 @@
         const enabled = input.checked;
         if (!enabled) {
             settingsStore.setSyncFlag('syncNotes', false);
+            return;
+        }
+        if (!get(passwordsStore).isUnlocked) {
+            input.checked = false;
+            await showAlert({
+                title: t('settings.sync_notes'),
+                message: t('settings.sync_vault_locked'),
+                variant: 'warning'
+            });
             return;
         }
         const confirmed = await showConfirm({
@@ -160,6 +169,54 @@
     async function manualSyncPasswords() {
         const t = get(_);
         const result = await syncPasswordsNow({ manual: true });
+        if (!result.success) {
+            showToast({ message: result.error || t('settings.sync_failed'), type: 'error' });
+        } else {
+            showToast({ message: t('settings.sync_done'), type: 'success' });
+        }
+    }
+
+    async function toggleWorklogSync(event) {
+        const t = get(_);
+        const input = event.currentTarget;
+        if (!input.checked) {
+            settingsStore.setSyncFlag('syncWorklog', false);
+            return;
+        }
+        if (!get(passwordsStore).isUnlocked) {
+            input.checked = false;
+            await showAlert({
+                title: t('settings.sync_worklog'),
+                message: t('settings.sync_vault_locked'),
+                variant: 'warning'
+            });
+            return;
+        }
+        const confirmed = await showConfirm({
+            title: t('settings.sync_worklog'),
+            message: t('settings.sync_worklog_confirm'),
+            confirmText: t('common.confirm') || '开启',
+            cancelText: t('common.cancel') || '取消'
+        });
+        if (!confirmed) {
+            input.checked = false;
+            return;
+        }
+        settingsStore.setSyncFlag('syncWorklog', true);
+        const result = await syncWorklogNow({ manual: true });
+        if (!result.success) {
+            settingsStore.setSyncFlag('syncWorklog', false);
+            await showAlert({
+                title: t('settings.sync_worklog'),
+                message: result.error || t('settings.sync_failed'),
+                variant: 'danger'
+            });
+        }
+    }
+
+    async function manualSyncWorklog() {
+        const t = get(_);
+        const result = await syncWorklogNow({ manual: true });
         if (!result.success) {
             showToast({ message: result.error || t('settings.sync_failed'), type: 'error' });
         } else {
@@ -576,6 +633,7 @@
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer shrink-0">
                             <input
+                                id="sync-notes-toggle"
                                 type="checkbox"
                                 checked={$settingsStore.syncNotes}
                                 on:change={toggleNotesSync}
@@ -614,6 +672,7 @@
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer shrink-0">
                             <input
+                                id="sync-passwords-toggle"
                                 type="checkbox"
                                 checked={$settingsStore.syncPasswords}
                                 on:change={togglePasswordSync}
@@ -644,6 +703,44 @@
                                 class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-[11px] font-bold disabled:opacity-50">
                                 <i class="ph ph-key"></i>
                                 {$_('passwords.vaultwarden_import')}
+                            </button>
+                        </div>
+                    {/if}
+                </div>
+
+                <div class="border-t border-slate-100 dark:border-slate-700"></div>
+
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">{$_('settings.sync_worklog')}</div>
+                            <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.sync_worklog_desc')}</div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input
+                                id="sync-worklog-toggle"
+                                type="checkbox"
+                                checked={$settingsStore.syncWorklog}
+                                on:change={toggleWorklogSync}
+                                class="sr-only peer"
+                            />
+                            <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                        </label>
+                    </div>
+                    <div class="text-[10px] text-slate-400 dark:text-slate-500">{$_('settings.sync_worklog_hint')}</div>
+                    {#if $settingsStore.syncWorklog}
+                        <div class="flex items-center justify-between gap-3 pl-3 border-l-2 border-amber-100 dark:border-amber-800">
+                            <span class="text-[10px] text-slate-400">
+                                {#if $passwordsStore.isUnlocked}
+                                    {$_('settings.sync_status')}: {syncStatusLabel($secureSyncStatus.worklog)}
+                                {:else}
+                                    {$_('settings.sync_vault_locked_short')}
+                                {/if}
+                            </span>
+                            <button on:click={manualSyncWorklog}
+                                disabled={!$passwordsStore.isUnlocked || $secureSyncStatus.worklog === 'syncing'}
+                                class="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-amber-50 text-amber-700 disabled:opacity-50">
+                                {$_('settings.sync_now')}
                             </button>
                         </div>
                     {/if}

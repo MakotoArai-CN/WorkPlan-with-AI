@@ -1,10 +1,13 @@
-// Opt-in encrypted cloud sync for notes and the password vault.
+// Opt-in encrypted cloud sync for notes, the password vault and worklog.
 //
-// Threat model: the cloud provider only ever receives an AES-GCM envelope. The
-// key is derived from a device-bound secret (and, for the vault, the unlocked
-// master password), so a database dump alone is not enough to read the data.
-// Trade-off: this is device-bound, not a portable backup: a reinstall or another
-// device needs the original device key/recovery path. The UI says so explicitly.
+// Threat model: the cloud provider only ever receives AES-GCM envelopes. A
+// random account key is wrapped by a key derived from the password-vault master
+// password; the master password is never uploaded. The same access key and
+// master password can restore the data on another device.
+//
+// The v1 device-bound envelopes are still readable on the original device and
+// are migrated to v2 the first time a v2 sync runs. They cannot be decrypted on
+// a new device without the old device key.
 
 import { get, writable } from 'svelte/store';
 import { gzipSync, gunzipSync, strFromU8, strToU8 } from 'fflate';
@@ -14,6 +17,13 @@ import { settingsStore } from '../stores/settings.js';
 import { taskStore, loadCloudRecord, saveCloudRecord } from '../stores/tasks.js';
 import { getDeviceKey } from './device-auth.js';
 import { deriveSyncSecret } from './crypto.js';
+import {
+    getAccountKey,
+    encryptDomainPayload,
+    decryptDomainPayload,
+    domainRecordKey,
+    clearPortableKeyCache
+} from './secure-sync-v2.js';
 
 const ENVELOPE_VERSION = 1;
 const KDF_ITERATIONS = 210_000;
@@ -22,8 +32,10 @@ const DEBOUNCE_MS = 1800;
 export const secureSyncStatus = writable({
     notes: 'idle',
     passwords: 'idle',
+    worklog: 'idle',
     lastNotesAt: null,
     lastPasswordsAt: null,
+    lastWorklogAt: null,
     error: ''
 });
 
@@ -31,8 +43,11 @@ let suppressNotes = 0;
 let suppressPasswords = 0;
 let notesTimer = null;
 let passwordsTimer = null;
+let worklogTimer = null;
 let lastNotesHash = '';
 let lastPasswordsHash = '';
+let lastWorklogHash = '';
+let suppressWorklog = 0;
 let initialized = false;
 
 function recordKey(kind, accessKey) {
@@ -115,6 +130,16 @@ function getAccessKey() {
     const key = get(taskStore)?.accessKey;
     if (!key) throw new Error('请先设置访问密钥');
     return key;
+}
+
+async function portableAccountKey() {
+    const masterPassword = passwordsStore.getMasterPassword();
+    if (!masterPassword) throw new Error('请先解锁密码库，同步密钥由主密码派生');
+    return await getAccountKey({
+        masterPassword,
+        accessKey: getAccessKey(),
+        create: true
+    });
 }
 
 async function notesSecret() {
@@ -207,19 +232,38 @@ export async function syncNotesNow({ manual = false } = {}) {
     suppressNotes += 1;
     try {
         const accessKey = getAccessKey();
-        const secret = await notesSecret();
+        const accountKey = await portableAccountKey();
         const local = notesPayload();
         const localState = get(notesStore);
         const lockedLocalNotes = localState.notes.filter(note => note.aiLocked && !get(settingsStore).syncLockedNotes);
-        const cloud = await loadCloudRecord(recordKey('notes', accessKey));
+        const cloud = await loadCloudRecord(domainRecordKey('notes', accessKey));
+        const legacyCloud = cloud?.content?.ciphertext
+            ? null
+            : await loadCloudRecord(recordKey('notes', accessKey));
         let finalPayload = local;
 
-        if (cloud?.content?.ciphertext) {
+        const sourceEnvelope = cloud?.content?.ciphertext
+            ? cloud.content
+            : (legacyCloud?.content?.ciphertext ? legacyCloud.content : null);
+        if (sourceEnvelope) {
             let remote;
-            try {
-                remote = await decryptEnvelope(cloud.content, secret);
-            } catch {
-                throw new Error('云端笔记无法用当前设备密钥解密，已停止同步以免覆盖');
+            if (sourceEnvelope.v === 2) {
+                try {
+                    remote = await decryptDomainPayload(sourceEnvelope, {
+                        accountKey,
+                        domain: 'notes',
+                        accessKey
+                    });
+                } catch {
+                    throw new Error('云端笔记无法用当前主密码解密，已停止同步以免覆盖');
+                }
+            } else {
+                // One-time migration from the old device-bound v1 envelope.
+                try {
+                    remote = await decryptEnvelope(sourceEnvelope, await notesSecret());
+                } catch {
+                    throw new Error('云端笔记是旧版设备加密数据，请先在原设备登录并开启同步完成迁移');
+                }
             }
             const remoteNotes = local.includeLocked
                 ? remote.notes
@@ -242,8 +286,13 @@ export async function syncNotesNow({ manual = false } = {}) {
         }
         lastNotesHash = hash({ notes: mergedAllNotes, categories: finalPayload.categories });
 
-        const envelope = await encryptEnvelope(finalPayload, secret);
-        await upload('notes', envelope);
+        const envelope = await encryptDomainPayload(finalPayload, {
+            accountKey,
+            domain: 'notes',
+            accessKey
+        });
+        const ok = await saveCloudRecord(domainRecordKey('notes', accessKey), envelope, Date.now());
+        if (!ok) throw new Error('云数据库未启用或不可用');
         secureSyncStatus.update(s => ({
             ...s,
             notes: 'done',
@@ -266,30 +315,54 @@ export async function syncPasswordsNow({ manual = false } = {}) {
     suppressPasswords += 1;
     try {
         const accessKey = getAccessKey();
-        const secret = await vaultSecret();
-        const local = passwordsStore.getSyncPayload();
+        const accountKey = await portableAccountKey();
+        const local = passwordsStore.getPortableSyncPayload();
         if (!local) throw new Error('请先解锁密码库');
-        const cloud = await loadCloudRecord(recordKey('vault', accessKey));
+        const cloud = await loadCloudRecord(domainRecordKey('vault', accessKey));
+        const legacyCloud = cloud?.content?.ciphertext
+            ? null
+            : await loadCloudRecord(recordKey('vault', accessKey));
         let finalPayload = local;
 
-        if (cloud?.content?.ciphertext) {
+        const sourceEnvelope = cloud?.content?.ciphertext
+            ? cloud.content
+            : (legacyCloud?.content?.ciphertext ? legacyCloud.content : null);
+        if (sourceEnvelope) {
             let remote;
-            try {
-                remote = await decryptEnvelope(cloud.content, secret);
-            } catch {
-                throw new Error('云端密码库无法用当前主密码/设备解密，已停止同步');
+            if (sourceEnvelope.v === 2) {
+                try {
+                    remote = await decryptDomainPayload(sourceEnvelope, {
+                        accountKey,
+                        domain: 'vault',
+                        accessKey
+                    });
+                } catch {
+                    throw new Error('云端密码库无法用当前主密码解密，已停止同步');
+                }
+            } else {
+                // One-time migration from the old device-bound v1 envelope.
+                try {
+                    const legacy = await decryptEnvelope(sourceEnvelope, await vaultSecret());
+                    remote = passwordsStore.decryptSyncPayload(legacy);
+                } catch {
+                    throw new Error('云端密码库是旧版设备加密数据，请先在原设备登录并开启同步完成迁移');
+                }
+                if (!remote) throw new Error('旧版云端密码库数据无效');
             }
             finalPayload = mergeVault(local, remote);
-            const localHash = hash(local);
-            const mergedHash = hash(finalPayload);
-            if (mergedHash !== localHash) {
-                passwordsStore.replaceFromSync(finalPayload);
+            if (hash(finalPayload) !== hash(local)) {
+                passwordsStore.replaceFromPortableSync(finalPayload);
             }
         }
 
         lastPasswordsHash = hash(finalPayload);
-        const envelope = await encryptEnvelope(finalPayload, secret);
-        await upload('vault', envelope);
+        const envelope = await encryptDomainPayload(finalPayload, {
+            accountKey,
+            domain: 'vault',
+            accessKey
+        });
+        const ok = await saveCloudRecord(domainRecordKey('vault', accessKey), envelope, Date.now());
+        if (!ok) throw new Error('云数据库未启用或不可用');
         secureSyncStatus.update(s => ({
             ...s,
             passwords: 'done',
@@ -303,6 +376,130 @@ export async function syncPasswordsNow({ manual = false } = {}) {
     } finally {
         suppressPasswords -= 1;
     }
+}
+
+function worklogPayload() {
+    const state = get(taskStore);
+    return {
+        overtimeRecords: state.overtimeRecords || [],
+        leaveRecords: state.leaveRecords || [],
+        savedAt: Date.now()
+    };
+}
+
+function mergeWorklog(local, remote) {
+    const mergeList = (localList, remoteList) => {
+        const map = new Map();
+        for (const record of Array.isArray(localList) ? localList : []) {
+            if (record?.id) map.set(record.id, record);
+        }
+        for (const record of Array.isArray(remoteList) ? remoteList : []) {
+            if (!record?.id) continue;
+            const existing = map.get(record.id);
+            if (!existing) {
+                map.set(record.id, record);
+                continue;
+            }
+            const localTime = Date.parse(existing.updatedAt || existing.createdAt || 0) || 0;
+            const remoteTime = Date.parse(record.updatedAt || record.createdAt || 0) || 0;
+            if (remoteTime > localTime) map.set(record.id, record);
+        }
+        return [...map.values()];
+    };
+    return {
+        overtimeRecords: mergeList(local.overtimeRecords, remote.overtimeRecords),
+        leaveRecords: mergeList(local.leaveRecords, remote.leaveRecords)
+    };
+}
+
+export async function syncWorklogNow({ manual = false } = {}) {
+    const settings = get(settingsStore);
+    if (!settings.syncWorklog && !manual) return { success: false, skipped: true };
+    secureSyncStatus.update(s => ({ ...s, worklog: 'syncing', error: '' }));
+    suppressWorklog += 1;
+    try {
+        const accessKey = getAccessKey();
+        const accountKey = await portableAccountKey();
+        const local = worklogPayload();
+        const cloud = await loadCloudRecord(domainRecordKey('worklog', accessKey));
+        let remote = null;
+
+        if (cloud?.content?.ciphertext) {
+            if (cloud.content.v === 2) {
+                try {
+                    remote = await decryptDomainPayload(cloud.content, {
+                        accountKey,
+                        domain: 'worklog',
+                        accessKey
+                    });
+                } catch {
+                    throw new Error('云端工时记录无法用当前主密码解密，已停止同步');
+                }
+            } else {
+                throw new Error('云端工时记录格式无效，已停止同步');
+            }
+        }
+
+        // First v2 run: the old task blob may still contain plaintext worklog.
+        if (!remote) {
+            const taskCloud = await loadCloudRecord(accessKey);
+            if (taskCloud?.content) {
+                remote = {
+                    overtimeRecords: Array.isArray(taskCloud.content.overtimeRecords)
+                        ? taskCloud.content.overtimeRecords
+                        : [],
+                    leaveRecords: Array.isArray(taskCloud.content.leaveRecords)
+                        ? taskCloud.content.leaveRecords
+                        : []
+                };
+            }
+        }
+
+        const finalPayload = remote ? mergeWorklog(local, remote) : local;
+        const changed = hash(finalPayload) !== hash(local);
+        if (changed) taskStore.replaceWorklogRecords(finalPayload.overtimeRecords, finalPayload.leaveRecords);
+        lastWorklogHash = hash({ ...finalPayload, savedAt: undefined });
+
+        const envelope = await encryptDomainPayload(finalPayload, {
+            accountKey,
+            domain: 'worklog',
+            accessKey
+        });
+        const ok = await saveCloudRecord(domainRecordKey('worklog', accessKey), envelope, Date.now());
+        if (!ok) throw new Error('云数据库未启用或不可用');
+
+        // After the encrypted copy is safely uploaded, strip the plaintext
+        // worklog fields from the task blob.
+        taskStore.setWorklogCloudEncrypted(true);
+        secureSyncStatus.update(s => ({
+            ...s,
+            worklog: 'done',
+            lastWorklogAt: Date.now(),
+            error: ''
+        }));
+        return {
+            success: true,
+            count: finalPayload.overtimeRecords.length + finalPayload.leaveRecords.length
+        };
+    } catch (error) {
+        secureSyncStatus.update(s => ({ ...s, worklog: 'error', error: error.message || String(error) }));
+        return { success: false, error: error.message || String(error) };
+    } finally {
+        suppressWorklog -= 1;
+    }
+}
+
+function scheduleWorklogSync() {
+    if (suppressWorklog > 0) return;
+    if (!get(settingsStore).syncWorklog) return;
+    if (worklogTimer) clearTimeout(worklogTimer);
+    worklogTimer = setTimeout(() => {
+        worklogTimer = null;
+        const payload = worklogPayload();
+        const currentHash = hash({ ...payload, savedAt: undefined });
+        if (currentHash === lastWorklogHash) return;
+        syncWorklogNow();
+    }, DEBOUNCE_MS);
 }
 
 function scheduleNotesSync() {
@@ -326,7 +523,12 @@ function schedulePasswordsSync() {
     if (passwordsTimer) clearTimeout(passwordsTimer);
     passwordsTimer = setTimeout(() => {
         passwordsTimer = null;
-        const payload = passwordsStore.getSyncPayload();
+        let payload = null;
+        try {
+            payload = passwordsStore.getPortableSyncPayload();
+        } catch {
+            return;
+        }
         if (!payload) return;
         const currentHash = hash({ passwords: payload.passwords, categories: payload.categories });
         if (currentHash === lastPasswordsHash) return;
@@ -341,9 +543,24 @@ export function initSecureSync() {
 
     const initialNotes = notesPayload();
     lastNotesHash = hash({ notes: initialNotes.notes, categories: initialNotes.categories });
+    let wasUnlocked = !!get(passwordsStore).isUnlocked;
 
     const unsubscribeNotes = notesStore.subscribe(() => scheduleNotesSync());
-    const unsubscribePasswords = passwordsStore.subscribe(() => schedulePasswordsSync());
+    const unsubscribePasswords = passwordsStore.subscribe((vault) => {
+        const unlocked = !!vault?.isUnlocked;
+        if (!unlocked) clearPortableKeyCache();
+        if (unlocked && !wasUnlocked) {
+            // Notes and worklog need the master password too; retry them when
+            // the vault is unlocked after a cold start.
+            setTimeout(() => {
+                if (get(settingsStore).syncNotes) syncNotesNow();
+                if (get(settingsStore).syncWorklog) syncWorklogNow();
+            }, 700);
+        }
+        wasUnlocked = unlocked;
+        schedulePasswordsSync();
+    });
+    const unsubscribeWorklog = taskStore.subscribe(() => scheduleWorklogSync());
 
     if (get(settingsStore).syncNotes) {
         setTimeout(() => syncNotesNow(), 900);
@@ -351,12 +568,17 @@ export function initSecureSync() {
     if (get(settingsStore).syncPasswords && get(passwordsStore).isUnlocked) {
         setTimeout(() => syncPasswordsNow(), 900);
     }
+    if (get(settingsStore).syncWorklog) {
+        setTimeout(() => syncWorklogNow(), 900);
+    }
 
     return () => {
         initialized = false;
         unsubscribeNotes();
         unsubscribePasswords();
+        unsubscribeWorklog();
         if (notesTimer) clearTimeout(notesTimer);
         if (passwordsTimer) clearTimeout(passwordsTimer);
+        if (worklogTimer) clearTimeout(worklogTimer);
     };
 }

@@ -63,6 +63,7 @@ function getInitialSettings() {
             overtimeConfig: { ...DEFAULT_OVERTIME_CONFIG },
             syncNotes: false,
             syncPasswords: false,
+            syncWorklog: false,
             syncLockedNotes: false,
             closeToQuit: false,
             androidPermissionsPrompted: false,
@@ -95,6 +96,7 @@ function getInitialSettings() {
                 overtimeConfig: normalizeOvertimeConfig(parsed.overtimeConfig || {}),
                 syncNotes: parsed.syncNotes === true,
                 syncPasswords: parsed.syncPasswords === true,
+                syncWorklog: parsed.syncWorklog === true,
                 syncLockedNotes: parsed.syncLockedNotes === true,
                 closeToQuit: parsed.closeToQuit ?? false,
                 androidPermissionsPrompted: parsed.androidPermissionsPrompted ?? false,
@@ -164,6 +166,7 @@ function createSettingsStore() {
             overtimeConfig: state.overtimeConfig,
             syncNotes: state.syncNotes === true,
             syncPasswords: state.syncPasswords === true,
+            syncWorklog: state.syncWorklog === true,
             syncLockedNotes: state.syncLockedNotes === true,
             closeToQuit: state.closeToQuit,
             androidPermissionsPrompted: state.androidPermissionsPrompted,
@@ -382,7 +385,7 @@ function createSettingsStore() {
             return newState;
         }),
         setSyncFlag: (key, value) => update(s => {
-            if (!['syncNotes', 'syncPasswords', 'syncLockedNotes'].includes(key)) return s;
+            if (!['syncNotes', 'syncPasswords', 'syncWorklog', 'syncLockedNotes'].includes(key)) return s;
             const newState = { ...s, [key]: value === true };
             save(newState);
             return newState;
