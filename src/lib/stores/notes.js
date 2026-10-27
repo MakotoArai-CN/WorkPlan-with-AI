@@ -42,13 +42,25 @@ function createNotesStore() {
         }
     }
 
+    function createNoteId() {
+        return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
     function save(state) {
-        if (typeof window === 'undefined') return;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-            notes: state.notes,
-            categories: state.categories,
-            aiPrompts: state.aiPrompts
-        }));
+        if (typeof window === 'undefined') return false;
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                notes: state.notes,
+                categories: state.categories,
+                aiPrompts: state.aiPrompts
+            }));
+            return true;
+        } catch (error) {
+            // QuotaExceededError used to throw from inside update(), so the note
+            // was neither added nor persisted. Keep the in-memory copy at least.
+            console.warn('Failed to save notes:', error?.message || error);
+            return false;
+        }
     }
 
     return {
@@ -56,7 +68,7 @@ function createNotesStore() {
         load,
         addNote: (note) => update(s => {
             const newNote = {
-                id: Date.now().toString(),
+                id: createNoteId(),
                 title: note.title || '无标题笔记',
                 content: note.content || '',
                 category: note.category || '全部',
@@ -87,6 +99,20 @@ function createNotesStore() {
         }),
         setActiveNote: (id) => update(s => ({ ...s, activeNoteId: id })),
         clearActiveNote: () => update(s => ({ ...s, activeNoteId: null })),
+        replaceAll: (notes, categories) => update(s => {
+            const nextNotes = Array.isArray(notes) ? notes.filter(note => note && note.id) : s.notes;
+            const nextCategories = Array.isArray(categories) && categories.length > 0
+                ? categories
+                : s.categories;
+            const next = {
+                ...s,
+                notes: nextNotes,
+                categories: nextCategories,
+                activeNoteId: nextNotes.some(note => note.id === s.activeNoteId) ? s.activeNoteId : null
+            };
+            save(next);
+            return next;
+        }),
         toggleAiLock: (id) => update(s => {
             const notes = s.notes.map(n =>
                 n.id === id ? { ...n, aiLocked: !n.aiLocked, updatedAt: new Date().toISOString() } : n
@@ -133,14 +159,34 @@ function createNotesStore() {
         },
         importNotes: (jsonStr) => {
             try {
-                const notes = JSON.parse(jsonStr);
-                if (!Array.isArray(notes)) throw new Error('Invalid format');
+                const parsed = JSON.parse(jsonStr);
+                if (!Array.isArray(parsed)) throw new Error('Invalid format');
+                const incoming = parsed.filter(item => item && typeof item === 'object');
+                if (!incoming.length) {
+                    return { success: false, error: '文件里没有可导入的笔记' };
+                }
                 update(s => {
-                    const newState = { ...s, notes: [...notes, ...s.notes] };
+                    const existingIds = new Set(s.notes.map(note => note.id));
+                    const imported = incoming.map((note) => {
+                        let id = typeof note.id === 'string' && note.id ? note.id : createNoteId();
+                        if (existingIds.has(id)) {
+                            id = createNoteId();
+                        }
+                        existingIds.add(id);
+                        return {
+                            ...note,
+                            id,
+                            title: typeof note.title === 'string' ? note.title : '无标题笔记',
+                            content: typeof note.content === 'string' ? note.content : '',
+                            tags: Array.isArray(note.tags) ? note.tags : [],
+                            attachments: Array.isArray(note.attachments) ? note.attachments : []
+                        };
+                    });
+                    const newState = { ...s, notes: [...imported, ...s.notes] };
                     save(newState);
                     return newState;
                 });
-                return { success: true };
+                return { success: true, skipped: parsed.length - incoming.length };
             } catch (e) {
                 return { success: false, error: e.message };
             }

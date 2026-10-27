@@ -1,5 +1,6 @@
 <script>
     import { taskStore, viewDate, today, activeTasks, completedTasks, futurePreviews, activeTask } from '../stores/tasks.js';
+    import { addLocalDays, formatLocalDate, parseLocalDate } from '../utils/datetime.js';
     import { configureAiPanel, showAiPanel } from '../stores/ai.js';
     import TaskCard from './TaskCard.svelte';
     import { _, locale } from 'svelte-i18n';
@@ -11,7 +12,7 @@
     let isAllExpanded = false;
 
     $: dateInfo = (() => {
-        const date = new Date($viewDate);
+        const date = parseLocalDate($viewDate);
         const localeCode = toIntlLocale($locale || 'zh');
         return {
             date: date.toLocaleDateString(localeCode, { month: 'long', day: 'numeric' }),
@@ -20,9 +21,9 @@
     })();
 
     function changeDate(offset) {
-        const d = new Date($viewDate);
-        d.setDate(d.getDate() + offset);
-        viewDate.set(d.toISOString().split('T')[0]);
+        const next = addLocalDays(parseLocalDate($viewDate), offset);
+        if (Number.isNaN(next.getTime())) return;
+        viewDate.set(formatLocalDate(next));
         activeTask.set(null);
     }
 

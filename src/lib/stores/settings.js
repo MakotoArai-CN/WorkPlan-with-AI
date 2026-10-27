@@ -4,9 +4,11 @@ import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
 import {
     getDefaultLocalFileConfig,
     getWorkspaceRoot,
-    isContentUri
+    isContentUri,
+    syncTrustedDirectories
 } from '../utils/local-file-tools.js';
 import { isWebDemo } from '../utils/runtime.js';
+import { DEFAULT_OVERTIME_CONFIG, normalizeOvertimeConfig } from '../utils/overtime.js';
 
 const DARK_THEMES = new Set(['dark', 'graphite']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
@@ -57,11 +59,15 @@ function getInitialSettings() {
             enableCharts: true,
             enableAiChatTools: true,
             enableAiExecutionNotification: true,
+            enableOvertime: false,
+            overtimeConfig: { ...DEFAULT_OVERTIME_CONFIG },
+            syncNotes: false,
+            syncPasswords: false,
+            syncLockedNotes: false,
             closeToQuit: false,
             androidPermissionsPrompted: false,
             agreementAccepted: false,
             showAgreement: false,
-            autoSaveApiKey: false,
             appVersion: APP_VERSION,
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
@@ -85,11 +91,15 @@ function getInitialSettings() {
                 enableCharts: parsed.enableCharts ?? true,
                 enableAiChatTools: parsed.enableAiChatTools ?? true,
                 enableAiExecutionNotification: parsed.enableAiExecutionNotification ?? true,
+                enableOvertime: parsed.enableOvertime ?? false,
+                overtimeConfig: normalizeOvertimeConfig(parsed.overtimeConfig || {}),
+                syncNotes: parsed.syncNotes === true,
+                syncPasswords: parsed.syncPasswords === true,
+                syncLockedNotes: parsed.syncLockedNotes === true,
                 closeToQuit: parsed.closeToQuit ?? false,
                 androidPermissionsPrompted: parsed.androidPermissionsPrompted ?? false,
                 agreementAccepted: parsed.agreementAccepted ?? false,
                 showAgreement: false,
-                autoSaveApiKey: parsed.autoSaveApiKey ?? false,
                 appVersion: APP_VERSION,
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
@@ -122,11 +132,12 @@ function getDefaultSettings() {
         enableCharts: true,
         enableAiChatTools: true,
         enableAiExecutionNotification: true,
+        enableOvertime: false,
+        overtimeConfig: { ...DEFAULT_OVERTIME_CONFIG },
         closeToQuit: false,
         androidPermissionsPrompted: false,
         agreementAccepted: false,
         showAgreement: false,
-        autoSaveApiKey: false,
         appVersion: APP_VERSION,
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
@@ -149,10 +160,14 @@ function createSettingsStore() {
             enableCharts: state.enableCharts,
             enableAiChatTools: state.enableAiChatTools,
             enableAiExecutionNotification: state.enableAiExecutionNotification,
+            enableOvertime: state.enableOvertime,
+            overtimeConfig: state.overtimeConfig,
+            syncNotes: state.syncNotes === true,
+            syncPasswords: state.syncPasswords === true,
+            syncLockedNotes: state.syncLockedNotes === true,
             closeToQuit: state.closeToQuit,
             androidPermissionsPrompted: state.androidPermissionsPrompted,
             agreementAccepted: state.agreementAccepted,
-            autoSaveApiKey: state.autoSaveApiKey,
             dailyReportPrompt: state.dailyReportPrompt,
             weeklyReportPrompt: state.weeklyReportPrompt,
             theme: state.theme,
@@ -315,6 +330,10 @@ function createSettingsStore() {
             update(s => ({ ...s, workspaceRoot }));
         }
 
+        // The backend owns the file-tool allowlist; feed it the configured
+        // trusted directories instead of trusting per-call `trustedDirs`.
+        void syncTrustedDirectories(get({ subscribe }).localFileConfig?.trustedDirectories || []);
+
         await refreshNotificationPermission({ request: !isAndroidPlatform() });
 
         try {
@@ -354,6 +373,28 @@ function createSettingsStore() {
             save(newState);
             return newState;
         }),
+        toggleOvertime: () => update(s => {
+            const newState = { ...s, enableOvertime: !s.enableOvertime };
+            save(newState);
+            return newState;
+        }),
+        setSyncFlag: (key, value) => update(s => {
+            if (!['syncNotes', 'syncPasswords', 'syncLockedNotes'].includes(key)) return s;
+            const newState = { ...s, [key]: value === true };
+            save(newState);
+            return newState;
+        }),
+        updateOvertimeConfig: (updates) => update(s => {
+            const newState = {
+                ...s,
+                overtimeConfig: normalizeOvertimeConfig({
+                    ...(s.overtimeConfig || {}),
+                    ...(updates || {})
+                })
+            };
+            save(newState);
+            return newState;
+        }),
         toggleAiExecutionNotification: () => update(s => {
             const newState = { ...s, enableAiExecutionNotification: !s.enableAiExecutionNotification };
             save(newState);
@@ -373,11 +414,6 @@ function createSettingsStore() {
                 console.error('AI execution notification failed:', e);
             }
         },
-        toggleAutoSaveApiKey: () => update(s => {
-            const newState = { ...s, autoSaveApiKey: !s.autoSaveApiKey };
-            save(newState);
-            return newState;
-        }),
         toggleCloseToQuit: async () => {
             const current = get({ subscribe });
             const newValue = !current.closeToQuit;
@@ -431,62 +467,71 @@ function createSettingsStore() {
             save(newState);
             return newState;
         }),
-        updateLocalFileConfig: (updates) => update(s => {
-            const newState = {
-                ...s,
-                localFileConfig: {
-                    ...getDefaultLocalFileConfig(),
-                    ...(s.localFileConfig || {}),
-                    ...updates
-                }
-            };
-            save(newState);
-            return newState;
-        }),
-        addTrustedDirectory: (directory) => update(s => {
-            const value = String(directory || '').trim();
-            if (!value) return s;
-            const trustedDirectories = [...(s.localFileConfig?.trustedDirectories || [])];
-            const exists = trustedDirectories.some((item) => {
-                if (item === value) return true;
-                if (isContentUri(item) || isContentUri(value)) {
-                    return item === value;
-                }
-                return item.toLowerCase() === value.toLowerCase();
-            });
-            if (!exists) {
-                trustedDirectories.push(value);
-            }
-            const newState = {
-                ...s,
-                localFileConfig: {
-                    ...getDefaultLocalFileConfig(),
-                    ...(s.localFileConfig || {}),
-                    trustedDirectories
-                }
-            };
-            save(newState);
-            return newState;
-        }),
-        removeTrustedDirectory: (directory) => update(s => {
-            const trustedDirectories = (s.localFileConfig?.trustedDirectories || [])
-                .filter((item) => {
-                    if (isContentUri(item) || isContentUri(directory)) {
-                        return item !== directory;
+        updateLocalFileConfig: (updates) => {
+            update(s => {
+                const newState = {
+                    ...s,
+                    localFileConfig: {
+                        ...getDefaultLocalFileConfig(),
+                        ...(s.localFileConfig || {}),
+                        ...updates
                     }
-                    return item.toLowerCase() !== String(directory || '').toLowerCase();
+                };
+                save(newState);
+                return newState;
+            });
+            void syncTrustedDirectories(get({ subscribe }).localFileConfig?.trustedDirectories || []);
+        },
+        addTrustedDirectory: (directory) => {
+            update(s => {
+                const value = String(directory || '').trim();
+                if (!value) return s;
+                const trustedDirectories = [...(s.localFileConfig?.trustedDirectories || [])];
+                const exists = trustedDirectories.some((item) => {
+                    if (item === value) return true;
+                    if (isContentUri(item) || isContentUri(value)) {
+                        return item === value;
+                    }
+                    return item.toLowerCase() === value.toLowerCase();
                 });
-            const newState = {
-                ...s,
-                localFileConfig: {
-                    ...getDefaultLocalFileConfig(),
-                    ...(s.localFileConfig || {}),
-                    trustedDirectories
+                if (!exists) {
+                    trustedDirectories.push(value);
                 }
-            };
-            save(newState);
-            return newState;
-        }),
+                const newState = {
+                    ...s,
+                    localFileConfig: {
+                        ...getDefaultLocalFileConfig(),
+                        ...(s.localFileConfig || {}),
+                        trustedDirectories
+                    }
+                };
+                save(newState);
+                return newState;
+            });
+            void syncTrustedDirectories(get({ subscribe }).localFileConfig?.trustedDirectories || []);
+        },
+        removeTrustedDirectory: (directory) => {
+            update(s => {
+                const trustedDirectories = (s.localFileConfig?.trustedDirectories || [])
+                    .filter((item) => {
+                        if (isContentUri(item) || isContentUri(directory)) {
+                            return item !== directory;
+                        }
+                        return item.toLowerCase() !== String(directory || '').toLowerCase();
+                    });
+                const newState = {
+                    ...s,
+                    localFileConfig: {
+                        ...getDefaultLocalFileConfig(),
+                        ...(s.localFileConfig || {}),
+                        trustedDirectories
+                    }
+                };
+                save(newState);
+                return newState;
+            });
+            void syncTrustedDirectories(get({ subscribe }).localFileConfig?.trustedDirectories || []);
+        },
         testNotification: async () => {
             const state = get({ subscribe });
             const t = get(i18n);
@@ -537,7 +582,6 @@ function createSettingsStore() {
         showAgreementModal: () => update(s => ({ ...s, showAgreement: true })),
         hideAgreementModal: () => update(s => ({ ...s, showAgreement: false })),
         isAgreementAccepted: () => get({ subscribe }).agreementAccepted,
-        isAutoSaveApiKeyEnabled: () => get({ subscribe }).autoSaveApiKey
     };
 }
 

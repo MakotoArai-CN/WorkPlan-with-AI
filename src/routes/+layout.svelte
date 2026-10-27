@@ -4,13 +4,14 @@
     import '@phosphor-icons/web/regular';
     import '@phosphor-icons/web/bold';
     import '@phosphor-icons/web/fill';
-    import { taskStore, activeTasks } from '$lib/stores/tasks.js';
+    import { taskStore, activeTasks, today, viewDate } from '$lib/stores/tasks.js';
     import { settingsStore } from '$lib/stores/settings.js';
     import { loadAiConfig } from '$lib/stores/ai.js';
     import { notesStore } from '$lib/stores/notes.js';
     import { passwordsStore } from '$lib/stores/passwords.js';
-    import { initConnector } from '$lib/stores/connector.js';
+    import { initSecureSync } from '$lib/utils/secure-sync.js';
     import { isWebDemo } from '$lib/utils/runtime.js';
+    import { formatLocalDate } from '$lib/utils/datetime.js';
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
@@ -51,10 +52,7 @@
             loadAiConfig();
             notesStore.load();
             passwordsStore.load();
-            if (!isWebDemo) {
-                initConnector();
-            }
-
+            initSecureSync();
             if (isWebDemo || destroyed) return;
 
             const currentSettings = get(settingsStore);
@@ -115,6 +113,14 @@
             }, 2000);
 
             interval = setInterval(() => {
+                // Roll the "today" cursor over at local midnight; a long-running
+                // window otherwise keeps showing yesterday's board.
+                const currentDay = formatLocalDate(new Date());
+                const previousDay = get(today);
+                if (currentDay !== previousDay) {
+                    today.set(currentDay);
+                    viewDate.update(value => value === previousDay ? currentDay : value);
+                }
                 taskStore.checkScheduled();
             }, 60000);
 

@@ -13,8 +13,8 @@ permissions:
   contents: write
 
 env:
-  G4F_DEV_REPOSITORY: MakotoArai-CN/g4f.dev
-  G4F_DEV_REF: 194fceb5d75de62feae5acb919f8abd57bb3fa30
+  G4F_DEV_REPOSITORY: gpt4free/g4f.dev
+  G4F_DEV_REF: f0f09e3716a0ce108b5d1acdd0f6523a21baab90
 
 jobs:
   get-version:
@@ -41,6 +41,7 @@ jobs:
         run: |
           test -f g4f.dev/dist/js/providers.json || { echo "Missing g4f.dev/dist/js/providers.json"; exit 1; }
           test -f g4f.dev/dist/js/client.js || { echo "Missing g4f.dev/dist/js/client.js"; exit 1; }
+          test -f g4f.dev/dist/js/model.js || { echo "Missing g4f.dev/dist/js/model.js"; exit 1; }
 
       - name: Get version from VERSION
         id: get_version

@@ -149,6 +149,12 @@ export function decrypt(ciphertext, password) {
     return result;
 }
 
+/** Derive a non-reversible sync secret from already-derived material. */
+export function deriveSyncSecret(...parts) {
+    const material = parts.filter(part => part !== null && part !== undefined && part !== '').join('|');
+    return CryptoJS.SHA256(`workplan-sync-v1|${material}`).toString();
+}
+
 export function needsMigration(ciphertext) {
     if (!ciphertext) return false;
     return !ciphertext.startsWith('v3:');

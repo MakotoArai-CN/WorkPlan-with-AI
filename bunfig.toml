@@ -1,0 +1,4 @@
+[test]
+# `g4f.dev` is a vendored upstream checkout. Its dist folder ships browser
+# smoke tests that need a DOM; keep them out of the app's `bun test` run.
+pathIgnorePatterns = ["g4f.dev/**"]

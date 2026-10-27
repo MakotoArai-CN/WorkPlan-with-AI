@@ -209,13 +209,14 @@
     }
 
     async function handleSend() {
-        if (!inputText.trim()) return;
+        if (!inputText.trim() || $isAiLoading) return;
         const text = inputText;
         inputText = "";
         try {
             await sendAiMessage(text, getAssistantPayload());
             scrollToBottom();
         } catch (error) {
+            inputText = text;
             await showAlert({
                 title: t('ai_panel.send_failed'),
                 message: error.message,
@@ -585,8 +586,10 @@
 
     $: if ($chatHistory.length) scrollToBottom();
     $: panelMeta = getPanelMeta();
-    $: if ($aiPanelContext.draft && !$chatHistory.length) {
+    let appliedDraft = null;
+    $: if ($aiPanelContext.draft && $aiPanelContext.draft !== appliedDraft && !$chatHistory.length) {
         inputText = $aiPanelContext.draft;
+        appliedDraft = $aiPanelContext.draft;
     }
     $: {
         inputText;
@@ -1486,6 +1489,8 @@
                 on:keydown={(e) =>
                     e.key === "Enter" &&
                     !e.shiftKey &&
+                    !e.isComposing &&
+                    e.keyCode !== 229 &&
                     (e.preventDefault(), handleSend())}
                 rows="1"
                 placeholder={panelMeta.placeholder}
@@ -1505,10 +1510,12 @@
             {#each panelMeta.quickActions as action}
                 <button
                     on:click={() => {
+                        if ($isAiLoading) return;
                         inputText = action.value;
                         handleSend();
                     }}
-                    class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition"
+                    disabled={$isAiLoading}
+                    class="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded transition disabled:opacity-50"
                 >
                     {action.label}
                 </button>

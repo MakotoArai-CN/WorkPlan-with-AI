@@ -6,7 +6,6 @@ import {
     isG4FProvider,
     streamChatWithG4F
 } from './g4f-client.js';
-import { chatViaWebSocketConnector } from './connector-client.js';
 import { isTauriRuntime } from './runtime.js';
 
 const PROVIDER_CONFIGS = {
@@ -14,20 +13,32 @@ const PROVIDER_CONFIGS = {
         name: 'OpenAI',
         endpoint: 'https://api.openai.com/v1/chat/completions',
         modelsEndpoint: 'https://api.openai.com/v1/models',
-        defaultModels: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o4-mini', 'o3', 'o3-mini', 'gpt-4o', 'gpt-4o-mini'],
-        defaultModel: 'gpt-4.1-mini',
+        defaultModels: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna'],
+        defaultModel: 'gpt-6.1-sol',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
         docUrl: 'https://platform.openai.com/docs/api-reference',
         apiUrl: 'https://platform.openai.com/api-keys'
     },
+    xai: {
+        name: 'xAI Grok',
+        endpoint: 'https://api.x.ai/v1/chat/completions',
+        modelsEndpoint: 'https://api.x.ai/v1/models',
+        defaultModels: ['grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-4.20'],
+        defaultModel: 'grok-4.7',
+        authType: 'bearer',
+        bodyFormat: 'openai',
+        supportsModelList: true,
+        docUrl: 'https://docs.x.ai/',
+        apiUrl: 'https://console.x.ai/'
+    },
     deepseek: {
         name: 'DeepSeek',
         endpoint: 'https://api.deepseek.com/chat/completions',
         modelsEndpoint: 'https://api.deepseek.com/models',
-        defaultModels: ['deepseek-v4', 'deepseek-v3.2', 'deepseek-reasoner', 'deepseek-chat'],
-        defaultModel: 'deepseek-v4',
+        defaultModels: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-pro-0813'],
+        defaultModel: 'deepseek-flash',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -38,8 +49,8 @@ const PROVIDER_CONFIGS = {
         name: 'Groq',
         endpoint: 'https://api.groq.com/openai/v1/chat/completions',
         modelsEndpoint: 'https://api.groq.com/openai/v1/models',
-        defaultModels: ['gpt-oss-120b', 'llama-4-scout', 'llama-3.3-70b-versatile', 'qwen3-32b', 'deepseek-r1-distill-llama-70b'],
-        defaultModel: 'gpt-oss-120b',
+        defaultModels: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'qwen/qwen3.8-27b', 'minimaxai/minimax-m2.7'],
+        defaultModel: 'openai/gpt-oss-120b',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -62,8 +73,8 @@ const PROVIDER_CONFIGS = {
         name: '智谱 GLM',
         endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
         modelsEndpoint: 'https://open.bigmodel.cn/api/paas/v4/models',
-        defaultModels: ['glm-5', 'glm-4.5', 'glm-4.5-flash', 'glm-z1-flash'],
-        defaultModel: 'glm-5',
+        defaultModels: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-4.7', 'glm-4.5-air'],
+        defaultModel: 'glm-5.3',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -74,8 +85,8 @@ const PROVIDER_CONFIGS = {
         name: '阿里通义千问',
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         modelsEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/models',
-        defaultModels: ['qwen3.5-max', 'qwen3.5-plus', 'qwen-max', 'qwen-turbo', 'qwq-plus'],
-        defaultModel: 'qwen3.5-max',
+        defaultModels: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.8-flash', 'qwen3.8-omni-flash'],
+        defaultModel: 'qwen3.8-max',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -86,8 +97,8 @@ const PROVIDER_CONFIGS = {
         name: '月之暗面 Kimi',
         endpoint: 'https://api.moonshot.cn/v1/chat/completions',
         modelsEndpoint: 'https://api.moonshot.cn/v1/models',
-        defaultModels: ['kimi-k2.5', 'kimi-k2-0711-preview', 'moonshot-v1-128k'],
-        defaultModel: 'kimi-k2.5',
+        defaultModels: ['kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed', 'kimi-k3', 'kimi-k2.7-code'],
+        defaultModel: 'kimi-k3.1-pro',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -132,8 +143,8 @@ const PROVIDER_CONFIGS = {
         name: '小米 MiMo',
         endpoint: 'https://api.xiaomimimo.com/v1/chat/completions',
         modelsEndpoint: 'https://api.xiaomimimo.com/v1/models',
-        defaultModels: ['mimo-v2-pro', 'mimo-v2-flash'],
-        defaultModel: 'mimo-v2-pro',
+        defaultModels: ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'],
+        defaultModel: 'mimo-v2.6-pro',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -143,12 +154,13 @@ const PROVIDER_CONFIGS = {
     anthropic: {
         name: 'Anthropic Claude',
         endpoint: 'https://api.anthropic.com/v1/messages',
-        defaultModels: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4', 'claude-haiku-4-5-20251001', 'claude-3-5-sonnet-latest'],
-        defaultModel: 'claude-sonnet-4-6',
+        modelsEndpoint: 'https://api.anthropic.com/v1/models',
+        defaultModels: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+        defaultModel: 'claude-sonnet-5-5',
         authType: 'x-api-key',
         headers: { 'anthropic-version': '2023-06-01' },
         bodyFormat: 'anthropic',
-        supportsModelList: false,
+        supportsModelList: true,
         docUrl: 'https://docs.anthropic.com/',
         apiUrl: 'https://console.anthropic.com/settings/keys'
     },
@@ -156,8 +168,8 @@ const PROVIDER_CONFIGS = {
         name: 'Google Gemini',
         endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
         modelsEndpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
-        defaultModels: ['gemini-3.1-pro', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-        defaultModel: 'gemini-3.1-pro',
+        defaultModels: ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview'],
+        defaultModel: 'gemini-4-argon',
         authType: 'query_key',
         bodyFormat: 'google',
         supportsModelList: true,
@@ -168,8 +180,8 @@ const PROVIDER_CONFIGS = {
         name: 'Mistral AI',
         endpoint: 'https://api.mistral.ai/v1/chat/completions',
         modelsEndpoint: 'https://api.mistral.ai/v1/models',
-        defaultModels: ['mistral-large-3', 'ministral-3-14b', 'mistral-medium-3'],
-        defaultModel: 'mistral-large-3',
+        defaultModels: ['mistral-large-4', 'mistral-medium-3-5', 'mistral-small-4-0', 'ministral-3-14b-25-12', 'mistral-large-3-25-12'],
+        defaultModel: 'mistral-large-4',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -180,8 +192,8 @@ const PROVIDER_CONFIGS = {
         name: 'OpenRouter',
         endpoint: 'https://openrouter.ai/api/v1/chat/completions',
         modelsEndpoint: 'https://openrouter.ai/api/v1/models',
-        defaultModels: ['openai/gpt-5.4', 'anthropic/claude-opus-4-6', 'anthropic/claude-sonnet-4-6', 'google/gemini-3.1-pro', 'deepseek/deepseek-v4', 'qwen/qwen3.5-max'],
-        defaultModel: 'anthropic/claude-sonnet-4-6',
+        defaultModels: ['anthropic/claude-sonnet-5-5', 'openai/gpt-6.1-sol', 'google/gemini-4-argon', 'deepseek/deepseek-v4.1-flash', 'qwen/qwen3.8-max', 'z-ai/glm-5.3'],
+        defaultModel: 'anthropic/claude-sonnet-5-5',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -192,8 +204,8 @@ const PROVIDER_CONFIGS = {
         name: 'Together AI',
         endpoint: 'https://api.together.xyz/v1/chat/completions',
         modelsEndpoint: 'https://api.together.xyz/v1/models',
-        defaultModels: ['meta-llama/Llama-4-70B-Instruct-Turbo', 'mistralai/Mistral-Large-3', 'Qwen/Qwen3.5-72B-Instruct'],
-        defaultModel: 'mistralai/Mistral-Large-3',
+        defaultModels: ['moonshotai/Kimi-K3', 'zai-org/GLM-5.3', 'deepseek-ai/DeepSeek-V4.1-Flash', 'Qwen/Qwen3.8-2.4T-A95B', 'Qwen/Qwen3.5-9B'],
+        defaultModel: 'moonshotai/Kimi-K3',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -204,8 +216,8 @@ const PROVIDER_CONFIGS = {
         name: 'Fireworks AI',
         endpoint: 'https://api.fireworks.ai/inference/v1/chat/completions',
         modelsEndpoint: 'https://api.fireworks.ai/inference/v1/models',
-        defaultModels: ['accounts/fireworks/models/llama-v3p3-70b-instruct', 'accounts/fireworks/models/mixtral-8x22b-instruct'],
-        defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct',
+        defaultModels: ['accounts/fireworks/models/glm-5p3', 'accounts/fireworks/models/glm-5p3-flash', 'accounts/fireworks/models/deepseek-v4p1-flash-1017', 'accounts/fireworks/models/minimax-m3p1-flash', 'accounts/fireworks/models/qwen3p8-flash-next-nvfp4'],
+        defaultModel: 'accounts/fireworks/models/glm-5p3',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -237,9 +249,9 @@ const PROVIDER_CONFIGS = {
     },
     minimax: {
         name: 'MiniMax',
-        endpoint: 'https://api.minimax.chat/v1/text/chatcompletion_v2',
-        defaultModels: ['abab7-chat', 'abab6.5s-chat', 'abab6.5g-chat', 'MiniMax-M1'],
-        defaultModel: 'abab6.5s-chat',
+        endpoint: 'https://api.minimax.cn/v1/chat/completions',
+        defaultModels: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
+        defaultModel: 'MiniMax-M3.1-Flash',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: false,
@@ -249,8 +261,8 @@ const PROVIDER_CONFIGS = {
     stepfun: {
         name: '阶跃星辰',
         endpoint: 'https://api.stepfun.com/v1/chat/completions',
-        defaultModels: ['step-3', 'step-2-16k', 'step-1-8k', 'step-1v-8k', 'step-r-mini'],
-        defaultModel: 'step-1-8k',
+        defaultModels: ['step-5-preview'],
+        defaultModel: 'step-5-preview',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: false,
@@ -281,23 +293,23 @@ const PROVIDER_CONFIGS = {
     },
     cohere: {
         name: 'Cohere',
-        endpoint: 'https://api.cohere.ai/v1/chat',
-        modelsEndpoint: 'https://api.cohere.ai/v1/models',
-        defaultModels: ['command-r-plus', 'command-r', 'command-r7b-12-2024'],
-        defaultModel: 'command-r-plus',
+        endpoint: 'https://api.cohere.com/v2/chat',
+        modelsEndpoint: 'https://api.cohere.com/v1/models',
+        defaultModels: ['command-a-plus-05-2026', 'command-a-03-2025', 'command-a-reasoning-08-2025', 'command-r7b-12-2024', 'north-mini-code-1-0'],
+        defaultModel: 'command-a-plus-05-2026',
         authType: 'bearer',
-        bodyFormat: 'cohere',
+        bodyFormat: 'cohere-v2',
         supportsModelList: true,
         docUrl: 'https://docs.cohere.com/',
         apiUrl: 'https://dashboard.cohere.com/api-keys'
     },
     perplexity: {
         name: 'Perplexity',
-        endpoint: 'https://api.perplexity.ai/chat/completions',
-        defaultModels: ['sonar-pro', 'sonar-reasoning', 'sonar', 'llama-3.1-sonar-large-128k-online', 'llama-3.1-sonar-small-128k-online'],
-        defaultModel: 'llama-3.1-sonar-large-128k-online',
+        endpoint: 'https://api.perplexity.ai/v1/agent',
+        defaultModels: ['perplexity/sonar', 'openai/gpt-6.1-sol', 'anthropic/claude-sonnet-5-5'],
+        defaultModel: 'perplexity/sonar',
         authType: 'bearer',
-        bodyFormat: 'openai',
+        bodyFormat: 'perplexity-agent',
         supportsModelList: false,
         docUrl: 'https://docs.perplexity.ai/',
         apiUrl: 'https://www.perplexity.ai/settings/api'
@@ -328,8 +340,8 @@ const PROVIDER_CONFIGS = {
         name: 'Novita AI',
         endpoint: 'https://api.novita.ai/v3/openai/chat/completions',
         modelsEndpoint: 'https://api.novita.ai/v3/openai/models',
-        defaultModels: ['meta-llama/llama-3.3-70b-instruct', 'meta-llama/llama-3.1-70b-instruct'],
-        defaultModel: 'meta-llama/llama-3.3-70b-instruct',
+        defaultModels: ['moonshotai/kimi-k3.1-pro', 'deepseek/deepseek-v4.1-flash-1017', 'minimax/minimax-m3.1-flash', 'xiaomimimo/mimo-v2.6-pro', 'deepseek/deepseek-v4-pro-0813'],
+        defaultModel: 'moonshotai/kimi-k3.1-pro',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
@@ -362,16 +374,22 @@ const PROVIDER_CONFIGS = {
         docUrl: 'https://lmstudio.ai/',
         apiUrl: ''
     },
-    webhook: {
-        name: 'Webhook / WebSocket',
-        endpoint: '',
-        modelsEndpoint: '',
-        defaultModels: ['nanobot/default'],
-        defaultModel: 'auto',
+    magpie: {
+        name: 'Magpie (本地网关)',
+        endpoint: 'http://127.0.0.1:3425/v1/chat/completions',
+        modelsEndpoint: 'http://127.0.0.1:3425/v1/models',
+        defaultModels: [
+            'auto/minimax-m3.1-flash',
+            'auto/minimax-m3',
+            'auto/gpt-6.1-sol',
+            'auto/glm-5.3',
+            'auto/kimi-k3.1-pro',
+            'auto/deepseek-v4.1-flash'
+        ],
+        defaultModel: 'auto/minimax-m3.1-flash',
         authType: 'bearer',
         bodyFormat: 'openai',
         supportsModelList: true,
-        supportsCustomModel: true,
         supportsCustomEndpoint: true,
         docUrl: '',
         apiUrl: ''
@@ -395,20 +413,6 @@ let baiduTokenCache = { token: null, expireTime: 0 };
 let modelCache = {};
 const ALLOWED_ENDPOINT_PROTOCOLS = new Set(['http:', 'https:']);
 const NATIVE_TOOL_BODY_FORMATS = new Set(['openai']);
-
-function resolveWebhookTransport(config = {}) {
-    const explicit = String(config.connectorTransport || config.transport || '').toLowerCase();
-    if (explicit === 'ws' || explicit === 'http') return explicit;
-    const endpoint = String(config.customEndpoint || config.connectorBaseUrl || '').toLowerCase();
-    if (endpoint.startsWith('ws')) return 'ws';
-    return 'http';
-}
-
-// 是否走 WebSocket 连接器：取决于 webhook 的传输方式（auto/ws/http）。
-function isWsConnector(providerId, config = {}) {
-    if (providerId === 'webhook') return resolveWebhookTransport(config) === 'ws';
-    return false;
-}
 
 function normalizeHttpEndpoint(url) {
     const value = String(url || '').trim();
@@ -516,26 +520,6 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         return await fetchCustomProviderModels(customEndpoint, apiKey);
     }
 
-    if (providerId === 'webhook') {
-        const endpoint = customEndpoint || '';
-        const defaults = PROVIDER_CONFIGS.webhook.defaultModels;
-        const isWs = String(endpoint).toLowerCase().startsWith('ws');
-        if (isWs || !endpoint) {
-            // WebSocket channel 不枚举模型，直接用默认模型。
-            return defaults;
-        }
-        try {
-            // HTTP（OpenAI 兼容，如 nanobot）：从 chat 端点推导 /models。
-            const models = await fetchCustomProviderModels(endpoint, apiKey);
-            const mergedModels = [...new Set([...(models || []), ...defaults])];
-            modelCache[cacheKey] = { models: mergedModels, expireTime: Date.now() + 300000 };
-            return mergedModels;
-        } catch (e) {
-            console.error('Failed to fetch connector models:', e);
-            return defaults;
-        }
-    }
-
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider || !provider.supportsModelList) {
         return provider ? provider.defaultModels : [];
@@ -558,6 +542,11 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         const headers = { 'Accept': 'application/json' };
         if (apiKey && provider.authType === 'bearer') {
             headers['Authorization'] = 'Bearer ' + apiKey;
+        } else if (apiKey && provider.authType === 'x-api-key') {
+            headers['x-api-key'] = apiKey;
+        }
+        if (provider.headers) {
+            Object.assign(headers, provider.headers);
         }
         let endpoint = modelsEndpoint;
         if (provider.authType === 'query_key' && apiKey) {
@@ -728,6 +717,38 @@ function buildRequestBody(provider, model, messages, options) {
             };
         case 'cohere':
             return { message: messages[messages.length - 1].content, model, temperature, max_tokens: maxTokens, stream };
+        case 'cohere-v2':
+            return {
+                model,
+                messages: messages.map(message => ({
+                    role: message.role,
+                    content: typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+                })),
+                temperature,
+                max_tokens: maxTokens,
+                stream
+            };
+        case 'perplexity-agent':
+            // Perplexity retired /chat/completions for Sonar on 2026-09-27; the
+            // Agent API follows the OpenAI Responses request shape.
+            {
+                const instructions = messages.find(message => message.role === 'system')?.content;
+                return {
+                    model,
+                    input: messages
+                        .filter(message => message.role !== 'system')
+                        .map(message => ({
+                            role: message.role,
+                            content: typeof message.content === 'string'
+                                ? message.content
+                                : JSON.stringify(message.content)
+                        })),
+                    ...(instructions ? { instructions } : {}),
+                    temperature,
+                    max_output_tokens: maxTokens,
+                    stream
+                };
+            }
         case 'cloudflare':
             return { messages, temperature, max_tokens: maxTokens, stream };
         case 'ollama':
@@ -768,6 +789,20 @@ function parseResponse(provider, responseData) {
             return responseData.content?.[0]?.text || '';
         case 'cohere':
             return responseData.text || '';
+        case 'cohere-v2':
+            return responseData.message?.content?.find?.(part => part.type === 'text')?.text
+                || responseData.message?.content?.[0]?.text
+                || '';
+        case 'perplexity-agent': {
+            if (Array.isArray(responseData.output)) {
+                return responseData.output
+                    .flatMap(item => item.content || [])
+                    .filter(part => part.type === 'output_text')
+                    .map(part => part.text)
+                    .join('');
+            }
+            return responseData.output_text || responseData.text || '';
+        }
         case 'cloudflare':
             return responseData.result?.response || '';
         case 'ollama':
@@ -827,6 +862,12 @@ function parseStreamChunk(provider, chunk) {
             return '';
         case 'cohere':
             return chunk.text || '';
+        case 'cohere-v2':
+            return chunk.delta?.message?.content?.text || chunk.text || '';
+        case 'perplexity-agent':
+            return chunk.type === 'response.output_text.delta'
+                ? (chunk.delta || '')
+                : (chunk.output_text || '');
         case 'cloudflare':
             return chunk.response || '';
         case 'ollama':
@@ -845,11 +886,6 @@ function isLocalProvider(providerId) {
 export function canProviderUseNativeTools(providerId, config = {}) {
     if (isG4FProvider(providerId)) {
         return false;
-    }
-
-    if (providerId === 'webhook') {
-        // 仅 HTTP（OpenAI 兼容）传输支持原生工具调用；WebSocket 传输不支持。
-        return resolveWebhookTransport(config) === 'http';
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
@@ -882,16 +918,9 @@ export async function callAI(config, userMessage, systemPrompt) {
         });
     }
 
-    if (isWsConnector(providerId, config)) {
-        const messages = [];
-        if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-        messages.push({ role: 'user', content: userMessage });
-        return await chatViaWebSocketConnector(config, messages);
-    }
-
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
+    const isCustomProvider = providerId === 'custom';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
@@ -968,7 +997,7 @@ export async function callAIWithMessagesAndTools(config, messages, tools = [], o
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
+    const isCustomProvider = providerId === 'custom';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
@@ -1048,13 +1077,9 @@ export async function callAIWithMessages(config, messages) {
         });
     }
 
-    if (isWsConnector(providerId, config)) {
-        return await chatViaWebSocketConnector(config, messages);
-    }
-
-    const provider = PROVIDER_CONFIGS[providerId];
+        const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
+    const isCustomProvider = providerId === 'custom';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;
@@ -1134,13 +1159,9 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
         );
     }
 
-    if (isWsConnector(providerId, config)) {
-        return await chatViaWebSocketConnector(config, messages, onChunk, { signal });
-    }
-
-    const provider = PROVIDER_CONFIGS[providerId];
+        const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
-    const isCustomProvider = providerId === 'custom' || providerId === 'webhook';
+    const isCustomProvider = providerId === 'custom';
     const isLocal = isLocalProvider(providerId);
     let endpoint = getEffectiveEndpoint(provider, providerId, config);
     let model;

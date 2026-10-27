@@ -3,12 +3,13 @@
     import { showConfirm } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { formatLocalDateTime } from '../utils/datetime.js';
 
     export let task;
     export let openModal;
     export let onSelect;
 
-    $: isOverdue = task.deadline && task.deadline < new Date().toISOString().slice(0, 16);
+    $: isOverdue = task.deadline && task.deadline < formatLocalDateTime(new Date());
 
     function getStatusStyle(status) {
         const styles = {
@@ -30,7 +31,7 @@
 
     function updateStatus(e) {
         const newStatus = e.target.value;
-        const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        const now = formatLocalDateTime(new Date());
         const updates = { status: newStatus };
         if (newStatus === 'doing') {
             if (!task.startTime) updates.startTime = now;
@@ -61,7 +62,7 @@
         const updates = { subtasks };
         if (newStatus === 'done' && task.status === 'todo') {
             updates.status = 'doing';
-            const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            const now = formatLocalDateTime(new Date());
             if (!task.startTime) updates.startTime = now;
         }
         taskStore.updateTask(task.id, updates);

@@ -274,15 +274,12 @@
             const mimeType = msg.mimeType || (msg.type === "generated_image" ? "image/png" : "audio/mpeg");
             const filename = `generated_${Date.now()}.${ext}`;
 
-            const binary = atob(msg.base64Data);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) {
-                bytes[i] = binary.charCodeAt(i);
-            }
-
+            // The backend writes `content` verbatim unless base64 is declared,
+            // so without this flag the file contains the base64 text itself.
             const path = await invoke("save_file_to_downloads", {
                 filename,
                 content: msg.base64Data,
+                base64: true,
             });
             showToast({
                 message: `已保存到: ${path}`,
@@ -302,12 +299,15 @@
         if ((!inputText.trim() && !$aiChatComposerAttachments.length) || $isAiLoading) return;
         const text = inputText.trim() || "请阅读并分析这些附件。";
         const attachments = $aiChatComposerAttachments;
-        inputText = "";
         try {
             await sendChatMessage(text, chatStyle, null, { attachments });
+            inputText = "";
             clearAiChatDraft();
             scrollToBottom();
         } catch (error) {
+            // Keep the draft so a failed send (e.g. missing API key) does not
+            // silently throw away what the user typed.
+            inputText = text;
             console.error("Send failed:", error);
         }
     }
@@ -322,6 +322,7 @@
     }
 
     async function handleClear() {
+        if ($isAiLoading) return;
         const t = get(_);
         const confirmed = await showConfirm({
             title: t("ai_chat.confirm_clear"),
@@ -336,6 +337,7 @@
     }
 
     async function handleDeleteSession(sessionId) {
+        if ($isAiLoading) return;
         const session = $aiChatSessions.find((item) => item.id === sessionId);
         if (!session) return;
         const t = get(_);
@@ -352,11 +354,13 @@
     }
 
     function handleCreateSession() {
+        if ($isAiLoading) return;
         createAiChatSession();
         showSessionDrawer = false;
     }
 
     function handleSelectSession(sessionId) {
+        if ($isAiLoading) return;
         selectAiChatSession(sessionId);
         showSessionDrawer = false;
     }
@@ -2076,6 +2080,8 @@
                     on:keydown={(e) =>
                         e.key === "Enter" &&
                         !e.shiftKey &&
+                        !e.isComposing &&
+                        e.keyCode !== 229 &&
                         (e.preventDefault(), handleSend())}
                     rows="1"
                     placeholder={$_("ai_chat.ph")}

@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.3.12] - 2026-10-27
+
+- 重写 README 和 `docs/sql/README.md`，去掉营销化描述，修正过期功能和命令，补全 Bitwarden/Vaultwarden、1Password、云同步和本地 SQLite 的当前状态
+- 密码库新增 **Bitwarden / Vaultwarden 只读导入**：Bitwarden 官方云与自部署 Vaultwarden 共用同一套预登录/令牌/`/api/sync` 流程，PBKDF2 + HKDF-Expand + AES-CBC/HMAC 解密后写入本地密码库；主密码只用于本次导入，不保存
+- Bitwarden / Vaultwarden 导入支持文件夹分类、用户名、密码、URL、备注和 TOTP；Argon2 账户会提示先改为 PBKDF2，开启两步验证的账户会明确提示暂不支持，组织密钥无法解密时跳过对应条目
+- 左侧导航改为滑动高亮块：切换菜单时背景色块以 300ms 缓动移动到目标项，折叠态同样生效
+- 移除 Webhook / WebSocket AI 供应商与系统设置中的连接器配置；旧 `webhook`/`openclaw` 配置自动迁移为普通 OpenAI 兼容自定义接口，不再建立 WebSocket
+- 收紧 AI 数据权限：AI 工具无法访问密码库；锁定笔记继续对 AI 不可见；加班/请假记录新增「AI 不可访问」标记，标记后 AI 无法读取、修改或删除，且不会出现在 AI 列表中
+- 取消 AI 设置自动把 API Key 写入密码库的旧行为，避免 AI 子系统触碰密码本
+- 密码 CSV 导入兼容 1Password 导出的 `Title,Url,Username,Password,Notes` 格式及 UTF-8 BOM，并支持引号内的逗号/换行备注；可直接导入 1Password CSV
+- 修复安全云同步设置开关引用未定义翻译函数、点击后报 `t is not defined` 导致无法开启笔记/密码同步的问题
+- 删除「AI 设置自动把 API Key 保存到密码库」的残留开关，避免界面出现已失效的密码库写入选项
+- 新增默认关闭的**笔记云同步**与**密码库云同步**：笔记先 gzip 压缩再 AES-256-GCM 加密，密码库用「主密码 + 设备指纹」派生的密钥二次加密；云端只保存密文，锁定笔记默认不上传，可在设置中单独允许
+- 云同步设置新增开关、立即同步、状态与失败提示；设备密钥变化/换设备导致无法解密时停止同步并提示，不会覆盖云端数据
+- 工时页新增 **AI 职业分析**：可结合加班、请假、任务、月薪和城市生成 0-100 职业评分、四维评分、锐评、年度总结和鼓励；支持三种模式与复制结果
+- AI 原生工具新增 `workplan_worklog_action` 和 `workplan_notes_action`：可查询/新增加班、请假、笔记，修改和删除必须经过应用层确认弹窗，用户拒绝时不会执行；锁定笔记对 AI 不可见
+- 新增云数据库 SQL 设计：`docs/sql/cloud_schema.sql`（PostgreSQL/Supabase，按实体分表、软删除、加密笔记/密码密文、索引与 RLS 示例）和轻量本地库 `docs/sql/local_schema.sql`（SQLite：`meta` + 通用 `records` + `outbox` + FTS5，不按实体拆表）
+- 加班与请假合并为单一「工时记录」入口：默认显示加班，可切换到请假；新增按钮按当前页签创建对应记录
+- 请假记录支持开始/结束日期、按天或按小时请假、半天及小数时长、8 种请假类型（年假/病假/事假/调休/产假/婚假/丧假/其他）、带薪/不带薪和备注
+- 支持修改和删除请假记录；跨月请假会按实际重叠天数分摊到各月，年/月/日视图均可查看
+- 新增年假额度配置，自动计算年假已用/剩余、当月请假、年度累计与带薪/不带薪拆分
+- 工时记录导出支持**按需字段**：老板版（只含日期/类型/时长/事项，不含工资）、完整版、自定义勾选；格式支持 CSV / Excel / JSON，范围可选本年或全部
+- 工作笔记新增多选、全选/取消全选，支持把选中笔记批量导出为 Word（.docx），单篇笔记也可导出 Word
+- `leaveRecords` 并入现有任务数据层：本地缓存、云端按 id 合并、导入/导出、清空数据均包含请假记录；旧数据缺少该字段时按空列表兼容
+- 新增独立的「加班记录」模块：默认关闭，在 系统设置 → 效率工具 中启用后，桌面侧边栏和移动端「更多」会出现入口
+- 支持按年 / 月 / 日切换查看，录入加班日期、开始/结束时间、加班类型（工作日/周末/节假日）、补偿方式（加班费/调休/无）和备注；结束时间早于开始时间按跨天计算
+- 支持修改和删除记录；修改起止时间后工时、加班工资、月度汇总和年度汇总会实时重算
+- 新增月薪与计算规则配置：按「月薪 ÷ 月计薪天数 ÷ 每日工时」折算时薪，支持调整计薪天数、每日工时和三类加班倍率
+- 自动汇总上月实际加班工时与工资，并以「上月工时 × 当前时薪 × 上月类型加权倍率」估算本月预计加班工资；上月无记录时按本月已录工时推算，月薪变化立即重算
+- 加班数据并入现有任务同步：本地缓存、云端按 id 合并、导入/导出、清空数据都会包含 `overtimeRecords`；旧数据/旧云端记录缺少该字段时自动按空列表兼容
+- 新增 `overtime.js` 计算模块和 21 个加班/请假回归测试；补齐 zh/en/ja 文案
+
+- 修复统计页生成日报/周报后复制按钮不显示「复制」：补全 `statistics_page.copy` 及 `common.send/added/expand/collapse` 的 zh/en/ja 文案，并新增 i18n key 校验测试，避免同类缺键再次上线
+- 复制报告改用统一的剪贴板工具：`navigator.clipboard` 不可用或被拒绝时回退到 `execCommand`，复制成功/失败改为 toast 提示，不再弹出阻塞弹窗
+- 修复任务生成偶发被网页搜索接管：网页搜索路由器在模型明确返回 `mode=reply` 时不再回退成搜索；收紧「最新/今日/资料/看一下」等易误判关键词；任务生成/规划类请求优先走任务路由；原生工具调用会忽略误选的 `workplan_web_search`；同时补充意图路由回归测试
+- G4F 资源升级到上游 `gpt4free/g4f.dev` 固定提交 `f0f09e3`（1.1.2）：新增 Qwen、G4F Community、Ollama Swarm、CrowLLM、Eaon、OrcaRouter、RelayRouter、LLM7、Kilo、WebGPU/Bonsai/Chrome AI 本地模型等提供商，更新默认模型与服务端默认模型，并兼容旧 provider id（如 `g4f-api.airforce`）与旧 API Key 存储键；已下线的 Azure 连接自动回落到 G4F Auto
+- 新增 `bunfig.toml` 把 vendored `g4f.dev` 自带的浏览器 smoke test 排除出 `bun test`，避免根目录测试被上游用例污染
+- 依赖升级：Vite 8.3.5、Svelte 5.57.2、DOMpurify 3.4.17、KaTeX 0.18.11、Mermaid 11.17.2、Supabase JS 2.118.0、Milkdown 7.22.3、Chart.js 4.6.1 等；新增 `devalue`、`prosemirror-view`、`source-map-js`、`fflate`、`brace-expansion` 安全覆盖，`bun audit` 从 27 条（含 1 条 critical）降到 2 条 low（仅 SvelteKit 3 可修）
+- 修复离线创建的任务在恢复连接后消失：任务数据新增按账号隔离的本地缓存，云端拉取从「整份覆盖」改为按 id 合并，离线新建/修改/删除会保留并重新上传，其他设备的新任务也不会被本地覆盖；心跳同步同样先合并再推送，存储配额不足时退化为只缓存当前数据（新增 `task-sync.js` 与合并回归测试）
+- 修复定时任务自动生成一直不生效：`checkScheduled` 的嵌套 store `update` 会用旧状态覆盖新任务，且 `lastGeneratedDate` 未持久化；改为单次 updater 返回新状态并保存，补生成上限 90 天，修正周日 0/7 不一致
+- 统一本地日期时间：`today`、统计今日/本周区间、逾期判断、完成/开始时间不再用 UTC `toISOString()`，避免 UTC+8 凌晨「今天」变昨天、逾期和完成时间偏移；`today` 跨午夜自动滚动，统计/看板/详情共用新增的 `datetime.js`
+- 修复工作笔记切换或离开页面时丢失未保存内容：销毁编辑器前先落盘并取消旧计时器，自动保存只写回发起编辑的笔记；存储配额失败不再连带丢掉内存中的笔记，导入校验并去重 id
+- 修复密码库安全与解锁问题：移动端生物识别解锁引用未定义变量导致崩溃；清空密码库时同时清除 PIN/生物识别/设备绑定；恢复码恢复后重新启用绑定标志；PIN 锁定计数正确返回 `locked_out`；启用生物识别不再消耗 PIN 尝试次数；主密码修改遇到无法解密的条目会整体中止而不是写入空密文；设备绑定改为条目写盘成功后再置位
+- 修复统计页任务详情编辑/删除/备注无效果，以及移动端模板/定时任务详情误操作任务 store
+- 修复 AI 聊天取消后仍发起不可取消请求、切换会话期间流式响应写错会话；聊天历史持久化剥离 base64 并增加配额兜底；AI 设置点取消不再保存修改；webhook 自定义端点不再被清空；Enter 发送增加输入法组合保护
+- 修复代码块复制按钮每次更新都会重复包裹 `<pre>`/新增按钮；复制失败回退；CSV 导出增加公式注入防护与表头并集
+- Vditor 图标脚本改为同源预加载，消除 CSP 对内联脚本的拦截；Windows 下载文件名拒绝 NUL/CON/COM1 等设备名
+- 修复 Windows 自启动路径含空格时未加引号导致开机不启动，启动项指向旧安装路径时状态错误地显示为已启用；Linux `.desktop` 的 Exec 与 macOS plist 路径补充转义
+- SSRF 防护补充 IPv4-compatible `::/96`、site-local `fec0::/10`、NAT64 `64:ff9b::/96` 与 6to4 内嵌私网地址的拦截
+- 文件工具授权边界移到后端：`trustedDirs` 参数不再被接受，改为 `set_trusted_directories` 维护后端白名单；工作目录从进程 CWD 改为稳定的「文档/WorkPlan」（移动端为应用数据目录），避免开机自启时以 `System32` 为根
+- 文件搜索/读写/删除命令改为 async，避免大目录扫描阻塞 UI 线程；`fetch_web_content` 手动跟随重定向，每一跳都重新校验并固定 DNS，关闭跨主机重定向的 DNS-rebinding 窗口
+- Android JS Bridge 的 `content://` 读写删除先校验应用持有的 URI 授权，模型生成的工具调用不能再借用应用存储权限访问任意文件
+- 修复 oklch 导出为空操作：导出前按 oklab→sRGB 公式把 Tailwind v4 的 `oklch()` 颜色转换成 `rgb()/rgba()`，PDF/截图不再出现黑块或透明色
+- 按 2026-10 官方文档/在线模型目录更新预置模型：OpenAI、DeepSeek、Groq、智谱、通义千问、Kimi、小米 MiMo、Claude、Gemini、Mistral、OpenRouter、Together、Fireworks、Cohere、Perplexity、MiniMax、StepFun、Novita；新增 xAI Grok 提供商
+- 新增 Magpie 本地网关预设（`http://127.0.0.1:3425/v1`，默认 `auto/minimax-m3.1-flash`），支持从网关 `/v1/models` 拉取 `auto/*` 模型列表
+- 跟进厂商 API 变更：Anthropic 启用 `/v1/models`（`x-api-key` + `anthropic-version`）；Cohere 改用 v2 `/chat`；Perplexity 改用 Agent `/v1/agent`（原 Sonar Chat Completions 于 2026-09-27 下线）；MiniMax 改用 `api.minimax.cn` OpenAI 兼容端点；无法从官方来源核实的厂商保留原列表
+- 版本号提升到 `0.3.12`
+
 ## [0.3.9] - 2026-05-06
 
 - 修复工作笔记编辑器生命周期问题：切换默认编辑器、关闭笔记或保存前会同步当前内容并销毁旧编辑器实例，避免发布版设置页卡住、输入框抖动和刷新按钮闪烁

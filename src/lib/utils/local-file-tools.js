@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { isAndroidRuntime } from './runtime.js';
+import { isAndroidRuntime, isTauriRuntime } from './runtime.js';
 
 export const SUPPORTED_TEXT_FILE_EXTENSIONS = [
     'txt',
@@ -217,6 +217,23 @@ export async function getWorkspaceRoot() {
     } catch (error) {
         console.warn('Failed to resolve workspace root:', error);
         return '';
+    }
+}
+
+/**
+ * Push the user's configured trusted directories to the backend allowlist.
+ * The file commands ignore their `trustedDirs` argument, so this is the only
+ * way the list changes.
+ */
+export async function syncTrustedDirectories(directories = []) {
+    if (!isTauriRuntime) return [];
+    try {
+        return await invoke('set_trusted_directories', {
+            directories: Array.isArray(directories) ? directories : []
+        });
+    } catch (error) {
+        console.warn('Failed to sync trusted directories:', error);
+        return [];
     }
 }
 

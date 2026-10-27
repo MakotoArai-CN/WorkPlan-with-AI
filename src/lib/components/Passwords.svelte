@@ -15,6 +15,7 @@
         MAX_PIN_ATTEMPTS,
     } from "../utils/device-auth.js";
     import { exportToCSV, exportToEncryptedJSON } from "../utils/export.js";
+    import VaultwardenImport from "./VaultwardenImport.svelte";
     import { onMount, onDestroy, tick } from "svelte";
     import CryptoJS from "crypto-js";
     import { _ } from 'svelte-i18n';
@@ -49,6 +50,8 @@
     // Biometric is Android-only; on every other build it stays unsupported.
     let biometricSupported = false;
     let biometricEnabled = false;
+    let biometricBusy = false;
+    let biometricError = "";
     let showBiometricSetupModal = false;
     let biometricSetupPin = "";
 
@@ -77,6 +80,7 @@
     let importData = null;
     let isImporting = false;
     let showImportPasswordModal = false;
+    let showVaultwardenImport = false;
     let importProgress = 0;
     let importTotal = 0;
     let showImportProgress = false;
@@ -85,7 +89,7 @@
     let loadTrigger;
     let observer;
     let decryptedCache = {};
-    let clickOutsideHandler;
+    let exportMenuHandler = null;
     let showChangeMasterPasswordModal = false;
 let oldMasterPassword = "";
 let newMasterPassword = "";
@@ -138,7 +142,7 @@ let confirmNewMasterPassword = "";
             // With biometrics enrolled, prompt straight away so the common case is
             // a single tap. Any failure just leaves the PIN/password form visible.
             if (biometricEnabled && biometricSupported) {
-                await attemptBiometricUnlock({ silent: true });
+                await unlockWithBiometric({ silent: true });
             }
         })();
 
@@ -151,8 +155,9 @@ let confirmNewMasterPassword = "";
         if (observer) {
             observer.disconnect();
         }
-        if (clickOutsideHandler) {
-            document.removeEventListener("click", clickOutsideHandler);
+        if (exportMenuHandler) {
+            document.removeEventListener("click", exportMenuHandler);
+            exportMenuHandler = null;
         }
     });
 
@@ -422,7 +427,7 @@ let confirmNewMasterPassword = "";
                 message:
                     result.error === "wrong_pin"
                         ? t("passwords.pin_wrong", {
-                              values: { remaining: result.attemptsRemaining ?? 0 },
+                              values: { count: passwordsStore.getPinAttemptsRemaining() },
                           })
                         : t("passwords.biometric_failed"),
                 variant: "danger",
@@ -446,31 +451,43 @@ let confirmNewMasterPassword = "";
      * Biometric unlock. On cancel we stay on whatever unlock form is showing so the
      * user can fall back to PIN or the master password.
      */
-    async function unlockWithBiometric() {
+    async function unlockWithBiometric({ silent = false } = {}) {
+        if (biometricBusy) return;
         const t = getI18n(_);
-        biometricError = "";
-        const result = await passwordsStore.unlockWithBiometric(
-            t("passwords.biometric_unlock"),
-        );
+        biometricBusy = true;
+        if (!silent) biometricError = "";
+        try {
+            const result = await passwordsStore.unlockWithBiometric(
+                t("passwords.biometric_unlock"),
+            );
 
-        if (result.success) {
-            showUnlockModal = false;
-            unlockPin = "";
-            unlockPassword = "";
-            decryptedCache = {};
+            if (result.success) {
+                showUnlockModal = false;
+                unlockPin = "";
+                unlockPassword = "";
+                decryptedCache = {};
+                refreshSecurityState();
+                return;
+            }
+
             refreshSecurityState();
-            return;
+            if (result.error === "cancelled") return;
+
+            // A lockout destroys the PIN (and with it biometric), so surface that the
+            // master password is now the only way in.
+            if (!silent) {
+                biometricError = pinEnabled
+                    ? t("passwords.biometric_failed")
+                    : t("passwords.pin_locked_out");
+            }
+            if (!pinEnabled) unlockMode = "password";
+        } finally {
+            biometricBusy = false;
         }
+    }
 
-        refreshSecurityState();
-        if (result.error === "cancelled") return;
-
-        // A lockout destroys the PIN (and with it biometric), so surface that the
-        // master password is now the only way in.
-        biometricError = pinEnabled
-            ? t("passwords.biometric_failed")
-            : t("passwords.pin_locked_out");
-        if (!pinEnabled) unlockMode = "password";
+    async function handleBiometricUnlock() {
+        await unlockWithBiometric();
     }
 
     async function handleRecoverWithCode() {
@@ -532,18 +549,17 @@ let confirmNewMasterPassword = "";
             showSetupModal = true;
             decryptedCache = {};
             showToast({ message: t('settings.clear_success'), type: "info" });
-        } else {
-            showUnlockModal = false;
-            currentView.set("dashboard");
         }
+        // Cancelling means "keep my vault": stay on the unlock form.
     }
 
     function lockVault() {
         closeExportMenu();
         passwordsStore.lock();
-        if (!$rememberSession) {
-            showUnlockModal = true;
-        }
+        // Always bring the unlock form back; otherwise "remember session" left
+        // the vault area blank with no way to unlock it.
+        unlockMode = pinEnabled ? "pin" : "password";
+        showUnlockModal = true;
         selectedPasswordIds.clear();
         selectMode = false;
         decryptedCache = {};
@@ -701,6 +717,20 @@ let confirmNewMasterPassword = "";
     function triggerImport() {
         closeExportMenu();
         importFileInput?.click();
+    }
+
+    function openVaultwardenImport() {
+        closeExportMenu();
+        showVaultwardenImport = true;
+    }
+
+    function handleVaultwardenImported(items) {
+        const count = passwordsStore.addPasswordsBatch(items);
+        showVaultwardenImport = false;
+        showToast({
+            message: getI18n(_)('passwords.vaultwarden_imported', { values: { count } }),
+            type: count > 0 ? 'success' : 'warning'
+        });
     }
 
     function closeExportMenu() {
@@ -891,47 +921,66 @@ async function handleChangeMasterPassword() {
 
     async function importFromCSV(file) {
         const t = getI18n(_);
-        const text = await file.text();
-        const lines = text.split("\n").filter((line) => line.trim());
-        if (lines.length < 2) {
+        const text = (await file.text()).replace(/^\uFEFF/, "");
+        const rows = parseCSV(text);
+        if (rows.length < 2) {
             showToast({ message: t('passwords.csv_empty'), type: "error" });
             return;
         }
-        const headers = parseCSVLine(lines[0]);
+        const headers = rows[0].map((header) => String(header || "").trim());
         const data = [];
-        for (let i = 1; i < lines.length; i++) {
-            const values = parseCSVLine(lines[i]);
+        for (let i = 1; i < rows.length; i++) {
+            const values = rows[i];
             const row = {};
             headers.forEach((header, index) => {
-                row[header] = values[index] || "";
+                if (header) row[header] = values[index] ?? "";
             });
-            data.push(row);
+            if (Object.keys(row).length > 0) data.push(row);
         }
         await processImportedDataAsync(data);
     }
 
-    function parseCSVLine(line) {
-        const result = [];
-        let current = "";
+    // RFC 4180-ish parser: handles quoted commas, escaped quotes, CRLF and
+    // multiline quoted notes (common in 1Password exports).
+    function parseCSV(text) {
+        const rows = [];
+        let row = [];
+        let field = "";
         let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            if (char === '"') {
-                if (inQuotes && line[i + 1] === '"') {
-                    current += '"';
-                    i++;
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (inQuotes) {
+                if (char === '"') {
+                    if (text[i + 1] === '"') {
+                        field += '"';
+                        i++;
+                    } else {
+                        inQuotes = false;
+                    }
                 } else {
-                    inQuotes = !inQuotes;
+                    field += char;
                 }
-            } else if (char === "," && !inQuotes) {
-                result.push(current.trim());
-                current = "";
-            } else {
-                current += char;
+                continue;
+            }
+            if (char === '"') {
+                inQuotes = true;
+            } else if (char === ",") {
+                row.push(field);
+                field = "";
+            } else if (char === "\n") {
+                row.push(field);
+                field = "";
+                if (row.some((value) => String(value).trim() !== "")) rows.push(row);
+                row = [];
+            } else if (char !== "\r") {
+                field += char;
             }
         }
-        result.push(current.trim());
-        return result;
+        if (field.length > 0 || row.length > 0) {
+            row.push(field);
+            if (row.some((value) => String(value).trim() !== "")) rows.push(row);
+        }
+        return rows;
     }
 
     async function importFromJSON(file) {
@@ -1134,8 +1183,11 @@ async function handleChangeMasterPassword() {
     $: displayedPasswords = filteredPasswords.slice(0, displayCount);
     $: hasMore = displayCount < filteredPasswords.length;
 
-    $: if (typeof window !== "undefined") {
-        if (showExportMenu) {
+    // Keep the document listener stable: writing the handler into a reactive
+    // dependency re-triggered this block forever and leaked one listener per tick.
+    function syncExportMenuOutsideHandler(menuOpen) {
+        if (menuOpen) {
+            if (exportMenuHandler) return;
             const handler = (e) => {
                 const menu = document.querySelector(".export-menu-dropdown");
                 const button = document.querySelector(".export-menu-button");
@@ -1148,15 +1200,22 @@ async function handleChangeMasterPassword() {
                     closeExportMenu();
                 }
             };
+            exportMenuHandler = handler;
             setTimeout(() => {
-                document.addEventListener("click", handler);
-                clickOutsideHandler = handler;
+                if (exportMenuHandler === handler) {
+                    document.addEventListener("click", handler);
+                }
             }, 0);
-        } else if (clickOutsideHandler) {
-            document.removeEventListener("click", clickOutsideHandler);
-            clickOutsideHandler = null;
+            return;
+        }
+
+        if (exportMenuHandler) {
+            document.removeEventListener("click", exportMenuHandler);
+            exportMenuHandler = null;
         }
     }
+
+    $: syncExportMenuOutsideHandler(showExportMenu);
 </script>
 
 <input
@@ -1253,6 +1312,12 @@ async function handleChangeMasterPassword() {
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
                             >
                                 <i class="ph ph-download text-lg text-purple-600"></i> {$_('passwords.import_passwords')}
+                            </button>
+                            <button
+                                on:click={openVaultwardenImport}
+                                class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                            >
+                                <i class="ph ph-key text-lg text-amber-600"></i> {$_('passwords.vaultwarden_import')}
                             </button>
                             <button
                                 on:click={openChangeMasterPasswordModal}
@@ -1647,6 +1712,12 @@ async function handleChangeMasterPassword() {
     {/if}
 </div>
 
+<VaultwardenImport
+    bind:show={showVaultwardenImport}
+    onClose={() => showVaultwardenImport = false}
+    onImported={handleVaultwardenImported}
+/>
+
 {#if showImportPasswordModal}
     <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
@@ -1841,6 +1912,9 @@ async function handleChangeMasterPassword() {
                         <i class="ph {biometricBusy ? 'ph-spinner animate-spin' : 'ph-fingerprint'} text-lg"></i>
                         {$_('passwords.biometric_unlock')}
                     </button>
+                    {#if biometricError}
+                        <p class="text-xs text-red-600 mt-1.5 font-medium text-center">{biometricError}</p>
+                    {/if}
                 {/if}
                 <button
                     on:click={switchToPasswordUnlock}
@@ -2126,6 +2200,7 @@ async function handleChangeMasterPassword() {
                         </button>
                     </label>
                     <input
+                        id="password-new-password"
                         type="text"
                         bind:value={newPassword.password}
                         placeholder={$_('passwords.password_placeholder')}

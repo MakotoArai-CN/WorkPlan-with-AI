@@ -1,6 +1,8 @@
 <script>
     import { settingsStore } from "../stores/settings.js";
     import { taskStore } from "../stores/tasks.js";
+    import { passwordsStore } from "../stores/passwords.js";
+    import { secureSyncStatus, syncNotesNow, syncPasswordsNow } from "../utils/secure-sync.js";
     import { invoke } from "@tauri-apps/api/core";
     import { showAlert, showConfirm, showToast } from "../stores/modal.js";
     import { onMount } from "svelte";
@@ -14,49 +16,111 @@
         DATABASE_SETUP_SQL,
         getDatabaseProviderMeta,
     } from "../utils/database-providers.js";
-    import {
-        connectorConfig,
-        connectorStatus,
-        updateConnectorConfig,
-        testConnection
-    } from "../stores/connector.js";
     import { isAndroidRuntime, isWebDemo } from "../utils/runtime.js";
 
-    let connectorTestLoading = false;
-    let connectorShowAdvanced = false;
     let isAndroid = false;
-
-    async function handleConnectorTest() {
-        connectorTestLoading = true;
-        try {
-            await testConnection();
-            showToast({ message: get(_)('settings.connector_test_ok') || '连接成功', variant: 'success' });
-        } catch (e) {
-            showToast({ message: (get(_)('settings.connector_test_fail') || '连接失败') + ': ' + (e?.message || String(e)), variant: 'error' });
-        } finally {
-            connectorTestLoading = false;
-        }
-    }
-
-    // 将 headers 对象与"每行 Key: Value"文本互转，供高级配置里的自定义请求头编辑使用（仅 HTTP 传输生效）。
-    function headersToText(headers = {}) {
-        return Object.entries(headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
-    }
-    function textToHeaders(text = '') {
-        const out = {};
-        for (const line of String(text).split('\n')) {
-            const idx = line.indexOf(':');
-            if (idx <= 0) continue;
-            const key = line.slice(0, idx).trim();
-            if (key) out[key] = line.slice(idx + 1).trim();
-        }
-        return out;
-    }
 
     let checkingUpdate = false;
     let isMobile = false;
     let fileInput;
     let trustedDirectoryInput = '';
+
+    async function toggleNotesSync(event) {
+        const t = get(_);
+        const input = event.currentTarget;
+        const enabled = input.checked;
+        if (!enabled) {
+            settingsStore.setSyncFlag('syncNotes', false);
+            return;
+        }
+        const confirmed = await showConfirm({
+            title: t('settings.sync_notes'),
+            message: t('settings.sync_notes_confirm'),
+            confirmText: t('common.confirm') || '开启',
+            cancelText: t('common.cancel') || '取消'
+        });
+        if (!confirmed) {
+            input.checked = false;
+            return;
+        }
+        settingsStore.setSyncFlag('syncNotes', true);
+        const result = await syncNotesNow({ manual: true });
+        if (!result.success) {
+            settingsStore.setSyncFlag('syncNotes', false);
+            await showAlert({
+                title: t('settings.sync_notes'),
+                message: result.error || t('settings.sync_failed'),
+                variant: 'danger'
+            });
+        }
+    }
+
+    async function togglePasswordSync(event) {
+        const t = get(_);
+        const input = event.currentTarget;
+        const enabled = input.checked;
+        if (!enabled) {
+            settingsStore.setSyncFlag('syncPasswords', false);
+            return;
+        }
+        if (!get(passwordsStore).isUnlocked) {
+            input.checked = false;
+            await showAlert({
+                title: t('settings.sync_passwords'),
+                message: t('settings.sync_vault_locked'),
+                variant: 'warning'
+            });
+            return;
+        }
+        const confirmed = await showConfirm({
+            title: t('settings.sync_passwords'),
+            message: t('settings.sync_passwords_confirm'),
+            confirmText: t('common.confirm') || '开启',
+            cancelText: t('common.cancel') || '取消'
+        });
+        if (!confirmed) {
+            input.checked = false;
+            return;
+        }
+        settingsStore.setSyncFlag('syncPasswords', true);
+        const result = await syncPasswordsNow({ manual: true });
+        if (!result.success) {
+            settingsStore.setSyncFlag('syncPasswords', false);
+            await showAlert({
+                title: t('settings.sync_passwords'),
+                message: result.error || t('settings.sync_failed'),
+                variant: 'danger'
+            });
+        }
+    }
+
+    async function manualSyncNotes() {
+        const t = get(_);
+        const result = await syncNotesNow({ manual: true });
+        if (!result.success) {
+            showToast({ message: result.error || t('settings.sync_failed'), type: 'error' });
+        } else {
+            showToast({ message: t('settings.sync_done'), type: 'success' });
+        }
+    }
+
+    async function manualSyncPasswords() {
+        const t = get(_);
+        const result = await syncPasswordsNow({ manual: true });
+        if (!result.success) {
+            showToast({ message: result.error || t('settings.sync_failed'), type: 'error' });
+        } else {
+            showToast({ message: t('settings.sync_done'), type: 'success' });
+        }
+    }
+
+    function syncStatusLabel(status) {
+        const t = get(_);
+        if (status === 'syncing') return t('settings.sync_syncing');
+        if (status === 'done') return t('settings.sync_done');
+        if (status === 'error') return t('settings.sync_error');
+        return t('settings.sync_idle');
+    }
 
     onMount(() => {
         isAndroid = isAndroidRuntime();
@@ -402,6 +466,127 @@
 
         <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
             <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                <i class="ph ph-clock-afternoon text-lg"></i> {$_('settings.efficiency_tools')}
+            </div>
+            <div class="p-4 md:p-6 space-y-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">{$_('settings.overtime')}</div>
+                        <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.overtime_desc')}</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={$settingsStore.enableOvertime}
+                            on:change={settingsStore.toggleOvertime}
+                            class="sr-only peer"
+                        />
+                        <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                </div>
+                {#if $settingsStore.enableOvertime}
+                    <div class="pl-4 border-l-2 border-orange-100 dark:border-orange-800 text-[10px] md:text-xs text-slate-500 dark:text-slate-400">
+                        {$_('settings.overtime_hint')}
+                    </div>
+                {/if}
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                <i class="ph ph-shield-check text-lg"></i> {$_('settings.secure_sync')}
+            </div>
+            <div class="p-4 md:p-6 space-y-5">
+                <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">
+                    {$_('settings.secure_sync_desc')}
+                </div>
+
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">{$_('settings.sync_notes')}</div>
+                            <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.sync_notes_desc')}</div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input
+                                type="checkbox"
+                                checked={$settingsStore.syncNotes}
+                                on:change={toggleNotesSync}
+                                class="sr-only peer"
+                            />
+                            <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+                    <div class="text-[10px] text-slate-400 dark:text-slate-500">{$_('settings.sync_notes_hint')}</div>
+                    {#if $settingsStore.syncNotes}
+                        <div class="flex items-center justify-between gap-3 pl-3 border-l-2 border-emerald-100 dark:border-emerald-800">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={$settingsStore.syncLockedNotes}
+                                    on:change={(event) => settingsStore.setSyncFlag('syncLockedNotes', event.currentTarget.checked)}
+                                    class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
+                                <span class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.sync_locked_notes')}</span>
+                            </label>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] text-slate-400">{$_('settings.sync_status')}: {syncStatusLabel($secureSyncStatus.notes)}</span>
+                                <button on:click={manualSyncNotes} disabled={$secureSyncStatus.notes === 'syncing'}
+                                    class="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-emerald-50 text-emerald-600 disabled:opacity-50">
+                                    {$_('settings.sync_now')}
+                                </button>
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+
+                <div class="border-t border-slate-100 dark:border-slate-700"></div>
+
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">{$_('settings.sync_passwords')}</div>
+                            <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.sync_passwords_desc')}</div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input
+                                type="checkbox"
+                                checked={$settingsStore.syncPasswords}
+                                on:change={togglePasswordSync}
+                                class="sr-only peer"
+                            />
+                            <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                        </label>
+                    </div>
+                    <div class="text-[10px] text-slate-400 dark:text-slate-500">{$_('settings.sync_passwords_hint')}</div>
+                    {#if $settingsStore.syncPasswords}
+                        <div class="flex items-center justify-between gap-3 pl-3 border-l-2 border-indigo-100 dark:border-indigo-800">
+                            <span class="text-[10px] text-slate-400">
+                                {#if $passwordsStore.isUnlocked}
+                                    {$_('settings.sync_status')}: {syncStatusLabel($secureSyncStatus.passwords)}
+                                {:else}
+                                    {$_('settings.sync_vault_locked_short')}
+                                {/if}
+                            </span>
+                            <button on:click={manualSyncPasswords}
+                                disabled={!$passwordsStore.isUnlocked || $secureSyncStatus.passwords === 'syncing'}
+                                class="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-indigo-50 text-indigo-600 disabled:opacity-50">
+                                {$_('settings.sync_now')}
+                            </button>
+                        </div>
+                    {/if}
+                </div>
+
+                {#if $secureSyncStatus.error}
+                    <div class="text-[10px] text-red-500 break-words">{$secureSyncStatus.error}</div>
+                {/if}
+
+                <div class="text-[10px] text-slate-400 dark:text-slate-500 flex items-start gap-1.5">
+                    <i class="ph ph-info mt-0.5"></i>
+                    <span>{$_('settings.sync_requires_db')}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                 <i class="ph ph-sparkle text-lg"></i> {$_('settings.ai_features')}
             </div>
             <div class="p-4 md:p-6 space-y-4">
@@ -415,21 +600,6 @@
                             type="checkbox"
                             checked={$settingsStore.enableAiSummary}
                             on:change={settingsStore.toggleAiSummary}
-                            class="sr-only peer"
-                        />
-                        <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                    </label>
-                </div>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">{$_('settings.auto_save_key')}</div>
-                        <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.auto_save_key_desc') || ''}</div>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={$settingsStore.autoSaveApiKey}
-                            on:change={settingsStore.toggleAutoSaveApiKey}
                             class="sr-only peer"
                         />
                         <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
@@ -472,137 +642,6 @@
                         <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
                 </div>
-                {#if !isWebDemo}
-                <div class="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-                    <div class="flex items-start justify-between gap-4">
-                        <div class="min-w-0 flex-1">
-                            <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base flex items-center gap-2 flex-wrap">
-                                {$_('settings.connector')}
-                                <span class="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-                                    {$_('settings.experimental')}
-                                </span>
-                                {#if $connectorConfig.enabled}
-                                    {#if $connectorStatus.connected}
-                                        <span class="text-[10px] text-green-600 dark:text-green-400 flex items-center gap-1">
-                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.connector_connected')}
-                                        </span>
-                                    {:else}
-                                        <span class="text-[10px] text-rose-500 dark:text-rose-400 flex items-center gap-1">
-                                            <i class="ph-fill ph-circle text-[8px]"></i>{$_('settings.connector_disconnected')}
-                                        </span>
-                                    {/if}
-                                {/if}
-                            </div>
-                            <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 leading-6">
-                                {$_('settings.connector_desc')}
-                            </div>
-                        </div>
-                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
-                            <input
-                                type="checkbox"
-                                checked={$connectorConfig.enabled}
-                                on:change={(e) => updateConnectorConfig({ enabled: e.target.checked })}
-                                class="sr-only peer"
-                            />
-                            <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
-                        </label>
-                    </div>
-
-                    {#if $connectorConfig.enabled}
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label for="connector-preset" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_preset')}</label>
-                                <select id="connector-preset" value={$connectorConfig.preset || 'nanobot'} on:change={(e) => updateConnectorConfig({ preset: e.target.value })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400">
-                                    <option value="nanobot">nanobot</option>
-                                    <option value="custom">{$_('settings.connector_preset_custom')}</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label for="connector-transport" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_transport')}</label>
-                                <select id="connector-transport" value={$connectorConfig.transport || 'auto'} on:change={(e) => updateConnectorConfig({ transport: e.target.value })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400">
-                                    <option value="auto">{$_('settings.connector_transport_auto')}</option>
-                                    <option value="ws">WebSocket</option>
-                                    <option value="http">HTTP</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div>
-                            <label for="connector-base-url" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_base_url')}</label>
-                            <input
-                                id="connector-base-url"
-                                type="url"
-                                value={$connectorConfig.baseUrl}
-                                on:change={(e) => updateConnectorConfig({ baseUrl: e.target.value })}
-                                placeholder={isAndroid ? "http://192.168.1.100:18789" : "http://127.0.0.1:18789"}
-                                class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
-                            />
-                            {#if isAndroid}
-                                <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1 leading-5">
-                                    {$_('settings.connector_android_hint')}
-                                </div>
-                            {/if}
-                        </div>
-
-                        <div>
-                            <label for="connector-api-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_api_key')}</label>
-                            <input
-                                id="connector-api-key"
-                                type="password"
-                                value={$connectorConfig.apiKey}
-                                on:change={(e) => updateConnectorConfig({ apiKey: e.target.value })}
-                                placeholder={$_('settings.connector_api_key_ph')}
-                                class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
-                            />
-                        </div>
-
-                        <div>
-                            <label for="connector-session-key" class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 block">{$_('settings.connector_session_key')}</label>
-                            <input
-                                id="connector-session-key"
-                                type="text"
-                                value={$connectorConfig.sessionKey}
-                                on:change={(e) => updateConnectorConfig({ sessionKey: e.target.value })}
-                                placeholder={$_('settings.connector_session_key_ph')}
-                                class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400"
-                            />
-                        </div>
-
-                        <button
-                            on:click={handleConnectorTest}
-                            disabled={connectorTestLoading}
-                            class="w-full px-3 py-2 bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800 rounded-lg text-xs font-bold hover:bg-orange-100 dark:hover:bg-orange-900/50 transition disabled:opacity-50"
-                        >
-                            {connectorTestLoading ? $_('settings.connector_testing') : $_('settings.connector_test_connection')}
-                        </button>
-
-                        <button
-                            on:click={() => connectorShowAdvanced = !connectorShowAdvanced}
-                            class="text-[10px] text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400"
-                        >
-                            <i class="ph ph-caret-{connectorShowAdvanced ? 'down' : 'right'}"></i> {$_('settings.connector_advanced')}
-                        </button>
-
-                        {#if connectorShowAdvanced}
-                            <div class="space-y-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 p-3 border border-slate-100 dark:border-slate-700">
-                                <div>
-                                    <label for="connector-timeout-ms" class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">{$_('settings.connector_timeout_ms')}</label>
-                                    <input id="connector-timeout-ms" type="number" min="30000" step="1000" value={$connectorConfig.timeoutMs} on:change={(e) => updateConnectorConfig({ timeoutMs: Number(e.target.value) || 180000 })} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded px-2 py-1 text-xs font-mono" />
-                                </div>
-                                <div>
-                                    <label for="connector-headers" class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">{$_('settings.connector_headers')}</label>
-                                    <textarea id="connector-headers" rows="3" value={headersToText($connectorConfig.headers)} on:change={(e) => updateConnectorConfig({ headers: textToHeaders(e.target.value) })} placeholder={$_('settings.connector_headers_ph')} class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 rounded px-2 py-1 text-xs font-mono resize-y"></textarea>
-                                </div>
-                            </div>
-                        {/if}
-
-                        {#if $connectorStatus.lastError}
-                            <div class="text-[10px] text-rose-500 dark:text-rose-400 break-words">
-                                <i class="ph ph-warning"></i> {$connectorStatus.lastError}
-                            </div>
-                        {/if}
-                    {/if}
-                </div>
-                {/if}
                 {#if !isWebDemo}
                 <div class="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
                     <div class="flex items-start justify-between gap-4">

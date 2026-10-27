@@ -1,0 +1,578 @@
+<script>
+    export let embedded = false;
+    import { taskStore } from '../stores/tasks.js';
+    import { settingsStore } from '../stores/settings.js';
+    import { showConfirm, showToast } from '../stores/modal.js';
+    import { exportToCSV, exportToExcel, exportToJSON } from '../utils/export.js';
+    import { _, locale } from 'svelte-i18n';
+    import { toIntlLocale } from '../i18n/index.js';
+    import { formatLocalDate } from '../utils/datetime.js';
+    import {
+        DEFAULT_OVERTIME_CONFIG,
+        LEAVE_TYPES,
+        calculateLeaveDays,
+        getAnnualLeaveBalance,
+        getLeaveMonthSummary,
+        getLeaveYearSummary,
+        summarizeLeaveRecords,
+        isValidDate,
+        normalizeLeaveRecord
+    } from '../utils/overtime.js';
+
+    const TYPE_STYLES = {
+        annual: 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-800',
+        sick: 'bg-sky-50 text-sky-600 border-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-800',
+        personal: 'bg-orange-50 text-orange-600 border-orange-100 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-800',
+        compensatory: 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800',
+        maternity: 'bg-purple-50 text-purple-600 border-purple-100 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800',
+        marriage: 'bg-pink-50 text-pink-600 border-pink-100 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-800',
+        bereavement: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600',
+        other: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600'
+    };
+
+    let viewMode = 'month';
+    let showForm = false;
+    let editingId = null;
+    let saving = false;
+    let exportOpen = false;
+    let form = createEmptyForm();
+
+    const now = new Date();
+    let cursorYear = now.getFullYear();
+    let cursorMonth = now.getMonth() + 1;
+    let cursorDay = now.getDate();
+
+    $: config = { ...DEFAULT_OVERTIME_CONFIG, ...($settingsStore.overtimeConfig || {}) };
+    $: leaveRecords = ($taskStore.leaveRecords || []).map(normalizeLeaveRecord);
+    $: localeCode = toIntlLocale($locale || 'zh');
+    $: todayValue = formatLocalDate(new Date());
+    $: monthSummary = getLeaveMonthSummary(leaveRecords, cursorYear, cursorMonth, config);
+    $: yearSummary = getLeaveYearSummary(leaveRecords, cursorYear, config);
+    $: daySummary = summarizeLeaveRecords(leaveRecords, config, { year: cursorYear, month: cursorMonth, day: cursorDay });
+    $: balance = getAnnualLeaveBalance(leaveRecords, cursorYear, config);
+    $: monthRecords = leaveRecords
+        .filter(record => overlapsMonth(record, cursorYear, cursorMonth))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate));
+    $: dayRecords = leaveRecords
+        .filter(record => record.startDate <= selectedDayValue() && record.endDate >= selectedDayValue())
+        .sort((a, b) => a.startDate.localeCompare(b.startDate));
+    $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
+        month: index + 1,
+        summary: getLeaveMonthSummary(leaveRecords, cursorYear, index + 1, config)
+    }));
+    $: cursorLabel = (() => {
+        if (viewMode === 'year') {
+            return new Date(cursorYear, 0, 1).toLocaleDateString(localeCode, { year: 'numeric' });
+        }
+        if (viewMode === 'day') {
+            return new Date(cursorYear, cursorMonth - 1, cursorDay).toLocaleDateString(localeCode, {
+                year: 'numeric', month: 'long', day: 'numeric', weekday: 'short'
+            });
+        }
+        return new Date(cursorYear, cursorMonth - 1, 1).toLocaleDateString(localeCode, {
+            year: 'numeric', month: 'long'
+        });
+    })();
+    $: formDays = form.unit === 'day'
+        ? calculateLeaveDays(form.startDate, form.endDate)
+        : 0;
+
+    function createEmptyForm() {
+        const value = formatLocalDate(new Date());
+        return {
+            startDate: value,
+            endDate: value,
+            unit: 'day',
+            duration: 1,
+            type: 'annual',
+            paid: true,
+            note: '',
+            aiLocked: false
+        };
+    }
+
+    function selectedDayValue() {
+        return `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(cursorDay).padStart(2, '0')}`;
+    }
+
+    function monthBounds(year, month) {
+        const last = new Date(year, month, 0).getDate();
+        return {
+            start: `${year}-${String(month).padStart(2, '0')}-01`,
+            end: `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`
+        };
+    }
+
+    function overlapsMonth(record, year, month) {
+        const { start, end } = monthBounds(year, month);
+        return record.startDate <= end && record.endDate >= start;
+    }
+
+    function formatLeave(summary) {
+        if (summary.hours > 0 && summary.days > 0) return `${summary.days} ${$_('leave.unit_day')} + ${summary.hours} ${$_('leave.unit_hour')}`;
+        if (summary.hours > 0) return `${summary.hours} ${$_('leave.unit_hour')}`;
+        return `${summary.days} ${$_('leave.unit_day')}`;
+    }
+
+    function formatRecord(record) {
+        if (record.unit === 'hour') return `${record.duration} ${$_('leave.unit_hour')}`;
+        return `${record.duration} ${$_('leave.unit_day')}`;
+    }
+
+    function shiftCursor(delta) {
+        if (viewMode === 'year') {
+            cursorYear += delta;
+            return;
+        }
+        if (viewMode === 'day') {
+            const next = new Date(cursorYear, cursorMonth - 1, cursorDay + delta);
+            cursorYear = next.getFullYear();
+            cursorMonth = next.getMonth() + 1;
+            cursorDay = next.getDate();
+            return;
+        }
+        const next = new Date(cursorYear, cursorMonth - 1 + delta, 1);
+        cursorYear = next.getFullYear();
+        cursorMonth = next.getMonth() + 1;
+        cursorDay = Math.min(cursorDay, new Date(cursorYear, cursorMonth, 0).getDate());
+    }
+
+    function goToday() {
+        const date = new Date();
+        cursorYear = date.getFullYear();
+        cursorMonth = date.getMonth() + 1;
+        cursorDay = date.getDate();
+    }
+
+    function selectMonth(month) {
+        cursorMonth = month;
+        cursorDay = 1;
+        viewMode = 'month';
+    }
+
+    function openCreate() {
+        editingId = null;
+        form = createEmptyForm();
+        if (viewMode !== 'day' && !(cursorYear === now.getFullYear() && cursorMonth === now.getMonth() + 1)) {
+            form.startDate = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-01`;
+            form.endDate = form.startDate;
+        }
+        form.duration = form.unit === 'day' ? calculateLeaveDays(form.startDate, form.endDate) : 1;
+        showForm = true;
+    }
+
+    function openEdit(record) {
+        editingId = record.id;
+        form = {
+            startDate: record.startDate,
+            endDate: record.endDate,
+            unit: record.unit,
+            duration: record.duration,
+            type: record.type,
+            paid: record.paid,
+            note: record.note || '',
+            aiLocked: record.aiLocked === true
+        };
+        showForm = true;
+    }
+
+    function closeForm() {
+        showForm = false;
+        saving = false;
+    }
+
+    function syncDurationFromDates() {
+        if (!editingId && form.unit === 'day') {
+            form.duration = calculateLeaveDays(form.startDate, form.endDate);
+        }
+    }
+
+    function changeUnit() {
+        if (!editingId) {
+            form.duration = form.unit === 'day' ? calculateLeaveDays(form.startDate, form.endDate) : 1;
+        }
+    }
+
+    function saveRecord() {
+        if (saving) return;
+        if (!isValidDate(form.startDate) || !isValidDate(form.endDate) || form.endDate < form.startDate) {
+            showToast({ message: $_('leave.invalid_date'), type: 'error' });
+            return;
+        }
+        if (!(Number(form.duration) > 0)) {
+            showToast({ message: $_('leave.invalid_duration'), type: 'error' });
+            return;
+        }
+        saving = true;
+        const existing = editingId ? leaveRecords.find(record => record.id === editingId) : null;
+        const record = normalizeLeaveRecord({
+            ...form,
+            duration: Number(form.duration),
+            id: editingId || `leave_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            createdAt: existing?.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        });
+        if (editingId) {
+            taskStore.updateLeaveRecord(editingId, record);
+        } else {
+            taskStore.addLeaveRecord(record);
+        }
+        cursorYear = Number(record.startDate.slice(0, 4));
+        cursorMonth = Number(record.startDate.slice(5, 7));
+        cursorDay = Number(record.startDate.slice(8, 10));
+        showForm = false;
+        saving = false;
+        showToast({
+            message: editingId ? $_('leave.updated') : $_('leave.saved'),
+            type: 'success'
+        });
+    }
+
+    async function deleteRecord(record) {
+        const confirmed = await showConfirm({
+            title: $_('leave.delete_title'),
+            message: $_('leave.delete_confirm', { values: { date: record.startDate } }),
+            confirmText: $_('leave.delete'),
+            cancelText: $_('leave.cancel'),
+            variant: 'danger'
+        });
+        if (!confirmed) return;
+        taskStore.deleteLeaveRecord(record.id);
+        showToast({ message: $_('leave.deleted'), type: 'success' });
+    }
+
+    function updateQuota(value) {
+        settingsStore.updateOvertimeConfig({ annualLeaveQuota: Number(value) || 0 });
+    }
+
+    function exportRows(scope) {
+        const records = scope === 'year'
+            ? leaveRecords.filter(record => record.startDate.slice(0, 4) === String(cursorYear))
+            : leaveRecords.slice();
+        return records.map(record => ({
+            [$_('leave.export_start')]: record.startDate,
+            [$_('leave.export_end')]: record.endDate,
+            [$_('leave.export_duration')]: record.duration,
+            [$_('leave.export_unit')]: record.unit === 'hour' ? $_('leave.unit_hour') : $_('leave.unit_day'),
+            [$_('leave.export_type')]: $_('leave.type_' + record.type),
+            [$_('leave.export_paid')]: record.paid ? $_('leave.paid') : $_('leave.unpaid'),
+            [$_('leave.export_note')]: record.note
+        }));
+    }
+
+    async function exportData(format, scope) {
+        exportOpen = false;
+        const rows = exportRows(scope);
+        if (rows.length === 0) {
+            showToast({ message: $_('leave.no_export'), type: 'warning' });
+            return;
+        }
+        if (format === 'json') {
+            const result = await exportToJSON({
+                exportedAt: new Date().toISOString(),
+                year: scope === 'year' ? cursorYear : 'all',
+                leaveRecords: rows
+            }, `leave_${scope === 'year' ? cursorYear : 'all'}.json`, { showToast });
+            return result;
+        }
+        if (format === 'xlsx') {
+            return await exportToExcel(rows, `leave_${scope === 'year' ? cursorYear : 'all'}.xlsx`, {
+                showToast,
+                sheetName: $_('leave.title')
+            });
+        }
+        return await exportToCSV(rows, `leave_${scope === 'year' ? cursorYear : 'all'}.csv`, { showToast });
+    }
+</script>
+
+<div class={`flex flex-col ${embedded ? 'h-full' : 'h-screen md:h-full'} overflow-hidden bg-slate-50`}>
+    <header class="h-auto bg-white/90 backdrop-blur px-4 md:px-6 flex flex-col md:flex-row justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0 py-2 gap-2">
+        {#if !embedded}
+            <div class="w-full md:w-auto">
+                <h2 class="text-lg font-bold text-rose-700 flex items-center gap-2">
+                    <i class="ph-fill ph-calendar-check"></i> {$_('leave.title')}
+                </h2>
+                <div class="text-[10px] md:text-xs text-slate-500">{$_('leave.subtitle')}</div>
+            </div>
+        {/if}
+        <div class={`flex items-center gap-2 w-full md:w-auto flex-wrap ${embedded ? 'md:ml-auto' : ''}`}>
+            <div class="flex bg-slate-100 p-1 rounded-lg gap-1">
+                {#each [
+                    { key: 'year', label: $_('leave.view_year') },
+                    { key: 'month', label: $_('leave.view_month') },
+                    { key: 'day', label: $_('leave.view_day') }
+                ] as item}
+                    <button on:click={() => viewMode = item.key}
+                        class="px-2.5 py-1 text-[10px] rounded transition whitespace-nowrap"
+                        class:bg-white={viewMode === item.key}
+                        class:shadow-sm={viewMode === item.key}
+                        class:font-bold={viewMode === item.key}
+                        class:text-rose-600={viewMode === item.key}
+                        class:text-slate-500={viewMode !== item.key}>
+                        {item.label}
+                    </button>
+                {/each}
+            </div>
+            {#if !embedded}
+            <details bind:open={exportOpen} class="relative">
+                <summary class="list-none h-9 px-3 bg-white border border-rose-200 hover:bg-rose-50 text-rose-700 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer">
+                    <i class="ph ph-download-simple"></i>
+                    <span class="hidden sm:inline">{$_('leave.export')}</span>
+                </summary>
+                <div class="absolute right-0 mt-1 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 p-1">
+                    <button on:click={() => exportData('csv', 'year')} class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-rose-50 dark:hover:bg-slate-700">{$_('leave.export_csv_year')}</button>
+                    <button on:click={() => exportData('csv', 'all')} class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-rose-50 dark:hover:bg-slate-700">{$_('leave.export_csv_all')}</button>
+                    <button on:click={() => exportData('xlsx', 'year')} class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-rose-50 dark:hover:bg-slate-700">{$_('leave.export_excel_year')}</button>
+                    <button on:click={() => exportData('xlsx', 'all')} class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-rose-50 dark:hover:bg-slate-700">{$_('leave.export_excel_all')}</button>
+                    <button on:click={() => exportData('json', 'year')} class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-rose-50 dark:hover:bg-slate-700">{$_('leave.export_json_year')}</button>
+                    <button on:click={() => exportData('json', 'all')} class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-rose-50 dark:hover:bg-slate-700">{$_('leave.export_json_all')}</button>
+                </div>
+            </details>
+            {/if}
+            <button on:click={openCreate}
+                class="h-9 px-4 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold shadow-md shadow-rose-200 flex items-center gap-2">
+                <i class="ph-bold ph-plus"></i>
+                <span class="hidden sm:inline">{$_('leave.add_record')}</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 overflow-y-auto overscroll-contain min-h-0" style="-webkit-overflow-scrolling: touch;">
+        <div class="p-4 md:p-6 space-y-5 pb-32">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 p-4 md:p-5 flex flex-col md:flex-row md:items-center gap-4">
+                <div class="flex items-center gap-3 flex-1">
+                    <div class="w-11 h-11 rounded-xl bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
+                        <i class="ph-fill ph-calendar-check text-xl text-rose-600 dark:text-rose-300"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] md:text-xs font-bold text-slate-400 uppercase">{$_('leave.annual_quota')}</div>
+                        <div class="flex items-center gap-2 mt-1">
+                            <input type="number" min="0" max="365" step="0.5" value={config.annualLeaveQuota}
+                                on:change={(event) => updateQuota(event.currentTarget.value)}
+                                class="w-24 text-xl font-black text-slate-800 dark:text-slate-100 bg-transparent border-b border-dashed border-slate-300 dark:border-slate-600 focus:border-rose-400 outline-none" />
+                            <span class="text-xs text-slate-500">{$_('leave.unit_day')}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-xs text-slate-500">
+                    {$_('leave.used')}: <span class="font-bold text-slate-700 dark:text-slate-200">{balance.used}</span>
+                    <span class="mx-2 text-slate-300">·</span>
+                    {$_('leave.remaining')}: <span class="font-bold text-rose-600">{balance.remaining}</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="text-[10px] md:text-xs font-bold text-slate-400 uppercase mb-1">{$_('leave.month_leave')}</div>
+                    <div class="text-xl md:text-2xl font-black text-slate-700 dark:text-slate-100">{formatLeave(monthSummary)}</div>
+                    <div class="text-[10px] text-slate-500 mt-1">{$_('leave.paid_days')}: {monthSummary.paidDays}</div>
+                </div>
+                <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="text-[10px] md:text-xs font-bold text-rose-500 uppercase mb-1">{$_('leave.year_leave')}</div>
+                    <div class="text-xl md:text-2xl font-black text-rose-600">{formatLeave(yearSummary)}</div>
+                    <div class="text-[10px] text-slate-500 mt-1">{$_('leave.unpaid_days')}: {yearSummary.unpaidDays}</div>
+                </div>
+                <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="text-[10px] md:text-xs font-bold text-sky-500 uppercase mb-1">{$_('leave.annual_used')}</div>
+                    <div class="text-xl md:text-2xl font-black text-sky-600">{balance.used}</div>
+                    <div class="text-[10px] text-slate-500 mt-1">{$_('leave.unit_day')}</div>
+                </div>
+                <div class="bg-gradient-to-br from-rose-500 to-pink-500 p-3 md:p-4 rounded-xl shadow-md shadow-rose-200 text-white">
+                    <div class="text-[10px] md:text-xs font-bold text-rose-100 uppercase mb-1">{$_('leave.annual_remaining')}</div>
+                    <div class="text-xl md:text-2xl font-black">{balance.remaining}</div>
+                    <div class="text-[10px] text-rose-100 mt-1">{$_('leave.unit_day')}</div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1">
+                    <button on:click={() => shiftCursor(-1)} aria-label={$_('leave.previous')}
+                        class="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-200 flex items-center justify-center dark:bg-slate-800 dark:border-slate-700">
+                        <i class="ph-bold ph-caret-left"></i>
+                    </button>
+                    <button on:click={() => shiftCursor(1)} aria-label={$_('leave.next')}
+                        class="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-200 flex items-center justify-center dark:bg-slate-800 dark:border-slate-700">
+                        <i class="ph-bold ph-caret-right"></i>
+                    </button>
+                    <div class="ml-2 text-sm md:text-base font-bold text-slate-700 dark:text-slate-200">{cursorLabel}</div>
+                </div>
+                <button on:click={goToday}
+                    class="h-8 px-3 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-500 hover:text-rose-600 dark:bg-slate-800 dark:border-slate-700">
+                    {$_('leave.today')}
+                </button>
+            </div>
+
+            {#if viewMode === 'year'}
+                <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {#each yearMonths as item}
+                        <button on:click={() => selectMonth(item.month)}
+                            class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-left hover:border-rose-200 hover:shadow-md transition dark:bg-slate-800 dark:border-slate-700">
+                            <div class="flex items-center justify-between">
+                                <div class="font-bold text-slate-700 dark:text-slate-200">
+                                    {new Date(cursorYear, item.month - 1, 1).toLocaleDateString(localeCode, { month: 'long' })}
+                                </div>
+                                <i class="ph ph-caret-right text-slate-300"></i>
+                            </div>
+                            <div class="text-2xl font-black text-rose-600 mt-3">{formatLeave(item.summary)}</div>
+                            <div class="text-[10px] text-slate-500 mt-1">{$_('leave.paid_days')}: {item.summary.paidDays}</div>
+                        </button>
+                    {/each}
+                </div>
+            {:else}
+                {@const visibleRecords = viewMode === 'day' ? dayRecords : monthRecords}
+                <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between">
+                        <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
+                            {viewMode === 'day' ? $_('leave.day_detail') : $_('leave.month_detail')}
+                        </div>
+                        <div class="text-[10px] text-slate-500">
+                            {formatLeave(viewMode === 'day' ? daySummary : monthSummary)}
+                        </div>
+                    </div>
+                    {#if visibleRecords.length}
+                        <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
+                            {#each visibleRecords as record}
+                                <div class="px-4 py-3 flex items-start gap-3">
+                                    <div class="w-20 shrink-0">
+                                        <div class="text-xs font-black text-slate-700 dark:text-slate-200">{record.startDate}</div>
+                                        <div class="text-[9px] text-slate-400">
+                                            {record.startDate === record.endDate ? '' : `→ ${record.endDate}`}
+                                        </div>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <span class="px-1.5 py-0.5 text-[10px] rounded border {TYPE_STYLES[record.type] || TYPE_STYLES.other}">
+                                                {$_('leave.type_' + record.type)}
+                                            </span>
+                                            <span class="text-xs font-bold text-slate-700 dark:text-slate-200">{formatRecord(record)}</span>
+                                            <span class="text-[10px] {record.paid ? 'text-green-600' : 'text-slate-400'}">
+                                                {record.paid ? $_('leave.paid') : $_('leave.unpaid')}
+                                            </span>
+                                            {#if record.aiLocked}
+                                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300" title={$_('leave.ai_locked')}>
+                                                    <i class="ph ph-lock-simple"></i>
+                                                </span>
+                                            {/if}
+                                        </div>
+                                        {#if record.note}
+                                            <div class="text-[10px] text-slate-500 mt-1 truncate">{record.note}</div>
+                                        {/if}
+                                    </div>
+                                    <div class="flex items-center gap-1 shrink-0">
+                                        <button on:click={() => openEdit(record)} aria-label={$_('leave.edit_record')}
+                                            class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center">
+                                            <i class="ph ph-pencil-simple"></i>
+                                        </button>
+                                        <button on:click={() => deleteRecord(record)} aria-label={$_('leave.delete')}
+                                            class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center">
+                                            <i class="ph ph-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            {/each}
+                        </div>
+                    {:else}
+                        <div class="py-12 text-center text-slate-400">
+                            <i class="ph ph-calendar-check text-4xl mb-2 opacity-40"></i>
+                            <div class="text-sm font-bold">{$_('leave.empty')}</div>
+                            <div class="text-xs mt-1">{$_('leave.empty_desc')}</div>
+                            <button on:click={openCreate} class="mt-3 text-xs font-bold text-rose-600 hover:text-rose-700">
+                                + {$_('leave.add_record')}
+                            </button>
+                        </div>
+                    {/if}
+                </div>
+            {/if}
+        </div>
+    </div>
+</div>
+
+{#if showForm}
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            on:click={closeForm}
+            on:keydown={(event) => event.key === 'Escape' && closeForm()}
+            role="button"
+            tabindex="0"
+        ></div>
+        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/40">
+                <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100">
+                    {editingId ? $_('leave.edit_record') : $_('leave.add_record')}
+                </h3>
+                <button on:click={closeForm} aria-label={$_('leave.cancel')}><i class="ph ph-x text-xl"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs font-bold text-slate-500">{$_('leave.start_date')}</span>
+                        <input type="date" bind:value={form.startDate} on:change={syncDurationFromDates}
+                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs font-bold text-slate-500">{$_('leave.end_date')}</span>
+                        <input type="date" bind:value={form.endDate} on:change={syncDurationFromDates}
+                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs font-bold text-slate-500">{$_('leave.unit')}</span>
+                        <select bind:value={form.unit} on:change={changeUnit}
+                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
+                            <option value="day">{$_('leave.unit_day')}</option>
+                            <option value="hour">{$_('leave.unit_hour')}</option>
+                        </select>
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs font-bold text-slate-500">{$_('leave.duration')}</span>
+                        <input type="number" min="0.5" step="0.5" bind:value={form.duration}
+                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs font-bold text-slate-500">{$_('leave.type')}</span>
+                        <select bind:value={form.type}
+                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
+                            {#each LEAVE_TYPES as type}
+                                <option value={type}>{$_('leave.type_' + type)}</option>
+                            {/each}
+                        </select>
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs font-bold text-slate-500">{$_('leave.paid')}</span>
+                        <select bind:value={form.paid}
+                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
+                            <option value={true}>{$_('leave.paid')}</option>
+                            <option value={false}>{$_('leave.unpaid')}</option>
+                        </select>
+                    </label>
+                    <label class="col-span-2 flex flex-col gap-1">
+                        <span class="text-xs font-bold text-slate-500">{$_('leave.note')}</span>
+                        <textarea bind:value={form.note} rows="2" placeholder={$_('leave.note_placeholder')}
+                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200 resize-none"></textarea>
+                    </label>
+                    <label class="col-span-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 cursor-pointer">
+                        <input type="checkbox" bind:checked={form.aiLocked}
+                            class="rounded border-slate-300 text-rose-500 focus:ring-rose-400" />
+                        <span class="text-xs font-bold text-slate-600 dark:text-slate-300">{$_('leave.ai_locked')}</span>
+                        <span class="text-[10px] text-slate-400">{$_('leave.ai_locked_hint')}</span>
+                    </label>
+                </div>
+                {#if form.unit === 'day'}
+                    <div class="text-[10px] text-slate-500">
+                        {$_('leave.auto_days')}: {formDays}
+                    </div>
+                {/if}
+            </div>
+            <div class="px-6 py-4 border-t border-slate-100 dark:border-slate-700 flex gap-3">
+                <button on:click={closeForm}
+                    class="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-xl font-bold text-sm">
+                    {$_('leave.cancel')}
+                </button>
+                <button on:click={saveRecord} disabled={saving}
+                    class="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white rounded-xl font-bold text-sm">
+                    {editingId ? $_('leave.save') : $_('leave.add_record')}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}

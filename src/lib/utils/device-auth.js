@@ -88,6 +88,14 @@ function setDeviceBindingFlag(enabled) {
     else localStorage.removeItem(DEVICE_BINDING_KEY);
 }
 
+/**
+ * Re-arm the binding flag after an envelope was restored (recovery flow). The
+ * flag lives only in this device's storage, so callers cannot set it directly.
+ */
+export function markDeviceBindingEnabled() {
+    setDeviceBindingFlag(true);
+}
+
 // --- Recovery code -----------------------------------------------------------
 //
 // The recovery code *is* the binding key, rather than a pointer to one stored on
@@ -171,7 +179,7 @@ export function clearBindingEnvelope() {
  * The caller must show the code to the user exactly once and must re-encrypt the
  * vault under the returned binding key.
  */
-export async function enableDeviceBinding() {
+export async function enableDeviceBinding({ deferFlag = false } = {}) {
     const deviceKey = await getDeviceKey();
     if (!deviceKey) {
         throw new Error('当前环境不支持设备绑定');
@@ -181,7 +189,12 @@ export async function enableDeviceBinding() {
     if (!storeBindingEnvelope(bindingKey, deviceKey)) {
         throw new Error('生成恢复码失败');
     }
-    setDeviceBindingFlag(true);
+    // The flag makes every future unlock derive master+binding. The caller must
+    // re-encrypt the vault before this is armed, otherwise a crash in between
+    // leaves the entries unreadable.
+    if (!deferFlag) {
+        setDeviceBindingFlag(true);
+    }
     return { recoveryCode, bindingKey, deviceKey };
 }
 
@@ -300,7 +313,9 @@ export async function unlockWithPin(pin) {
     const masterPassword = decrypt(wrapper, pinWrappingSecret(pin, deviceKey));
     if (!masterPassword) {
         recordPinFailure();
-        const remaining = getPinAttemptsRemaining();
+        // A lockout clears the wrapper (and with it the attempts counter), so
+        // read the state after the failure instead of the freshly reset counter.
+        const remaining = isPinEnabled() ? getPinAttemptsRemaining() : 0;
         return {
             success: false,
             error: remaining > 0 ? 'wrong_pin' : 'locked_out',
@@ -310,6 +325,19 @@ export async function unlockWithPin(pin) {
 
     resetPinAttempts();
     return { success: true, masterPassword, attemptsRemaining: MAX_PIN_ATTEMPTS };
+}
+
+/**
+ * Verify a PIN without spending an attempt. Used by enrollment flows where a
+ * typo must not destroy the existing wrapper.
+ */
+export async function verifyPin(pin) {
+    if (typeof window === 'undefined') return false;
+    const wrapper = localStorage.getItem(PIN_WRAPPER_KEY);
+    if (!wrapper) return false;
+    const deviceKey = await getDeviceKey();
+    if (!deviceKey) return false;
+    return Boolean(decrypt(wrapper, pinWrappingSecret(pin, deviceKey)));
 }
 
 // --- Biometric unlock (Android only) -----------------------------------------
@@ -446,9 +474,8 @@ export async function enableBiometric(pin) {
 
     // Verify the PIN opens the wrapper before we commit — otherwise we'd store a
     // wrong PIN that would just fail biometric unlock forever.
-    const check = await unlockWithPin(pin);
-    if (!check.success) {
-        return { success: false, error: check.error || 'wrong_pin' };
+    if (!(await verifyPin(pin))) {
+        return { success: false, error: 'wrong_pin' };
     }
 
     const wrapped = encrypt(pin, deviceKey);

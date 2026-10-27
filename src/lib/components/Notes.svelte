@@ -4,6 +4,7 @@
     import { renderMarkdown } from "../utils/markdown.js";
     import {
         exportToMarkdown,
+        exportNotesToWord,
         exportToHTML,
         exportToPDF,
     } from "../utils/export.js";
@@ -11,6 +12,7 @@
         getEffectiveConfig,
         configureAiPanel,
         showAiPanel,
+        providerRequiresApiKey,
     } from "../stores/ai.js";
     import { settingsStore } from "../stores/settings.js";
     import { _, locale } from 'svelte-i18n';
@@ -44,6 +46,8 @@
     let editorError = '';
     let autoSaveTimer = null;
     let selectedCategory = null;
+    let selectMode = false;
+    let selectedNoteIds = new Set();
     $: if (selectedCategory === null) selectedCategory = $_('notes.category_all');
     let showCategoryPanel = false;
     let newCategoryName = '';
@@ -96,10 +100,8 @@
     onDestroy(() => {
         window.removeEventListener("resize", handleResize);
         document.removeEventListener("keydown", handleKeydown);
+        flushPendingEdits();
         void destroyEditor();
-        if (autoSaveTimer) {
-            clearTimeout(autoSaveTimer);
-        }
         if (aiSuggestionTimer) {
             clearTimeout(aiSuggestionTimer);
         }
@@ -326,19 +328,46 @@
         if (autoSaveTimer) {
             clearTimeout(autoSaveTimer);
         }
+        const noteId = $activeNote?.id;
+        if (!noteId) return;
         autoSaveTimer = setTimeout(() => {
-            if ($activeNote && editMode) {
-                notesStore.updateNote($activeNote.id, {
-                    title: editTitle,
-                    content: editContent,
-                });
-                showToast({
-                    message: get(_)('notes.auto_saved'),
-                    type: "success",
-                    duration: 1000,
-                });
-            }
+            autoSaveTimer = null;
+            // Only write back to the note that was active when the edit happened;
+            // a pending save must never land on a note the user just switched to.
+            if (!editMode || $activeNote?.id !== noteId) return;
+            syncContentFromEditor();
+            notesStore.updateNote(noteId, {
+                title: editTitle,
+                content: editContent,
+            });
+            showToast({
+                message: get(_)('notes.auto_saved'),
+                type: "success",
+                duration: 1000,
+            });
         }, 2000);
+    }
+
+    function cancelAutoSave() {
+        if (autoSaveTimer) {
+            clearTimeout(autoSaveTimer);
+            autoSaveTimer = null;
+        }
+    }
+
+    // Persist the in-memory editor buffer before the editor is torn down or the
+    // user switches notes. Without this, switching notes (or leaving the page)
+    // while auto-save is off silently discards every keystroke.
+    function flushPendingEdits() {
+        cancelAutoSave();
+        if (!editMode) return;
+        const note = $activeNote;
+        if (!note) return;
+        syncContentFromEditor();
+        notesStore.updateNote(note.id, {
+            title: editTitle.trim() ? editTitle : note.title,
+            content: editContent,
+        });
     }
 
     $: filteredNotes = $notesList.filter((note) => {
@@ -384,7 +413,11 @@
         }
     }
 
-    function createNote() {
+    async function createNote() {
+        if (editMode) {
+            flushPendingEdits();
+            await destroyEditor();
+        }
         const defaultTitle = $_('notes.new_note_title');
         notesStore.addNote({ title: defaultTitle, content: "" });
         editMode = true;
@@ -397,6 +430,7 @@
 
     async function selectNote(note) {
         if (editMode) {
+            flushPendingEdits();
             await destroyEditor();
         }
         notesStore.setActiveNote(note.id);
@@ -539,6 +573,7 @@
 
     async function saveNote() {
         if ($activeNote) {
+            cancelAutoSave();
             syncContentFromEditor();
             notesStore.updateNote($activeNote.id, {
                 title: editTitle,
@@ -623,6 +658,8 @@
                 await exportToHTML(html, `${filename}.html`, $activeNote.title, {
                     showToast,
                 });
+            } else if (type === "word") {
+                await exportNotesToWord([$activeNote], `${filename}.docx`, { showToast });
             } else if (type === "pdf") {
                 if (previewElement) {
                     await exportToPDF(previewElement, `${filename}.pdf`, {
@@ -635,6 +672,36 @@
             showToast({ message: get(_)('notes.export_failed_short') + ": " + e.message, type: "error" });
         }
     }
+
+    function toggleSelectMode() {
+        selectMode = !selectMode;
+        selectedNoteIds = new Set();
+    }
+
+    function toggleNoteSelection(id) {
+        const next = new Set(selectedNoteIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        selectedNoteIds = next;
+    }
+
+    function selectAllNotes() {
+        selectedNoteIds = new Set(filteredNotes.map(note => note.id));
+    }
+
+    function clearNoteSelection() {
+        selectedNoteIds = new Set();
+    }
+
+    async function exportSelectedNotes() {
+        const notes = selectedNoteIds.size > 0
+            ? filteredNotes.filter(note => selectedNoteIds.has(note.id))
+            : filteredNotes;
+        if (notes.length === 0) return;
+        await exportNotesToWord(notes, `notes_${new Date().toISOString().slice(0, 10)}.docx`, { showToast });
+    }
+
+    $: allFilteredSelected = filteredNotes.length > 0 && filteredNotes.every(note => selectedNoteIds.has(note.id));
 
     function formatDate(dateStr) {
         const date = new Date(dateStr);
@@ -662,10 +729,7 @@
     async function requestAiSuggestion(currentText) {
         if (!currentText || currentText.length < 20) return;
         const config = getEffectiveConfig();
-        const needsApiKey =
-            config.provider !== 'ollama' &&
-            config.provider !== 'lmstudio' &&
-            !String(config.provider || '').startsWith('g4f');
+        const needsApiKey = providerRequiresApiKey(config.provider);
         if (needsApiKey && !config.apiKey) return;
         const lastLines = currentText.split('\n').slice(-3).join('\n');
         if (lastLines.trim().length < 10) return;
@@ -817,6 +881,23 @@
                     </div>
                 {/if}
             </div>
+            <div class="px-3 py-2 border-b border-slate-100 flex items-center gap-2 text-[10px]">
+                <button on:click={toggleSelectMode}
+                    class={`px-2 py-1 rounded font-bold ${selectMode ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    {selectMode ? $_('notes.exit_selection') : $_('notes.multi_select')}
+                </button>
+                {#if selectMode}
+                    <button on:click={allFilteredSelected ? clearNoteSelection : selectAllNotes}
+                        class="px-2 py-1 rounded bg-slate-100 text-slate-600 font-bold">
+                        {allFilteredSelected ? $_('notes.clear_selection') : $_('notes.select_all')}
+                    </button>
+                    <button on:click={exportSelectedNotes}
+                        class="ml-auto px-2 py-1 rounded bg-blue-50 text-blue-600 font-bold flex items-center gap-1">
+                        <i class="ph ph-file-doc"></i>
+                        {$_('notes.export_word')}{selectedNoteIds.size > 0 ? ` (${selectedNoteIds.size})` : ''}
+                    </button>
+                {/if}
+            </div>
             <div class="flex-1 overflow-y-auto">
                 {#if filteredNotes.length === 0}
                     <div class="text-center py-8 text-slate-400 text-sm">
@@ -826,13 +907,18 @@
                 {:else}
                     {#each filteredNotes as note (note.id)}
                         <button
-                            on:click={() => selectNote(note)}
+                            on:click={() => selectMode ? toggleNoteSelection(note.id) : selectNote(note)}
                             class="w-full text-left p-3 border-b border-slate-100 hover:bg-slate-50 transition"
-                            class:bg-emerald-50={$activeNote?.id === note.id}
-                            class:border-l-4={$activeNote?.id === note.id}
-                            class:border-l-emerald-500={$activeNote?.id === note.id}
+                            class:bg-emerald-50={$activeNote?.id === note.id || selectedNoteIds.has(note.id)}
+                            class:border-l-4={$activeNote?.id === note.id || selectedNoteIds.has(note.id)}
+                            class:border-l-emerald-500={$activeNote?.id === note.id || selectedNoteIds.has(note.id)}
                         >
                             <div class="flex items-center gap-1 mb-0.5">
+                                {#if selectMode}
+                                    <span class={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${selectedNoteIds.has(note.id) ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>
+                                        <i class="ph-bold ph-check text-[10px]"></i>
+                                    </span>
+                                {/if}
                                 {#if note.aiLocked}
                                     <span class="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-600 rounded font-bold" title={$_('notes.ai_locked')}>
                                         <i class="ph ph-lock-simple"></i>
@@ -940,6 +1026,12 @@
                                             <i
                                                 class="ph ph-file-html text-lg text-orange-500"
                                             ></i> HTML
+                                        </button>
+                                        <button
+                                            on:click={() => handleExport("word")}
+                                            class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                                        >
+                                            <i class="ph ph-file-doc text-lg text-blue-500"></i> Word
                                         </button>
                                         <button
                                             on:click={() => handleExport("pdf")}

@@ -13,10 +13,36 @@ function createModalStore() {
         onCancel: null
     });
 
+    const resetState = {
+        show: false,
+        type: 'confirm',
+        title: '',
+        message: '',
+        confirmText: '确认',
+        cancelText: '取消',
+        variant: 'default',
+        onConfirm: null,
+        onCancel: null
+    };
+
+    // A dialog that is closed or replaced must still settle its promise,
+    // otherwise every `await showConfirm()` / `showAlert()` listener hangs.
+    let pendingResolve = null;
+    let dialogType = 'confirm';
+
+    function settle(value) {
+        const resolve = pendingResolve;
+        pendingResolve = null;
+        if (resolve) resolve(value);
+    }
+
     return {
         subscribe,
         confirm: (options) => {
+            settle(false);
             return new Promise((resolve) => {
+                pendingResolve = resolve;
+                dialogType = 'confirm';
                 set({
                     show: true,
                     type: 'confirm',
@@ -26,18 +52,21 @@ function createModalStore() {
                     cancelText: options.cancelText || '取消',
                     variant: options.variant || 'default',
                     onConfirm: () => {
-                        set({ show: false, type: 'confirm', title: '', message: '', confirmText: '确认', cancelText: '取消', variant: 'default', onConfirm: null, onCancel: null });
-                        resolve(true);
+                        set({ ...resetState });
+                        settle(true);
                     },
                     onCancel: () => {
-                        set({ show: false, type: 'confirm', title: '', message: '', confirmText: '确认', cancelText: '取消', variant: 'default', onConfirm: null, onCancel: null });
-                        resolve(false);
+                        set({ ...resetState });
+                        settle(false);
                     }
                 });
             });
         },
         alert: (options) => {
+            settle(false);
             return new Promise((resolve) => {
+                pendingResolve = resolve;
+                dialogType = 'alert';
                 set({
                     show: true,
                     type: 'alert',
@@ -47,14 +76,16 @@ function createModalStore() {
                     cancelText: '',
                     variant: options.variant || 'default',
                     onConfirm: () => {
-                        set({ show: false, type: 'confirm', title: '', message: '', confirmText: '确认', cancelText: '取消', variant: 'default', onConfirm: null, onCancel: null });
-                        resolve(true);
+                        set({ ...resetState });
+                        settle(true);
                     },
                     onCancel: null
                 });
             });
         },
         close: () => {
+            // Closing an alert means acknowledging it; closing a confirm cancels.
+            settle(dialogType === 'alert');
             update(s => ({ ...s, show: false }));
         }
     };

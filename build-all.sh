@@ -8,8 +8,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-G4F_DEV_REPOSITORY="${G4F_DEV_REPOSITORY:-https://github.com/MakotoArai-CN/g4f.dev.git}"
-G4F_DEV_REF="${G4F_DEV_REF:-194fceb5d75de62feae5acb919f8abd57bb3fa30}"
+G4F_DEV_REPOSITORY="${G4F_DEV_REPOSITORY:-https://github.com/gpt4free/g4f.dev.git}"
+G4F_DEV_REF="${G4F_DEV_REF:-f0f09e3716a0ce108b5d1acdd0f6523a21baab90}"
 G4F_DEV_DIR="${G4F_DEV_DIR:-g4f.dev}"
 
 log_info() {
@@ -37,7 +37,7 @@ check_command() {
 }
 
 has_g4f_assets() {
-    [ -f "$G4F_DEV_DIR/dist/js/providers.json" ] && [ -f "$G4F_DEV_DIR/dist/js/client.js" ]
+    [ -f "$G4F_DEV_DIR/dist/js/providers.json" ] && [ -f "$G4F_DEV_DIR/dist/js/client.js" ] && [ -f "$G4F_DEV_DIR/dist/js/model.js" ]
 }
 
 ensure_g4f_assets() {
@@ -61,7 +61,7 @@ ensure_g4f_assets() {
         git -C "$G4F_DEV_DIR" checkout --force FETCH_HEAD
     elif [ -d "$G4F_DEV_DIR" ]; then
         log_error "$G4F_DEV_DIR 目录存在但不是 Git 仓库，无法自动拉取 G4F 资源"
-        log_error "请删除该目录后重试，或手动补齐 dist/js/providers.json 与 dist/js/client.js"
+        log_error "请删除该目录后重试，或手动补齐 dist/js/providers.json、dist/js/client.js 与 dist/js/model.js"
         return 1
     else
         log_info "克隆固定版本的 g4f.dev 资源"
