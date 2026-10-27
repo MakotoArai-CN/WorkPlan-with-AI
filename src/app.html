@@ -30,5 +30,9 @@
 </head>
 <body data-sveltekit-preload-data="hover">
     <div style="display: contents">%sveltekit.body%</div>
+    <!-- Vditor loads its icon sprite by injecting an inline <script>, which the
+         app CSP (script-src 'self') blocks. Preload it as a normal same-origin
+         script; Vditor then sees this element id and skips the inline injection. -->
+    <script src="%sveltekit.assets%/vendor/vditor/dist/js/icons/material.js" id="vditorIconScript"></script>
 </body>
 </html>

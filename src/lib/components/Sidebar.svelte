@@ -1,23 +1,33 @@
 <script>
     import { currentView, taskStore, enabledScheduledCount, activeTasks } from '../stores/tasks.js';
+    import { settingsStore } from '../stores/settings.js';
     import { showConfirm, showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { exportToJSON, describeSavedLocation } from '../utils/export.js';
+    import { tick } from 'svelte';
 
     const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
 
     let fileInput;
+    let navEl;
+    let pillTop = 0;
+    let pillHeight = 0;
+    let pillReady = false;
     let collapsed = false;
     let lastView = 'dashboard';
 
-    $: if (AUTO_COLLAPSE_VIEWS.has($currentView)) {
-        collapsed = true;
-    } else if (AUTO_COLLAPSE_VIEWS.has(lastView) && lastView !== $currentView) {
-        collapsed = false;
+    // Collapse on full-width editors and restore on the way back. Keep the
+    // previous-view check in the same statement: a separate `$: lastView = ...`
+    // runs first, making `lastView !== $currentView` permanently false.
+    $: {
+        if (AUTO_COLLAPSE_VIEWS.has($currentView)) {
+            collapsed = true;
+        } else if (AUTO_COLLAPSE_VIEWS.has(lastView)) {
+            collapsed = false;
+        }
+        lastView = $currentView;
     }
-
-    $: lastView = $currentView;
 
     $: navItems = [
         {
@@ -56,6 +66,14 @@
             activeText: 'text-indigo-700',
             hoverBg: 'hover:bg-slate-50'
         },
+        ...($settingsStore.enableOvertime ? [{
+            id: 'worklog',
+            label: $_('nav.worklog'),
+            icon: 'ph-clipboard-text',
+            activeBg: 'bg-orange-50',
+            activeText: 'text-orange-700',
+            hoverBg: 'hover:bg-slate-50'
+        }] : []),
         {
             id: 'notes',
             label: $_('nav.notes'),
@@ -92,6 +110,29 @@
 
     function switchView(view) {
         currentView.set(view);
+    }
+
+    function updateNavPill() {
+        if (!navEl || typeof window === 'undefined') return;
+        const active = navEl.querySelector(`[data-nav-id="${$currentView}"]`);
+        if (!active) {
+            pillReady = false;
+            return;
+        }
+        pillTop = active.offsetTop;
+        pillHeight = active.offsetHeight;
+        pillReady = true;
+    }
+
+    $: if (navEl) {
+        $currentView;
+        collapsed;
+        navItems.length;
+        tick().then(updateNavPill);
+    }
+
+    function handleNavResize() {
+        updateNavPill();
     }
 
     function toggleCollapse() {
@@ -181,6 +222,8 @@
     }
 </script>
 
+<svelte:window on:resize={handleNavResize} />
+
 <aside
     class="hidden md:flex bg-white border-r border-slate-200 flex-col z-20 shadow-lg shrink-0 transition-[width,padding] duration-300 ease-out"
     class:w-72={!collapsed}
@@ -246,11 +289,16 @@
         </div>
     </div>
 
-    <nav class="flex-1 px-3 pb-3 space-y-1.5">
+    <nav bind:this={navEl} class="relative flex-1 px-3 pb-3 space-y-1.5">
+        <div
+            class="nav-active-pill pointer-events-none absolute left-3 right-3 rounded-2xl bg-slate-100 shadow-sm transition-all duration-300 ease-out"
+            style={`top:${pillTop}px;height:${pillHeight}px;opacity:${pillReady ? 1 : 0}`}
+        ></div>
         {#each navItems as item}
             <button
                 on:click={() => switchView(item.id)}
-                class={`relative w-full flex items-center rounded-2xl py-3 transition-all duration-300 text-sm font-bold ${collapsed ? 'justify-center px-2' : 'justify-start gap-3 px-3 text-left'} ${$currentView === item.id ? `${item.activeBg} ${item.activeText} shadow-sm` : `text-slate-600 ${item.hoverBg}`}`}
+                data-nav-id={item.id}
+                class={`relative z-10 w-full flex items-center rounded-2xl py-3 transition-colors duration-300 text-sm font-bold ${collapsed ? 'justify-center px-2' : 'justify-start gap-3 px-3 text-left'} ${$currentView === item.id ? item.activeText : `text-slate-600 ${item.hoverBg}`}`}
                 title={item.label}
             >
                 <span class="w-5 flex items-center justify-center shrink-0">
@@ -275,6 +323,7 @@
             </button>
         {/each}
     </nav>
+
 
     <div class="p-3 border-t border-slate-100 bg-slate-50">
         {#if !collapsed}

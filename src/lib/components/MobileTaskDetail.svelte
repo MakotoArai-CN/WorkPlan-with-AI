@@ -3,6 +3,7 @@
     import { showConfirm } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { formatLocalDateTime } from '../utils/datetime.js';
 
     export let openModal;
 
@@ -12,7 +13,7 @@
 
     function isOverdue(t) {
         if (!t || !t.deadline) return false;
-        const now = new Date().toISOString().slice(0, 16);
+        const now = formatLocalDateTime(new Date());
         return t.deadline < now && t.status !== 'done';
     }
 
@@ -22,12 +23,19 @@
 
     function markDone() {
         if (!$activeTask) return;
-        const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-        taskStore.updateTask($activeTask.id, {
-            status: 'done',
-            completedDate: now,
-            subtasks: $activeTask.subtasks?.map(s => ({ ...s, status: 'done' }))
-        });
+        const now = formatLocalDateTime(new Date());
+        if ($currentView === 'templates') {
+            taskStore.updateTemplate($activeTask.id, {
+                status: 'done',
+                subtasks: $activeTask.subtasks?.map(s => ({ ...s, status: 'done' }))
+            });
+        } else if ($currentView !== 'scheduled') {
+            taskStore.updateTask($activeTask.id, {
+                status: 'done',
+                completedDate: now,
+                subtasks: $activeTask.subtasks?.map(s => ({ ...s, status: 'done' }))
+            });
+        }
         activeTask.set(null);
     }
 
@@ -42,14 +50,26 @@
             variant: 'danger'
         });
         if (confirmed) {
-            taskStore.deleteTask($activeTask.id);
+            if ($currentView === 'templates') {
+                taskStore.deleteTemplate($activeTask.id);
+            } else if ($currentView === 'scheduled') {
+                taskStore.deleteScheduledTask($activeTask.id);
+            } else {
+                taskStore.deleteTask($activeTask.id);
+            }
             activeTask.set(null);
         }
     }
 
     function updateNote(e) {
         if (!$activeTask) return;
-        taskStore.updateTask($activeTask.id, { note: e.target.value });
+        if ($currentView === 'templates') {
+            taskStore.updateTemplate($activeTask.id, { note: e.target.value });
+        } else if ($currentView === 'scheduled') {
+            taskStore.updateScheduledTask($activeTask.id, { note: e.target.value });
+        } else {
+            taskStore.updateTask($activeTask.id, { note: e.target.value });
+        }
     }
 </script>
 

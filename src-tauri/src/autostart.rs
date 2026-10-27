@@ -12,6 +12,40 @@ fn get_exe_path() -> Result<String, String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
+/// The Windows Run value is parsed as a command line. An unquoted path with
+/// spaces is split into separate arguments and the app never starts.
+#[cfg(target_os = "windows")]
+fn quote_run_value(path: &str) -> String {
+    format!("\"{}\"", path)
+}
+
+#[cfg(target_os = "windows")]
+fn unquote_run_value(value: &str) -> &str {
+    value.trim().trim_matches('"')
+}
+
+/// Desktop Entry Exec values use shell-like quoting; these characters need a
+/// backslash or the launcher mis-parses the path.
+#[cfg(target_os = "linux")]
+fn quote_exec_arg(path: &str) -> String {
+    let escaped = path
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('`', "\\`")
+        .replace('$', "\\$");
+    format!("\"{}\"", escaped)
+}
+
+#[cfg(target_os = "macos")]
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 #[cfg(target_os = "windows")]
 pub fn set_autostart_registry(enable: bool) -> Result<bool, String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -22,7 +56,7 @@ pub fn set_autostart_registry(enable: bool) -> Result<bool, String> {
 
     if enable {
         let exe_path = get_exe_path()?;
-        key.set_value("WorkPlan-with-AI", &exe_path)
+        key.set_value("WorkPlan-with-AI", &quote_run_value(&exe_path))
             .map_err(|e| format!("无法设置启动项: {}", e))?;
         Ok(true)
     } else {
@@ -48,7 +82,13 @@ pub fn get_autostart_status() -> Result<bool, String> {
         .map_err(|e| format!("无法打开注册表: {}", e))?;
 
     match key.get_value::<String, _>("WorkPlan-with-AI") {
-        Ok(_) => Ok(true),
+        Ok(value) => {
+            // A leftover entry from an older install path is not a working
+            // autostart configuration, so report it as disabled (toggling it on
+            // rewrites the path).
+            let current = get_exe_path()?;
+            Ok(unquote_run_value(&value) == current)
+        }
         Err(_) => Ok(false),
     }
 }
@@ -84,7 +124,7 @@ pub fn set_autostart_registry(enable: bool) -> Result<bool, String> {
              Terminal=false\n\
              StartupNotify=false\n\
              X-GNOME-Autostart-enabled=true\n",
-            exe_path
+            quote_exec_arg(&exe_path)
         );
         std::fs::write(&desktop_file, content)
             .map_err(|e| format!("无法写入 desktop 文件: {}", e))?;
@@ -144,7 +184,7 @@ pub fn set_autostart_registry(enable: bool) -> Result<bool, String> {
     <false/>
 </dict>
 </plist>"#,
-            exe_path
+            xml_escape(&exe_path)
         );
         std::fs::write(&plist_path, content)
             .map_err(|e| format!("无法写入 plist 文件: {}", e))?;

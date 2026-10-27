@@ -11,10 +11,10 @@ use serde::Serialize;
 use std::fs;
 use std::io::Write;
 use std::collections::HashSet;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 use std::path::{Component, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 use tauri_plugin_opener::OpenerExt;
@@ -36,6 +36,60 @@ static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
 /// able to call that command — including a model-generated execution plan — could read
 /// any file on disk. The backend now only reads back what it handed out.
 static PICKED_FILE_GRANTS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// Stable root for relative paths and the default search location. The process
+/// CWD is wrong for this: an autostarted app can inherit `System32` as its CWD,
+/// which would both hide the user's files and widen the workspace allowlist to
+/// a system directory.
+static WORKSPACE_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// Directories the user authorized from Settings. This is backend state on
+/// purpose: the file commands used to accept `trusted_dirs` from the caller, so
+/// anything able to shape those arguments could expand its own read boundary.
+static TRUSTED_DIRECTORIES: Mutex<Option<Vec<PathBuf>>> = Mutex::new(None);
+
+fn set_workspace_root(path: PathBuf) {
+    let _ = WORKSPACE_ROOT.set(path);
+}
+
+fn replace_trusted_directories(directories: Vec<PathBuf>) {
+    if let Ok(mut guard) = TRUSTED_DIRECTORIES.lock() {
+        *guard = Some(directories);
+    }
+}
+
+fn trusted_directories_snapshot() -> Vec<PathBuf> {
+    TRUSTED_DIRECTORIES
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn default_workspace_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let documents = app.path().document_dir().ok();
+    let mut candidates = Vec::new();
+    if let Some(documents) = documents {
+        candidates.push(documents.join("WorkPlan"));
+    }
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        candidates.push(data_dir.join("workspace"));
+    }
+    for candidate in candidates {
+        if fs::create_dir_all(&candidate).is_ok() {
+            return fs::canonicalize(&candidate).map_err(|e| e.to_string());
+        }
+    }
+    Err("无法创建工作目录".to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn default_workspace_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&data_dir).map_err(|e| format!("创建数据目录失败: {}", e))?;
+    fs::canonicalize(&data_dir).map_err(|e| e.to_string())
+}
 
 fn grant_picked_paths<I: IntoIterator<Item = String>>(paths: I) {
     let Ok(mut guard) = PICKED_FILE_GRANTS.lock() else {
@@ -94,6 +148,12 @@ fn sanitize_download_filename(filename: &str) -> Result<String, String> {
         return Err("文件名无效".to_string());
     }
 
+    // Windows device names are not real files: writing to them "succeeds"
+    // without creating anything, so reject them on Windows.
+    if cfg!(windows) && is_windows_reserved_name(basename) {
+        return Err("文件名无效".to_string());
+    }
+
     // Defense in depth: reject anything that still parses as more than one plain segment.
     let as_path = PathBuf::from(basename);
     let mut components = as_path.components();
@@ -105,6 +165,17 @@ fn sanitize_download_filename(filename: &str) -> Result<String, String> {
     }
 
     Ok(only.to_string_lossy().to_string())
+}
+
+fn is_windows_reserved_name(basename: &str) -> bool {
+    let stem = basename.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+    let bytes = stem.as_bytes();
+    bytes.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && bytes[3].is_ascii_digit()
 }
 
 #[derive(Serialize)]
@@ -163,6 +234,10 @@ struct WebSearchEntry {
 }
 
 fn current_workspace_root() -> Result<PathBuf, String> {
+    if let Some(root) = WORKSPACE_ROOT.get() {
+        return Ok(root.clone());
+    }
+    // Tests and early calls before setup fall back to the CWD.
     std::env::current_dir().map_err(|e| e.to_string())
 }
 
@@ -199,15 +274,14 @@ fn normalize_path(path: &str) -> Result<PathBuf, String> {
     normalize_pathbuf(PathBuf::from(path))
 }
 
-fn allowed_local_roots(trusted_dirs: &[String]) -> Result<Vec<PathBuf>, String> {
+fn allowed_local_roots(_caller_supplied: &[String]) -> Result<Vec<PathBuf>, String> {
+    // `_caller_supplied` is intentionally ignored. The allowlist lives in the
+    // backend and is populated by `set_trusted_directories`; accepting the
+    // caller's list here let a crafted tool invocation authorize `C:\`.
     let mut roots = vec![normalize_pathbuf(current_workspace_root()?)?];
-    for dir in trusted_dirs {
-        let dir = dir.trim();
-        if dir.is_empty() || dir.starts_with("content://") {
-            continue;
-        }
-        roots.push(normalize_path(dir)?);
-    }
+    roots.extend(trusted_directories_snapshot());
+    roots.sort();
+    roots.dedup();
     Ok(roots)
 }
 
@@ -247,11 +321,33 @@ fn is_blocked_ip(ip: IpAddr) -> bool {
                 return is_blocked_ip(IpAddr::V4(mapped));
             }
             let segments = addr.segments();
+            // Deprecated IPv4-compatible ::/96 (e.g. ::127.0.0.1), site-local
+            // fec0::/10, and NAT64 64:ff9b::/96 can all reach IPv4 space that
+            // the v4 checks above would reject.
+            let is_v4_compatible = segments[..6].iter().all(|segment| *segment == 0);
+            let is_site_local = (segments[0] & 0xffc0) == 0xfec0;
+            let is_nat64 = segments[0] == 0x0064 && segments[1] == 0xff9b;
+            let is_6to4_private = if segments[0] == 0x2002 {
+                // 2002:AABB:CCDD::/48 embeds AABB:CCDD as the IPv4 address.
+                let embedded = Ipv4Addr::new(
+                    (segments[1] >> 8) as u8,
+                    segments[1] as u8,
+                    (segments[2] >> 8) as u8,
+                    segments[2] as u8,
+                );
+                is_blocked_ip(IpAddr::V4(embedded))
+            } else {
+                false
+            };
             addr.is_loopback()
                 || addr.is_unspecified()
                 || addr.is_multicast()
                 || (segments[0] & 0xfe00) == 0xfc00
                 || (segments[0] & 0xffc0) == 0xfe80
+                || is_v4_compatible
+                || is_site_local
+                || is_nat64
+                || is_6to4_private
         }
     }
 }
@@ -420,26 +516,44 @@ fn get_app_version() -> String {
 }
 
 #[tauri::command]
-fn get_workspace_root(app: tauri::AppHandle) -> Result<String, String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        let data_dir = app.path().app_data_dir()
-            .map_err(|e| e.to_string())?;
-        fs::create_dir_all(&data_dir)
-            .map_err(|e| format!("创建数据目录失败: {}", e))?;
-        Ok(data_dir.to_string_lossy().to_string())
+fn get_workspace_root() -> Result<String, String> {
+    Ok(normalize_pathbuf(current_workspace_root()?)?
+        .to_string_lossy()
+        .to_string())
+}
+
+/// Replace the backend allowlist with the directories the user configured.
+///
+/// The command normalizes and checks each directory once; callers of the file
+/// commands can no longer widen their own read scope by passing `trustedDirs`.
+#[tauri::command]
+fn set_trusted_directories(directories: Vec<String>) -> Result<Vec<String>, String> {
+    let mut accepted: Vec<PathBuf> = Vec::new();
+    for raw in directories {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with("content://") {
+            continue;
+        }
+        let Ok(path) = normalize_path(trimmed) else {
+            continue;
+        };
+        if !path.is_dir() {
+            continue;
+        }
+        if !accepted.iter().any(|existing| existing == &path) {
+            accepted.push(path);
+        }
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let _ = app;
-        Ok(normalize_pathbuf(current_workspace_root()?)?
-            .to_string_lossy()
-            .to_string())
-    }
+    let report = accepted
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect();
+    replace_trusted_directories(accepted);
+    Ok(report)
 }
 
 #[tauri::command]
-fn search_local_files(
+async fn search_local_files(
     root: Option<String>,
     query: String,
     max_results: Option<usize>,
@@ -496,7 +610,7 @@ fn search_local_files(
 }
 
 #[tauri::command]
-fn read_local_file(
+async fn read_local_file(
     path: String,
     max_bytes: Option<usize>,
     trusted_dirs: Option<Vec<String>>,
@@ -523,7 +637,7 @@ fn read_local_file(
 }
 
 #[tauri::command]
-fn write_local_file(
+async fn write_local_file(
     path: String,
     content: String,
     trusted_dirs: Vec<String>,
@@ -545,7 +659,7 @@ fn write_local_file(
 }
 
 #[tauri::command]
-fn delete_local_file(
+async fn delete_local_file(
     path: String,
     trusted_dirs: Vec<String>,
 ) -> Result<LocalFileMutationResult, String> {
@@ -654,47 +768,56 @@ async fn fetch_web_content(url: String, max_chars: Option<usize>) -> Result<Stri
     if url.is_empty() {
         return Err("URL 不能为空".to_string());
     }
-    let (url, resolved) = validate_public_http_url_resolved(&url)?;
+    let mut current_url = validate_public_http_url(&url)?;
 
     let limit = max_chars.unwrap_or(4000).clamp(200, 12000);
-    let mut builder = reqwest::Client::builder()
-        .user_agent(concat!(
-            "Mozilla/5.0 (compatible; WorkPlan/",
-            env!("CARGO_PKG_VERSION"),
-            "; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)"
-        ))
-        .timeout(std::time::Duration::from_secs(10));
+    // Follow redirects manually so every hop is re-validated and its DNS answer
+    // is pinned. reqwest's redirect policy only validates the URL; the client
+    // would re-resolve a new host at connect time (DNS rebinding TOCTOU).
+    let mut response = None;
+    for _ in 0..=5 {
+        let (safe_url, resolved) = validate_public_http_url_resolved(current_url.as_str())?;
+        let mut builder = reqwest::Client::builder()
+            .user_agent(concat!(
+                "Mozilla/5.0 (compatible; WorkPlan/",
+                env!("CARGO_PKG_VERSION"),
+                "; +https://github.com/MakotoArai-CN/WorkPlan-with-AI)"
+            ))
+            .timeout(std::time::Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none());
 
-    // Pin the host to the addresses we just validated, closing the DNS-rebinding
-    // window between validation and the client's own lookup.
-    if let Some(host) = url.host_str() {
-        if host.parse::<IpAddr>().is_err() && !resolved.is_empty() {
-            builder = builder.resolve_to_addrs(host, &resolved);
+        if let Some(host) = safe_url.host_str() {
+            if host.parse::<IpAddr>().is_err() && !resolved.is_empty() {
+                builder = builder.resolve_to_addrs(host, &resolved);
+            }
         }
+
+        let client = builder.build().map_err(|e| e.to_string())?;
+        let hop = client
+            .get(safe_url.clone())
+            .send()
+            .await
+            .map_err(|e| format!("请求失败: {}", e))?;
+
+        if hop.status().is_redirection() {
+            let location = hop
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            if let Some(location) = location {
+                current_url = safe_url
+                    .join(&location)
+                    .map_err(|e| format!("重定向地址无效: {}", e))?;
+                continue;
+            }
+        }
+
+        response = Some(hop);
+        break;
     }
 
-    let client = builder
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= 5 {
-                return attempt.error(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "重定向次数过多",
-                ));
-            }
-            if let Err(error) = validate_public_http_url(attempt.url().as_str()) {
-                return attempt.error(std::io::Error::new(std::io::ErrorKind::Other, error));
-            }
-            attempt.follow()
-        }))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("请求失败: {}", e))?;
-
+    let response = response.ok_or_else(|| "重定向次数过多".to_string())?;
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
     }
@@ -787,8 +910,9 @@ async fn fetch_web_content(url: String, max_chars: Option<usize>) -> Result<Stri
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Truncate
-    if result.len() > limit {
+    // Truncate. The limit is a character budget (CJK text would otherwise get
+    // up to ~4x the requested bytes because `len()` counts UTF-8 bytes).
+    if result.chars().count() > limit {
         let truncated: String = result.chars().take(limit).collect();
         result = format!("{}...[已截断]", truncated);
     }
@@ -993,7 +1117,7 @@ async fn pick_files_for_read(
 }
 
 #[tauri::command]
-fn read_selected_text_files(
+async fn read_selected_text_files(
     app: tauri::AppHandle,
     paths: Vec<String>,
     max_bytes: Option<usize>,
@@ -1084,7 +1208,7 @@ fn mime_from_extension(path: &str) -> String {
 }
 
 #[tauri::command]
-fn read_binary_files(
+async fn read_binary_files(
     app: tauri::AppHandle,
     paths: Vec<String>,
     max_bytes: Option<usize>,
@@ -1231,6 +1355,25 @@ mod tests {
         assert!(sanitize_download_filename("..").is_err());
         assert!(sanitize_download_filename("/").is_err());
         assert!(sanitize_download_filename("evil\0.txt").is_err());
+        if cfg!(windows) {
+            // Device names open the null device and report a successful save
+            // without creating a file.
+            assert!(sanitize_download_filename("NUL").is_err());
+            assert!(sanitize_download_filename("con.txt").is_err());
+            assert!(sanitize_download_filename("COM1.log").is_err());
+            assert!(sanitize_download_filename("LPT9").is_err());
+            assert!(sanitize_download_filename("console.txt").is_ok());
+        }
+    }
+
+    #[test]
+    fn caller_supplied_trusted_dirs_do_not_expand_the_allowlist() {
+        let caller_dir = std::env::temp_dir();
+        let roots = allowed_local_roots(&[caller_dir.to_string_lossy().to_string()]).unwrap();
+        let normalized_caller = normalize_pathbuf(caller_dir).unwrap();
+        assert!(!roots.iter().any(|root| root == &normalized_caller));
+        let workspace = normalize_pathbuf(current_workspace_root().unwrap()).unwrap();
+        assert!(roots.iter().any(|root| root == &workspace));
     }
 
     #[test]
@@ -1276,6 +1419,11 @@ mod tests {
             "169.254.169.254", // cloud metadata endpoint
             "0.0.0.0",
             "100.64.0.1",
+            "::ffff:127.0.0.1",
+            "::7f00:1",      // IPv4-compatible loopback
+            "2002:7f00:1::", // 6to4 embedding 127.0.0.1
+            "fec0::1",       // deprecated site-local
+            "64:ff9b::7f00:1", // NAT64 embedding 127.0.0.1
         ] {
             assert!(
                 is_blocked_ip(addr.parse().unwrap()),
@@ -1312,6 +1460,7 @@ pub fn run() {
             get_autostart_status,
             get_app_version,
             get_workspace_root,
+            set_trusted_directories,
             search_local_files,
             read_local_file,
             write_local_file,
@@ -1336,6 +1485,9 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
+            if let Ok(root) = default_workspace_root(app.handle()) {
+                set_workspace_root(root);
+            }
             let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
             let notification =
@@ -1437,6 +1589,9 @@ pub fn run() {
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let builder = builder.setup(|app| {
+        if let Ok(root) = default_workspace_root(app.handle()) {
+            set_workspace_root(root);
+        }
         app.handle()
             .plugin(tauri_plugin_mobile_onbackpressed_listener::init())?;
         // Android-only: the plugin has no desktop implementation, so it is registered

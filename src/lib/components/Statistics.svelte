@@ -1,18 +1,20 @@
 <script>
     import { taskStore, activeTask } from '../stores/tasks.js';
     import { settingsStore } from '../stores/settings.js';
-    import { aiConfig, configureAiPanel, generateReport, showAiPanel } from '../stores/ai.js';
-    import { showAlert } from '../stores/modal.js';
+    import { aiConfig, configureAiPanel, generateReport, showAiPanel, providerRequiresApiKey } from '../stores/ai.js';
+    import { showAlert, showToast } from '../stores/modal.js';
     import { get } from 'svelte/store';
     import { _ } from 'svelte-i18n';
     import MarkdownRenderer from './MarkdownRenderer.svelte';
     import GanttChart from './GanttChart.svelte';
     import Charts from './Charts.svelte';
+    import { copyText } from '../utils/clipboard.js';
+    import { addLocalDays, formatLocalDate, formatLocalDateTime, parseLocalDate } from '../utils/datetime.js';
 
     export let openDetailPanel = null;
 
-    let statsStart = new Date().toISOString().split('T')[0];
-    let statsEnd = new Date().toISOString().split('T')[0];
+    let statsStart = formatLocalDate(new Date());
+    let statsEnd = statsStart;
     let statsStatus = 'all';
     let statsRangeType = 'week';
     let generatingReport = false;
@@ -50,31 +52,28 @@
 
     function setStatsRange(type) {
         statsRangeType = type;
-        const d = new Date();
-        const y = d.getFullYear();
-        const m = d.getMonth();
-        const day = d.getDay() || 7;
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        const weekday = now.getDay() || 7;
         if (type === 'today') {
-            statsStart = statsEnd = new Date().toISOString().split('T')[0];
+            statsStart = statsEnd = formatLocalDate(now);
         } else if (type === 'yesterday') {
-            d.setDate(d.getDate() - 1);
-            statsStart = statsEnd = d.toISOString().split('T')[0];
+            statsStart = statsEnd = formatLocalDate(addLocalDays(now, -1));
         } else if (type === 'week') {
-            d.setDate(d.getDate() - day + 1);
-            statsStart = d.toISOString().split('T')[0];
-            d.setDate(d.getDate() + 6);
-            statsEnd = d.toISOString().split('T')[0];
+            const monday = addLocalDays(now, -(weekday - 1));
+            statsStart = formatLocalDate(monday);
+            statsEnd = formatLocalDate(addLocalDays(monday, 6));
         } else if (type === 'lastWeek') {
-            d.setDate(d.getDate() - day - 6);
-            statsStart = d.toISOString().split('T')[0];
-            d.setDate(d.getDate() + 6);
-            statsEnd = d.toISOString().split('T')[0];
+            const lastMonday = addLocalDays(now, -weekday - 6);
+            statsStart = formatLocalDate(lastMonday);
+            statsEnd = formatLocalDate(addLocalDays(lastMonday, 6));
         } else if (type === 'month') {
-            statsStart = new Date(y, m, 1, 12).toISOString().split('T')[0];
-            statsEnd = new Date(y, m + 1, 0, 12).toISOString().split('T')[0];
+            statsStart = formatLocalDate(new Date(y, m, 1));
+            statsEnd = formatLocalDate(new Date(y, m + 1, 0));
         } else if (type === 'lastMonth') {
-            statsStart = new Date(y, m - 1, 1, 12).toISOString().split('T')[0];
-            statsEnd = new Date(y, m, 0, 12).toISOString().split('T')[0];
+            statsStart = formatLocalDate(new Date(y, m - 1, 1));
+            statsEnd = formatLocalDate(new Date(y, m, 0));
         }
     }
 
@@ -84,7 +83,7 @@
 
     function isOverdue(t) {
         if (!t.deadline) return false;
-        const now = new Date().toISOString().slice(0, 16);
+        const now = formatLocalDateTime(new Date());
         return t.deadline < now && t.status !== 'done';
     }
 
@@ -140,7 +139,7 @@
             return;
         }
         const config = get(aiConfig);
-        if (!config.apiKey && config.provider !== 'ollama' && config.provider !== 'lmstudio') {
+        if (providerRequiresApiKey(config.provider) && !config.apiKey) {
             await showAlert({ title: t('statistics_page.no_ai_title'), message: t('statistics_page.no_ai_msg'), variant: 'warning' });
             return;
         }
@@ -162,11 +161,14 @@
         reportContent = '';
     }
 
-    function copyReport() {
+    async function copyReport() {
+        if (!reportContent) return;
         const t = get(_);
-        if (navigator.clipboard && reportContent) {
-            navigator.clipboard.writeText(reportContent);
-            showAlert({ title: t('statistics_page.copy_ok'), message: t('statistics_page.copy_msg'), variant: 'success' });
+        const ok = await copyText(reportContent);
+        if (ok) {
+            showToast({ message: t('statistics_page.copy_msg'), type: 'success' });
+        } else {
+            showToast({ message: t('common.copy_failed'), type: 'error' });
         }
     }
 

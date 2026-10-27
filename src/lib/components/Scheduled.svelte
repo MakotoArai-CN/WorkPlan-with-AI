@@ -2,6 +2,7 @@
     import { taskStore, activeTask } from '../stores/tasks.js';
     import { configureAiPanel, showAiPanel } from '../stores/ai.js';
     import { showConfirm } from '../stores/modal.js';
+    import { normalizeRepeatDays } from '../utils/schedule.js';
     import { get } from 'svelte/store';
     import { _ } from 'svelte-i18n';
 
@@ -60,15 +61,15 @@
     }
 
     function formatRepeatDays(days, t) {
-        if (!days || !days.length) return ['-'];
+        const normalized = normalizeRepeatDays(days);
+        if (!normalized.length) return ['-'];
         const map = {
             1: t('weekdays.mon'), 2: t('weekdays.tue'), 3: t('weekdays.wed'),
             4: t('weekdays.thu'), 5: t('weekdays.fri'), 6: t('weekdays.sat'), 0: t('weekdays.sun')
         };
         const prefix = t('weekdays.prefix');
-        return days
-            .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b))
-            .map(x => prefix + map[x]);
+        // normalizeRepeatDays returns a sorted copy; never sort the store array.
+        return normalized.map(x => prefix + map[x]);
     }
 
     function handleTaskKeydown(event, task) {

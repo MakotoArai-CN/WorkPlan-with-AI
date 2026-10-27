@@ -46,6 +46,7 @@
     let settingsPanelWasOpen = false;
     let settingsInitializing = false;
     let settingsInitRequestId = 0;
+    let configSnapshot = null;
     let modelLoadRequestId = 0;
     let modelsLoadedForKey = "";
     let isAndroid = false;
@@ -128,6 +129,9 @@
 
     async function initializeSettingsPanel() {
         const initRequestId = ++settingsInitRequestId;
+        // Cancel/backdrop must restore the settings as they were when the panel
+        // opened; every input binds straight into the store.
+        configSnapshot = JSON.parse(JSON.stringify(get(aiConfig)));
         const isCurrentInit = () => initRequestId === settingsInitRequestId && $showAiSettings;
         settingsInitializing = true;
         try {
@@ -233,7 +237,10 @@
     }
 
     function handleClose() {
-        saveAiConfig();
+        // Discard unsaved edits (Cancel / X / backdrop), don't persist them.
+        if (configSnapshot) {
+            aiConfig.set(JSON.parse(JSON.stringify(configSnapshot)));
+        }
         showAiSettings.set(false);
     }
 
@@ -398,7 +405,6 @@
         "ollama",
         "lmstudio",
         "custom",
-        ...(!isWebDemo && ($connectorConfig.enabled || $aiConfig.provider === "webhook") ? ["webhook"] : []),
     ];
 </script>
 

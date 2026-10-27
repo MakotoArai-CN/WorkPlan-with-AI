@@ -23,6 +23,19 @@
     "notification:allow-create-channel",
     "notification:allow-list-channels",
     "opener:default",
-    "store:default"
+    "store:default",
+    "http:default",
+    "http:allow-fetch",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        }
+      ]
+    }
   ]
 }

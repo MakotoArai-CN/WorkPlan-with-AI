@@ -20,6 +20,7 @@
     import Templates from '$lib/components/Templates.svelte';
     import Scheduled from '$lib/components/Scheduled.svelte';
     import Statistics from '$lib/components/Statistics.svelte';
+    import Worklog from '$lib/components/Worklog.svelte';
     import Settings from '$lib/components/Settings.svelte';
     import AiChat from '$lib/components/AiChat.svelte';
     import Notes from '$lib/components/Notes.svelte';
@@ -34,7 +35,7 @@
 
     const DESKTOP_DETAIL_VIEWS = new Set(['dashboard', 'templates', 'scheduled', 'statistics', 'notes']);
     const MOBILE_ROOT_VIEWS = new Set(['dashboard', 'templates', 'scheduled', 'notes', 'more']);
-    const MOBILE_SECONDARY_VIEWS = new Set(['aichat', 'passwords', 'settings', 'statistics']);
+    const MOBILE_SECONDARY_VIEWS = new Set(['aichat', 'passwords', 'settings', 'statistics', 'worklog']);
 
     let showModal = false;
     let editTask = null;
@@ -52,6 +53,10 @@
         !androidPermissionPromptShown
     ) {
         promptAndroidStartupPermissions();
+    }
+
+    $: if ($currentView === 'worklog' && !$settingsStore.enableOvertime) {
+        currentView.set('dashboard');
     }
 
     onMount(() => {
@@ -294,6 +299,8 @@
                 <Scheduled {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'statistics'}
                 <Statistics openDetailPanel={openDesktopDetailPanel} />
+            {:else if $currentView === 'worklog'}
+                <Worklog />
             {:else if $currentView === 'notes'}
                 <Notes openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'passwords'}

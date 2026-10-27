@@ -1,5 +1,5 @@
 import { writable, get, derived } from 'svelte/store';
-import { isG4FProvider } from '../utils/g4f-client.js';
+import { isG4FProvider, normalizeG4FProviderId } from '../utils/g4f-client.js';
 import {
     looksLikeFileIntent,
     searchLocalFiles,
@@ -22,17 +22,21 @@ import {
     searchWeb,
     fetchWebContent
 } from '../utils/web-search.js';
+import {
+    isExplicitWebSearchRequest,
+    mentionsUrlOrDomain,
+    shouldSkipWebSearchForTaskText
+} from '../utils/intent-heuristics.js';
 import { settingsStore } from './settings.js';
-import { connectorConfig } from './connector.js';
 import { notesStore } from './notes.js';
-import { getConnectorBaseUrl, resolveConnectorTransport, getConnectorHttpChatEndpoint } from '../utils/connector-client.js';
 import { TASK_STATUSES, TASK_PRIORITIES, resolveStatus, resolvePriority, normalizeStatus, normalizePriority } from '../utils/task-vocabulary.js';
+import { formatLocalDateTime } from '../utils/datetime.js';
 
 const STORAGE_KEY = 'planpro_ai_config';
 const AI_CHAT_HISTORY_KEY = 'planpro_ai_chat_history';
 const AI_CHAT_SESSIONS_KEY = 'planpro_ai_chat_sessions';
 const PROVIDER_CONFIG_FIELDS = ['apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
-const OPTIONAL_API_KEY_PROVIDERS = new Set(['ollama', 'lmstudio', 'custom', 'webhook']);
+const OPTIONAL_API_KEY_PROVIDERS = new Set(['ollama', 'lmstudio', 'custom']);
 const USER_CHAT_AVATARS = [
     '/avatars/user-orbit-1.svg',
     '/avatars/user-orbit-2.svg',
@@ -136,42 +140,9 @@ function providerNeedsApiKey(providerId) {
     return !isG4FProvider(providerId) && !OPTIONAL_API_KEY_PROVIDERS.has(providerId);
 }
 
-function applyConnectorRuntimeConfig(config) {
-    if (config.provider !== 'webhook') return config;
-    const cfg = get(connectorConfig);
-    if (!cfg.enabled) {
-        return {
-            ...config,
-            apiKey: config.apiKey || '',
-            customEndpoint: ''
-        };
-    }
-    const transport = resolveConnectorTransport(cfg);
-    const base = {
-        ...config,
-        apiKey: cfg.apiKey || config.apiKey || '',
-        connectorTransport: transport,
-        connectorPreset: cfg.preset || 'nanobot',
-        sessionKey: cfg.sessionKey || '',
-        clientId: cfg.clientId || '',
-        connectorTimeoutMs: cfg.timeoutMs || 180000,
-        timeoutMs: cfg.timeoutMs || 180000,
-        baseUrl: cfg.baseUrl || '',
-        customHeaders: { ...(config.customHeaders || {}), ...(cfg.headers || {}) }
-    };
-    if (transport === 'http') {
-        const httpEndpoint = getConnectorHttpChatEndpoint(cfg);
-        return {
-            ...base,
-            customEndpoint: httpEndpoint || config.customEndpoint || ''
-        };
-    }
-    const wsBaseUrl = getConnectorBaseUrl(cfg);
-    return {
-        ...base,
-        customEndpoint: wsBaseUrl || config.customEndpoint || '',
-        connectorBaseUrl: wsBaseUrl || config.customEndpoint || ''
-    };
+/** Public wrapper so components do not reimplement the provider matrix. */
+export function providerRequiresApiKey(providerId) {
+    return providerNeedsApiKey(providerId);
 }
 
 export const aiConfig = writable(getDefaultAiConfigState());
@@ -221,11 +192,9 @@ function resetAiChatRuntimeCapabilities() {
     aiChatRuntimeCapabilities.set(getDefaultAiChatRuntimeCapabilities());
 }
 export const aiChatCapabilities = derived(
-    [settingsStore, aiConfig, aiChatRuntimeCapabilities, connectorConfig],
-    ([$settings, $config, $runtime, $connectorConfig]) => {
+    [settingsStore, aiConfig, aiChatRuntimeCapabilities],
+    ([$settings, $config, $runtime]) => {
         const needsApiKey = providerNeedsApiKey($config.provider);
-        const connectorReady = $config.provider !== 'webhook' ||
-            ($connectorConfig.enabled && Boolean($connectorConfig.baseUrl));
         const toolRouterEnabled = $settings.enableAiChatTools ?? true;
         const localFileEnabled = $settings.localFileConfig?.enabled ?? false;
 
@@ -245,7 +214,7 @@ export const aiChatCapabilities = derived(
 
         return {
             mode: toolRouterEnabled ? 'internal_router' : 'chat_only',
-            connectionReady: connectorReady && (!needsApiKey || Boolean($config.apiKey)),
+            connectionReady: !needsApiKey || Boolean($config.apiKey),
             toolRouterEnabled,
             projectToolsAvailable: toolRouterEnabled && toolCallAvailable,
             nativeToolCallAvailable: toolRouterEnabled && nativeToolCallAvailable === true,
@@ -502,16 +471,33 @@ function normalizeConnectionProfile(profile, index = 0) {
         ...(profile || {})
     };
 
-    // 兼容旧存档：OpenClaw provider 已移除，把 localStorage 里残留的 'openclaw'
-    // 及其缓存的 providerConfigs 迁移到通用 webhook 连接器。仅为升级旧配置而存在。
-    if (normalized.provider === 'openclaw') {
-        normalized.provider = 'webhook';
+    // 兼容旧存档：OpenClaw/Webhook provider 已移除，把 localStorage 里残留的
+    // 配置迁移到普通 OpenAI 兼容自定义接口。
+    if (normalized.provider === 'openclaw' || normalized.provider === 'webhook') {
+        // Webhook/WebSocket support was removed; keep old setups usable as a
+        // plain OpenAI-compatible custom endpoint.
+        normalized.provider = 'custom';
     }
-    if (normalized.providerConfigs?.openclaw && !normalized.providerConfigs.webhook) {
+    if (normalized.providerConfigs?.openclaw && !normalized.providerConfigs.custom) {
         normalized.providerConfigs = {
             ...normalized.providerConfigs,
-            webhook: normalized.providerConfigs.openclaw
+            custom: normalized.providerConfigs.openclaw
         };
+    }
+
+    // G4F 升级后部分 provider id 改名（如 g4f-api.airforce → g4f-airforce），
+    // 兼容旧存档里保存的连接与各自缓存的配置。
+    const migratedProvider = normalizeG4FProviderId(normalized.provider);
+    if (migratedProvider !== normalized.provider) {
+        const previousProvider = normalized.provider;
+        const previousConfig = normalized.providerConfigs?.[previousProvider];
+        normalized.provider = migratedProvider;
+        if (previousConfig && !normalized.providerConfigs?.[migratedProvider]) {
+            normalized.providerConfigs = {
+                ...normalized.providerConfigs,
+                [migratedProvider]: previousConfig
+            };
+        }
     }
 
     normalized.id = normalized.id || createId('profile');
@@ -846,7 +832,6 @@ export function saveAiConfig() {
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
     setAiConfigIfChanged(nextState);
-    saveApiKeyToPasswords(nextState.provider, nextState, nextState.activeProfileName);
 }
 
 export function addConnectionProfile(name = '') {
@@ -905,69 +890,6 @@ export function deleteConnectionProfile(profileId) {
     });
 }
 
-async function saveApiKeyToPasswords(providerId, config, profileName = '') {
-    if (typeof window === 'undefined') return;
-
-    const settingsStr = localStorage.getItem('planpro_system_settings');
-    if (!settingsStr) return;
-
-    try {
-        const settings = JSON.parse(settingsStr);
-        if (!settings.autoSaveApiKey) return;
-    } catch {
-        return;
-    }
-
-    const apiKey = config.apiKey;
-    if (!apiKey || !apiKey.trim()) return;
-
-    try {
-        const { passwordsStore, isPasswordsUnlocked } = await import('./passwords.js');
-        const { get: storeGet } = await import('svelte/store');
-
-        const unlocked = storeGet(isPasswordsUnlocked);
-        if (!unlocked) return;
-
-        const { getProviderInfo } = await import('../utils/ai-providers.js');
-        const providerInfo = getProviderInfo(providerId);
-        const providerName = providerInfo?.name || providerId;
-        const cleanProfile = String(profileName || '').trim();
-        const title = cleanProfile && cleanProfile !== '默认连接'
-            ? `${providerName} · ${cleanProfile} API Key`
-            : `${providerName} API Key`;
-        const endpointSuffix = config.customEndpoint ? ` (${config.customEndpoint})` : '';
-        const username = `${providerId}${endpointSuffix}`;
-
-        const existingPasswords = storeGet(passwordsStore).passwords;
-        const existingEntry = existingPasswords.find(p =>
-            p.category === 'API密钥' &&
-            p.title === title &&
-            p.username === username
-        );
-
-        if (existingEntry) {
-            const decrypted = passwordsStore.decryptPassword(existingEntry.password);
-            if (decrypted !== apiKey) {
-                passwordsStore.updatePassword(existingEntry.id, {
-                    password: apiKey,
-                    notes: `由 AI 设置自动同步\n更新时间: ${new Date().toLocaleString()}`
-                });
-            }
-        } else {
-            passwordsStore.addPassword({
-                title,
-                username,
-                password: apiKey,
-                url: config.customEndpoint || providerInfo?.apiUrl || '',
-                category: 'API密钥',
-                notes: `由 AI 设置自动同步\n连接：${cleanProfile || '默认'}\n创建时间: ${new Date().toLocaleString()}`
-            });
-        }
-    } catch (e) {
-        console.warn('Failed to save API key to passwords:', e);
-    }
-}
-
 function syncAiChatSessionHistory(history = null) {
     const currentHistory = Array.isArray(history) ? history : get(aiChatHistory);
     const trimmedHistory = currentHistory.slice(-100);
@@ -1004,16 +926,62 @@ function syncAiChatSessionHistory(history = null) {
     return updatedSessions;
 }
 
+/**
+ * Media attachments are kept in memory for the live request, but persisting
+ * their base64 payloads exhausts the ~5 MB localStorage quota (and makes the
+ * next send fail while saving history). Strip them on the way to disk.
+ */
+function stripMediaForStorage(message) {
+    if (!message || typeof message !== 'object') return message;
+    const copy = { ...message };
+    if (Array.isArray(copy.attachments)) {
+        copy.attachments = copy.attachments.map((attachment) => {
+            if (!attachment || typeof attachment !== 'object') return attachment;
+            const { base64Data, thumbnailUrl, ...rest } = attachment;
+            return rest;
+        });
+    }
+    if (typeof copy.base64Data === 'string' && copy.base64Data) {
+        delete copy.base64Data;
+        copy.mediaUnavailable = true;
+    }
+    if (typeof copy.thumbnailUrl === 'string' && copy.thumbnailUrl) {
+        delete copy.thumbnailUrl;
+    }
+    return copy;
+}
+
+function persistAiChatHistory(history, sessions, activeSessionId, { maxMessages = 100, maxSessions = 30 } = {}) {
+    const safeHistory = history.slice(-maxMessages).map(stripMediaForStorage);
+    const safeSessions = sessions.slice(0, maxSessions).map(session => ({
+        ...session,
+        history: Array.isArray(session.history)
+            ? session.history.slice(-maxMessages).map(stripMediaForStorage)
+            : []
+    }));
+    localStorage.setItem(AI_CHAT_HISTORY_KEY, JSON.stringify(safeHistory));
+    localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify({
+        activeSessionId,
+        sessions: safeSessions
+    }));
+}
+
 export function saveAiChatHistory() {
     if (typeof window === 'undefined') return;
     const history = get(aiChatHistory);
     const sessions = syncAiChatSessionHistory(history);
     const activeSessionId = get(activeAiChatSessionId);
-    localStorage.setItem(AI_CHAT_HISTORY_KEY, JSON.stringify(history.slice(-100)));
-    localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify({
-        activeSessionId,
-        sessions
-    }));
+    try {
+        persistAiChatHistory(history, sessions, activeSessionId);
+    } catch (error) {
+        console.warn('Failed to persist AI chat history, retrying with a smaller window:', error);
+        try {
+            persistAiChatHistory(history, sessions, activeSessionId, { maxMessages: 20, maxSessions: 10 });
+        } catch (retryError) {
+            // Never let a storage quota failure break the chat request itself.
+            console.warn('AI chat history could not be persisted:', retryError);
+        }
+    }
 }
 
 export async function attachFilesToAiChatComposer() {
@@ -1252,7 +1220,7 @@ export function getModelsForProvider(providerId) {
 export function getEffectiveConfig() {
     const config = get(aiConfig);
     const isCustom = config.provider === 'custom';
-    return applyConnectorRuntimeConfig({
+    return {
         provider: config.provider,
         apiKey: config.apiKey,
         secretKey: config.secretKey,
@@ -1265,7 +1233,7 @@ export function getEffectiveConfig() {
         customHeaders: config.customHeaders,
         dailyReportPrompt: config.dailyReportPrompt,
         weeklyReportPrompt: config.weeklyReportPrompt
-    });
+    };
 }
 
 function getFormattedDateTime() {
@@ -2851,6 +2819,9 @@ function formatWebSearchResult(entries = []) {
 }
 
 async function analyzeWebSearchIntent(userText, config, callAI, intentHint = null) {
+    if (shouldSkipWebSearchForTaskText(userText)) {
+        return null;
+    }
     if (!looksLikeWebSearchIntent(userText) && intentHint !== 'web_search') {
         return null;
     }
@@ -2879,14 +2850,27 @@ async function analyzeWebSearchIntent(userText, config, callAI, intentHint = nul
 
     try {
         const aiResponse = await callAI(config, userText, systemPrompt);
-        if (!aiResponse) return fallbackPlan;
+        if (!aiResponse) {
+            return isExplicitWebSearchRequest(userText) ? fallbackPlan : null;
+        }
         const parsed = extractJsonPayload(aiResponse);
-        if (parsed.mode !== 'web' || !parsed.query) {
-            return fallbackPlan;
+        const mode = String(parsed?.mode || '').toLowerCase();
+        // The router explicitly said "no search needed" — never turn that into
+        // a fallback web search, or task prompts that merely mention a searchy
+        // word ("生成今日任务", "看一下我的任务") end up as web results.
+        if (mode === 'reply') {
+            return null;
+        }
+        if (mode !== 'web' && !parsed?.query) {
+            return null;
+        }
+        if (!parsed?.query && !fallbackPlan) {
+            return null;
         }
         return {
             ...fallbackPlan,
             ...parsed,
+            mode: 'web',
             url: parsed.url || fallbackPlan?.url || '',
             query: parsed.query || fallbackPlan?.query || userText,
             response_goal: parsed.response_goal || fallbackPlan?.response_goal,
@@ -2894,7 +2878,7 @@ async function analyzeWebSearchIntent(userText, config, callAI, intentHint = nul
         };
     } catch (error) {
         console.error('Failed to parse web search intent:', error);
-        return fallbackPlan;
+        return isExplicitWebSearchRequest(userText) ? fallbackPlan : null;
     }
 }
 
@@ -3284,6 +3268,57 @@ function buildNativeToolDefinitions(allowLocalFiles = true) {
         {
             type: 'function',
             function: {
+                name: 'workplan_worklog_action',
+                description: '查询、新增、修改或删除 WorkPlan 的加班/请假记录。任何新增/修改/删除都会由应用弹出确认，用户拒绝时不会执行。',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['list', 'create_overtime', 'create_leave', 'update', 'delete']
+                        },
+                        kind: { type: 'string', enum: ['overtime', 'leave'] },
+                        id: { type: 'string', description: 'update/delete 的目标记录 ID。' },
+                        date: { type: 'string', description: '加班日期 YYYY-MM-DD。' },
+                        start: { type: 'string', description: '加班开始时间 HH:mm。' },
+                        end: { type: 'string', description: '加班结束时间 HH:mm。' },
+                        type: { type: 'string', enum: ['weekday', 'weekend', 'holiday'], description: '加班类型。' },
+                        compensation: { type: 'string', enum: ['pay', 'time_off', 'none'], description: '补偿方式。' },
+                        start_date: { type: 'string', description: '请假开始日期 YYYY-MM-DD。' },
+                        end_date: { type: 'string', description: '请假结束日期 YYYY-MM-DD。' },
+                        unit: { type: 'string', enum: ['day', 'hour'], description: '请假单位。' },
+                        duration: { type: 'number', description: '请假时长；不填时按日期自动计算。' },
+                        leave_type: { type: 'string', enum: ['annual', 'sick', 'personal', 'compensatory', 'maternity', 'marriage', 'bereavement', 'other'] },
+                        paid: { type: 'boolean', description: '请假是否带薪。' },
+                        note: { type: 'string' },
+                        limit: { type: 'integer', minimum: 1, maximum: 100, description: 'list 返回的最大条数。' }
+                    },
+                    required: ['action']
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'workplan_notes_action',
+                description: '查询、新建、修改或删除工作笔记。锁定笔记不会提供给 AI；新建/修改/删除都会由应用弹出确认。',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        action: { type: 'string', enum: ['list', 'create', 'update', 'delete'] },
+                        id: { type: 'string', description: 'update/delete 的目标笔记 ID。' },
+                        title: { type: 'string' },
+                        content: { type: 'string', description: 'Markdown 内容。' },
+                        category: { type: 'string' },
+                        limit: { type: 'integer', minimum: 1, maximum: 50 }
+                    },
+                    required: ['action']
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
                 name: 'workplan_web_search',
                 description: '搜索网页或访问用户给出的 URL，用于实时信息、官网资料、在线搜索和网页内容总结。',
                 parameters: {
@@ -3379,6 +3414,11 @@ function buildNativeToolMessages(userText, assistantContext = {}, intentHint = n
 7. 普通任务的可操作数据已按时间范围过滤；用户未明确提到过去/历史时，不要操作未列出的历史任务。
 8. 用户描述要做/已做的工作内容（即使含"修改/删除/完成"等动词），若对象不在上面列出的任务中，应使用 operation=create 新建任务记录该工作，而非 update/delete 已有任务。
 9. 描述"已经完成的工作"（如"补充已完成的任务""昨天完成了X"）时，operation=create 且 status=done。
+10. 用户要求生成、创建、规划、整理任务/待办/模板/定时任务时，即使话里出现"今日""最新""查一下"等词，也必须调用 workplan_project_action，不要调用 workplan_web_search；只有明确要求联网查资料、访问网址或查询实时外部信息时才用网页搜索。
+11. 用户要求记录/修改/删除加班或请假时，调用 workplan_worklog_action；要求查询/新建/修改/删除工作笔记时，调用 workplan_notes_action。
+12. worklog/notes 的新增、修改、删除会弹出应用确认。确认结果返回前不要声称操作已完成；用户拒绝时如实说明已取消。
+13. 不要读取或操作锁定笔记；锁定笔记不会出现在上下文中。标记为 AI 不可访问的加班/请假记录同样不可读取或修改。
+14. 密码库数据完全不可访问：不要尝试读取、导出或修改任何密码条目，也不要请求用户提供主密码。
 ${hintText}
 
 【当前页面】
@@ -3444,9 +3484,9 @@ function cleanNativeUpdates(updates = {}, source = 'tasks', task = {}) {
         cleanUpdates.status = status;
         if (source !== 'templates') {
             if (status === 'done') {
-                cleanUpdates.completedDate = new Date().toISOString().slice(0, 16);
+                cleanUpdates.completedDate = formatLocalDateTime(new Date());
             } else if (status === 'doing' && !task.startTime) {
-                cleanUpdates.startTime = new Date().toISOString().slice(0, 16);
+                cleanUpdates.startTime = formatLocalDateTime(new Date());
             }
         }
     }
@@ -3732,6 +3772,200 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
     };
 }
 
+async function confirmAiMutation(title, message) {
+    const { showConfirm } = await import('./modal.js');
+    return await showConfirm({
+        title,
+        message,
+        confirmText: '执行',
+        cancelText: '取消',
+        variant: 'danger'
+    });
+}
+
+function formatWorklogList(state, limit = 30) {
+    const overtime = (state.overtimeRecords || []).filter(record => !record.aiLocked).slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit);
+    const leave = (state.leaveRecords || []).filter(record => !record.aiLocked).slice().sort((a, b) => b.startDate.localeCompare(a.startDate)).slice(0, limit);
+    const lines = [];
+    lines.push(`【加班记录】共 ${(state.overtimeRecords || []).filter(record => !record.aiLocked).length} 条（AI 不可访问的已隐藏）`);
+    for (const record of overtime) {
+        lines.push(`- ${record.id} ${record.date} ${record.start}-${record.end} ${record.hours}h 类型=${record.type} 补偿=${record.compensation || 'pay'} 备注=${record.note || ''}`);
+    }
+    lines.push(`【请假记录】共 ${(state.leaveRecords || []).filter(record => !record.aiLocked).length} 条（AI 不可访问的已隐藏）`);
+    for (const record of leave) {
+        lines.push(`- ${record.id} ${record.startDate}~${record.endDate} ${record.duration}${record.unit === 'hour' ? '小时' : '天'} 类型=${record.type} 带薪=${record.paid !== false} 备注=${record.note || ''}`);
+    }
+    return lines.join('\n');
+}
+
+async function runNativeWorklogAction(args) {
+    const { taskStore } = await import('./tasks.js');
+    const {
+        calculateLeaveDays,
+        calculateOvertimeHours,
+        inferOvertimeType,
+        normalizeLeaveRecord,
+        normalizeOvertimeRecord
+    } = await import('../utils/overtime.js');
+    const state = get(taskStore);
+    const action = String(args.action || '').toLowerCase();
+    const kind = args.kind || (action.includes('leave') ? 'leave' : 'overtime');
+
+    if (action === 'list') {
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: formatWorklogList(state, Number(args.limit) || 30)
+        };
+    }
+
+    if (action === 'create_overtime' || (action === 'create' && kind === 'overtime')) {
+        const hours = calculateOvertimeHours(args.start, args.end);
+        if (!args.date || hours <= 0) {
+            return { role: 'assistant', type: 'text', content: '加班记录缺少有效的日期或起止时间。' };
+        }
+        const record = normalizeOvertimeRecord({
+            id: `overtime_${Date.now()}`,
+            date: args.date,
+            start: args.start,
+            end: args.end,
+            hours,
+            type: args.type || inferOvertimeType(args.date),
+            compensation: args.compensation || 'pay',
+            note: args.note || ''
+        });
+        const ok = await confirmAiMutation('确认新增加班记录', `${record.date} ${record.start}-${record.end}（${record.hours} 小时）\n类型：${record.type}\n补偿：${record.compensation}\n备注：${record.note || '无'}`);
+        if (!ok) return { role: 'assistant', type: 'text', content: '已取消新增加班记录。' };
+        taskStore.addOvertimeRecord(record);
+        return { role: 'assistant', type: 'text', content: `已新增加班记录：${record.date} ${record.start}-${record.end}，${record.hours} 小时。` };
+    }
+
+    if (action === 'create_leave' || (action === 'create' && kind === 'leave')) {
+        if (!args.start_date || !args.end_date) {
+            return { role: 'assistant', type: 'text', content: '请假记录缺少开始或结束日期。' };
+        }
+        const record = normalizeLeaveRecord({
+            id: `leave_${Date.now()}`,
+            startDate: args.start_date,
+            endDate: args.end_date,
+            unit: args.unit || 'day',
+            duration: args.duration || calculateLeaveDays(args.start_date, args.end_date),
+            type: args.leave_type || 'annual',
+            paid: args.paid !== false,
+            note: args.note || ''
+        });
+        const ok = await confirmAiMutation('确认新增请假记录', `${record.startDate} ~ ${record.endDate}\n类型：${record.type}\n时长：${record.duration}${record.unit === 'hour' ? '小时' : '天'}\n带薪：${record.paid ? '是' : '否'}\n备注：${record.note || '无'}`);
+        if (!ok) return { role: 'assistant', type: 'text', content: '已取消新增请假记录。' };
+        taskStore.addLeaveRecord(record);
+        return { role: 'assistant', type: 'text', content: `已新增请假记录：${record.startDate} ~ ${record.endDate}，${record.duration}${record.unit === 'hour' ? '小时' : '天'}。` };
+    }
+
+    if (action === 'update' || action === 'delete') {
+        const list = kind === 'leave' ? state.leaveRecords : state.overtimeRecords;
+        const existing = (list || []).find(record => record.id === args.id);
+        if (!existing) {
+            return { role: 'assistant', type: 'text', content: `没有找到 ID 为 ${args.id || '(空)'} 的${kind === 'leave' ? '请假' : '加班'}记录。` };
+        }
+        if (existing.aiLocked) {
+            return { role: 'assistant', type: 'text', content: '该记录已标记为 AI 不可访问，AI 不能读取或修改。' };
+        }
+        if (action === 'delete') {
+            const label = kind === 'leave'
+                ? `${existing.startDate} ~ ${existing.endDate} 的请假`
+                : `${existing.date} ${existing.start}-${existing.end} 的加班`;
+            const ok = await confirmAiMutation('确认删除记录', `确定删除${label}记录吗？此操作不可撤销。`);
+            if (!ok) return { role: 'assistant', type: 'text', content: '已取消删除。' };
+            if (kind === 'leave') taskStore.deleteLeaveRecord(existing.id);
+            else taskStore.deleteOvertimeRecord(existing.id);
+            return { role: 'assistant', type: 'text', content: `已删除${label}记录。` };
+        }
+        const updates = {};
+        if (kind === 'leave') {
+            for (const key of ['startDate', 'endDate', 'unit', 'type', 'paid', 'note']) {
+                const source = key === 'startDate' ? args.start_date : key === 'endDate' ? args.end_date : key === 'type' ? args.leave_type : key;
+                if (source !== undefined) updates[key] = source;
+            }
+            if (args.duration !== undefined) updates.duration = Number(args.duration);
+            if ((updates.startDate || updates.endDate) && updates.duration === undefined) {
+                updates.duration = calculateLeaveDays(updates.startDate || existing.startDate, updates.endDate || existing.endDate);
+            }
+        } else {
+            for (const key of ['date', 'start', 'end', 'type', 'compensation', 'note']) {
+                if (args[key] !== undefined) updates[key] = args[key];
+            }
+            if (updates.start || updates.end) {
+                updates.hours = calculateOvertimeHours(updates.start || existing.start, updates.end || existing.end);
+            }
+        }
+        const merged = kind === 'leave'
+            ? normalizeLeaveRecord({ ...existing, ...updates })
+            : normalizeOvertimeRecord({ ...existing, ...updates });
+        const ok = await confirmAiMutation('确认修改记录', `将修改${kind === 'leave' ? '请假' : '加班'}记录 ${existing.id}。\n修改后：${kind === 'leave' ? `${merged.startDate}~${merged.endDate} ${merged.duration}${merged.unit === 'hour' ? '小时' : '天'}` : `${merged.date} ${merged.start}-${merged.end} ${merged.hours}h`}\n备注：${merged.note || '无'}`);
+        if (!ok) return { role: 'assistant', type: 'text', content: '已取消修改。' };
+        if (kind === 'leave') taskStore.updateLeaveRecord(existing.id, updates);
+        else taskStore.updateOvertimeRecord(existing.id, updates);
+        return { role: 'assistant', type: 'text', content: `已修改记录 ${existing.id}。` };
+    }
+
+    return { role: 'assistant', type: 'text', content: '无法识别工时操作。' };
+}
+
+async function runNativeNotesAction(args) {
+    const action = String(args.action || '').toLowerCase();
+    const state = get(notesStore);
+    const visibleNotes = (state.notes || []).filter(note => !note.aiLocked);
+
+    if (action === 'list') {
+        const limit = Number(args.limit) || 20;
+        const lines = visibleNotes.slice(0, limit).map(note => (
+            `- ${note.id}《${note.title}》分类=${note.category || ''}\n${String(note.content || '').slice(0, 1500)}`
+        ));
+        return {
+            role: 'assistant',
+            type: 'text',
+            content: lines.length ? `共 ${visibleNotes.length} 篇可读笔记（锁定笔记已隐藏）：\n${lines.join('\n')}` : '没有可读的工作笔记。'
+        };
+    }
+
+    if (action === 'create') {
+        if (!args.title && !args.content) {
+            return { role: 'assistant', type: 'text', content: '没有提供笔记标题或内容。' };
+        }
+        const ok = await confirmAiMutation('确认新建笔记', `标题：${args.title || '无标题'}\n分类：${args.category || '默认'}\n内容：${String(args.content || '').slice(0, 200)}`);
+        if (!ok) return { role: 'assistant', type: 'text', content: '已取消新建笔记。' };
+        notesStore.addNote({
+            title: args.title || '未命名笔记',
+            content: args.content || '',
+            category: args.category || '默认'
+        });
+        return { role: 'assistant', type: 'text', content: `已新建笔记《${args.title || '未命名笔记'}》。` };
+    }
+
+    const note = (state.notes || []).find(item => item.id === args.id);
+    if (!note) return { role: 'assistant', type: 'text', content: `没有找到 ID 为 ${args.id || '(空)'} 的笔记。` };
+    if (note.aiLocked) return { role: 'assistant', type: 'text', content: '该笔记已锁定，AI 不能读取或修改。' };
+
+    if (action === 'delete') {
+        const ok = await confirmAiMutation('确认删除笔记', `确定删除《${note.title}》吗？此操作不可撤销。`);
+        if (!ok) return { role: 'assistant', type: 'text', content: '已取消删除笔记。' };
+        notesStore.deleteNote(note.id);
+        return { role: 'assistant', type: 'text', content: `已删除笔记《${note.title}》。` };
+    }
+
+    if (action === 'update') {
+        const updates = {};
+        for (const key of ['title', 'content', 'category']) {
+            if (args[key] !== undefined) updates[key] = args[key];
+        }
+        const ok = await confirmAiMutation('确认修改笔记', `将修改《${note.title}》。\n新标题：${updates.title || note.title}\n内容：${String(updates.content ?? note.content).slice(0, 200)}`);
+        if (!ok) return { role: 'assistant', type: 'text', content: '已取消修改笔记。' };
+        notesStore.updateNote(note.id, updates);
+        return { role: 'assistant', type: 'text', content: `已修改笔记《${updates.title || note.title}》。` };
+    }
+
+    return { role: 'assistant', type: 'text', content: '无法识别笔记操作。' };
+}
+
 async function executeNativeToolCall(toolCall, userText, config, assistantContext, requireFileConfirmation, progress, allowLocalFiles = true) {
     const args = parseNativeToolArguments(toolCall.arguments);
     if (toolCall.name === 'workplan_web_search') {
@@ -3768,6 +4002,16 @@ async function executeNativeToolCall(toolCall, userText, config, assistantContex
         return await runLocalFilePlan(plan, userText, config, requireFileConfirmation);
     }
 
+    if (toolCall.name === 'workplan_worklog_action') {
+        progress('task_processing');
+        return await runNativeWorklogAction(args);
+    }
+
+    if (toolCall.name === 'workplan_notes_action') {
+        progress('task_processing');
+        return await runNativeNotesAction(args);
+    }
+
     if (toolCall.name === 'workplan_project_action') {
         progress('task_processing');
         return await runNativeProjectAction(args, userText, assistantContext);
@@ -3780,7 +4024,7 @@ async function executeNativeToolCall(toolCall, userText, config, assistantContex
     };
 }
 
-async function tryResolveWithNativeTools(userText, assistantContext, config, intentHint, progress, allowLocalFiles = true) {
+async function tryResolveWithNativeTools(userText, assistantContext, config, intentHint, progress, allowLocalFiles = true, options = {}) {
     if (!await shouldAttemptNativeToolCalling(config)) {
         return null;
     }
@@ -3797,7 +4041,15 @@ async function tryResolveWithNativeTools(userText, assistantContext, config, int
             { maxTokens: Number(config.maxTokens) || 4096, toolChoice: 'auto' }
         );
 
-        const toolCalls = response.toolCalls || [];
+        let toolCalls = response.toolCalls || [];
+        // Task authoring must not be swallowed by a stray web-search tool call.
+        if (options.skipWebSearch) {
+            const filtered = toolCalls.filter(call => call.name !== 'workplan_web_search');
+            if (filtered.length !== toolCalls.length) {
+                console.warn('[AI Tools] ignored workplan_web_search for task-authoring request:', userText);
+            }
+            toolCalls = filtered;
+        }
         if (!toolCalls.length) {
             return null;
         }
@@ -4004,9 +4256,13 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     const aiTaskCandidates = assistantContext.source === 'tasks'
         ? getTaskCandidatesForAI(text, scopedItems, aiRelevantTasks, operationType, timeScope)
         : scopedItems;
-    const hasWebIntent = intentHint === 'web_search' || (!intentHint && looksLikeWebSearchIntent(text));
-    const hasFileIntent = allowLocalFiles && (intentHint === 'file' || (!intentHint && looksLikeFileIntent(text)));
-    const hasProjectIntent = intentHint === 'task' ||
+    const skipWebSearchForTask = shouldSkipWebSearchForTaskText(text);
+    // A misclassified "web_search" hint must not leak into the task branches.
+    const effectiveIntentHint = skipWebSearchForTask && intentHint === 'web_search' ? 'task' : intentHint;
+    const hasWebIntent = !skipWebSearchForTask &&
+        (intentHint === 'web_search' || (!intentHint && looksLikeWebSearchIntent(text)));
+    const hasFileIntent = allowLocalFiles && (effectiveIntentHint === 'file' || (!effectiveIntentHint && looksLikeFileIntent(text)));
+    const hasProjectIntent = effectiveIntentHint === 'task' ||
         (!hasWebIntent && !hasFileIntent && (looksLikeProjectIntent(text) || assistantContext.source !== 'tasks'));
     const allowImplicitCreate = assistantContext.scope === 'dashboard' ||
         assistantContext.scope === 'project' ||
@@ -4081,9 +4337,10 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
             text,
             nativeToolContext,
             currentConfig,
-            intentHint,
+            effectiveIntentHint,
             progress,
-            allowLocalFiles
+            allowLocalFiles,
+            { skipWebSearch: skipWebSearchForTask }
         );
         if (nativeToolResult?.__batchResults?.length) {
             return {
@@ -4095,22 +4352,21 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         }
     }
 
-    const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI, intentHint);
+    const webSearchPlan = await analyzeWebSearchIntent(text, currentConfig, callAI, effectiveIntentHint);
     const localFilePlan = allowLocalFiles
-        ? await analyzeLocalFileIntent(text, currentConfig, callAI, intentHint)
+        ? await analyzeLocalFileIntent(text, currentConfig, callAI, effectiveIntentHint)
         : null;
 
     let result;
 
-    if (intentHint === 'image_generation' || (!intentHint && looksLikeImageGenerationIntent(text))) {
+    if (effectiveIntentHint === 'image_generation' || (!effectiveIntentHint && looksLikeImageGenerationIntent(text))) {
         progress('generating');
         result = await handleImageGeneration(text, currentConfig);
-    } else if (intentHint === 'audio_generation' || (!intentHint && looksLikeAudioGenerationIntent(text))) {
+    } else if (effectiveIntentHint === 'audio_generation' || (!effectiveIntentHint && looksLikeAudioGenerationIntent(text))) {
         progress('generating');
         result = await handleAudioGeneration(text, currentConfig);
     } else {
-    const userMentionsUrl = /https?:\/\/\S+/i.test(text)
-        || /\b[a-z0-9-]+\.(?:com|cn|net|org|io|cool|app|dev|ai|tech|xyz|info|me|so|gg|cc|tv|us|uk|de|jp|fr|co|club|store|shop|site|online|top|art|live|run)\b/i.test(text)
+    const userMentionsUrl = mentionsUrlOrDomain(text)
         || /访问网站|打开网站|访问网址|whois|有没有注册|是否注册|备案/i.test(text);
     if (webSearchPlan && (userMentionsUrl || !localFilePlan)) {
         progress('web_searching');
@@ -5290,9 +5546,9 @@ ${taskList}
                     if (task) {
                         const updates = { status: detectedStatus };
                         if (detectedStatus === 'done') {
-                            updates.completedDate = new Date().toISOString().slice(0, 16);
+                            updates.completedDate = formatLocalDateTime(new Date());
                         } else if (detectedStatus === 'doing' && !task.startTime) {
-                            updates.startTime = new Date().toISOString().slice(0, 16);
+                            updates.startTime = formatLocalDateTime(new Date());
                         }
                         updateOperations.push({
                             task: JSON.parse(JSON.stringify(task)),
@@ -5383,9 +5639,9 @@ ${taskList}
                     if (normalized) {
                         cleanUpdates.status = normalized;
                         if (normalized === 'done') {
-                            cleanUpdates.completedDate = new Date().toISOString().slice(0, 16);
+                            cleanUpdates.completedDate = formatLocalDateTime(new Date());
                         } else if (normalized === 'doing' && !task.startTime) {
-                            cleanUpdates.startTime = new Date().toISOString().slice(0, 16);
+                            cleanUpdates.startTime = formatLocalDateTime(new Date());
                         }
                     }
                 }
@@ -5762,7 +6018,8 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
 
     isAiLoading.set(true);
     streamingContent.set('');
-    _streamAbortController = new AbortController();
+    const abortController = new AbortController();
+    _streamAbortController = abortController;
 
     try {
         const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
@@ -5793,9 +6050,9 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
                 updateToolProgress('classifying');
             } else {
                 updateToolProgress('ai_classifying');
-                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
                 const aiIntent = await classifyUserIntent(effectiveText, currentConfig);
-                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
                 if (aiIntent === null) {
                     useToolRouter = false;
                 } else if (aiIntent !== 'chat') {
@@ -5805,14 +6062,16 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             }
         }
 
-        // Check if this is a complex multi-step request that should be decomposed
-        if (aiChatToolsEnabled) {
+        // Check if this is a complex multi-step request that should be decomposed.
+        // Task authoring is never decomposed: the plan router lists web_search as a
+        // step type and used to turn "帮我整理今天的任务" into a web lookup.
+        if (aiChatToolsEnabled && !shouldSkipWebSearchForTaskText(effectiveText)) {
             const { shouldDecompose, decomposeIntoSteps, executePlan, formatPlanSummary, cancelPlan, getTaskCreateResults } = await import('../utils/ai-execution-engine.js');
             if (shouldDecompose(effectiveText)) {
-                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
                 updateToolProgress('decomposing');
                 const plan = await decomposeIntoSteps(effectiveText, currentConfig);
-                if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
                 const planMessage = {
                     role: 'assistant',
@@ -5828,7 +6087,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
                 });
 
                 const abortHandler = () => cancelPlan(plan.id);
-                _streamAbortController?.signal.addEventListener('abort', abortHandler);
+                abortController.signal.addEventListener('abort', abortHandler);
 
                 await executePlan(plan, {
                     getConfig: () => ({
@@ -5920,16 +6179,16 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
                     }
                 });
 
-                _streamAbortController?.signal.removeEventListener('abort', abortHandler);
+                abortController.signal.removeEventListener('abort', abortHandler);
                 saveAiChatHistory();
                 return;
             }
         }
 
         if (useToolRouter) {
-            if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+            if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             const assistantPayload = await buildAiChatAssistantPayload(effectiveText);
-            if (_streamAbortController?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+            if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             const assistantResult = await resolveAssistantMessage(effectiveText, assistantPayload, currentConfig, intentHint, updateToolProgress, { allowLocalFiles: true });
             // If resolveAssistantMessage signals no tool action matched, fall through to streaming chat
             if (assistantResult?.__batchResults?.length) {
@@ -5987,8 +6246,8 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             });
         };
 
-        const result = await callAIWithMessagesStream(currentConfig, messages, onChunk, { signal: _streamAbortController?.signal });
-        _streamAbortController = null;
+        const result = await callAIWithMessagesStream(currentConfig, messages, onChunk, { signal: abortController.signal });
+        if (_streamAbortController === abortController) _streamAbortController = null;
 
         aiChatHistory.update(h => {
             const newHistory = [...h];
@@ -6010,7 +6269,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         streamingContent.set('');
         saveAiChatHistory();
     } catch (error) {
-        _streamAbortController = null;
+        if (_streamAbortController === abortController) _streamAbortController = null;
         if (error?.name === 'AbortError') {
             aiChatHistory.update(h => {
                 const newHistory = [...h];

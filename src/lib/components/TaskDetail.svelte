@@ -4,6 +4,7 @@
     import { showConfirm } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { formatLocalDateTime } from '../utils/datetime.js';
 
     export let openModal;
     export let closePanel = null;
@@ -14,7 +15,7 @@
 
     function isOverdue(t) {
         if (!t || !t.deadline) return false;
-        const now = new Date().toISOString().slice(0, 16);
+        const now = formatLocalDateTime(new Date());
         return t.deadline < now && t.status !== 'done';
     }
 
@@ -29,12 +30,13 @@
             variant: 'danger'
         });
         if (confirmed) {
-            if ($currentView === 'dashboard') {
-                taskStore.deleteTask($activeTask.id);
-            } else if ($currentView === 'templates') {
+            if ($currentView === 'templates') {
                 taskStore.deleteTemplate($activeTask.id);
             } else if ($currentView === 'scheduled') {
                 taskStore.deleteScheduledTask($activeTask.id);
+            } else {
+                // dashboard / statistics / anything else that lists real tasks
+                taskStore.deleteTask($activeTask.id);
             }
             activeTask.set(null);
         }
@@ -42,12 +44,12 @@
 
     function updateNote(e) {
         if (!$activeTask) return;
-        if ($currentView === 'dashboard') {
-            taskStore.updateTask($activeTask.id, { note: e.target.value });
-        } else if ($currentView === 'templates') {
+        if ($currentView === 'templates') {
             taskStore.updateTemplate($activeTask.id, { note: e.target.value });
         } else if ($currentView === 'scheduled') {
             taskStore.updateScheduledTask($activeTask.id, { note: e.target.value });
+        } else {
+            taskStore.updateTask($activeTask.id, { note: e.target.value });
         }
     }
 </script>

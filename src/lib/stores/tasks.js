@@ -1,9 +1,14 @@
 import { writable, derived, get } from 'svelte/store';
 import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
+import { formatLocalDate, formatLocalDateTime, parseLocalDate } from '../utils/datetime.js';
+import { buildScheduledInstances, normalizeRepeatDays } from '../utils/schedule.js';
+import { normalizeLeaveRecord, normalizeOvertimeRecord } from '../utils/overtime.js';
+import { mergeSyncState, normalizeSyncPayload } from '../utils/task-sync.js';
 
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const DEFAULT_SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
 const DEFAULT_TABLE_NAME = import.meta.env.VITE_SUPABASE_TABLE || 'planpro_data';
+const LOCAL_CACHE_KEY = 'planpro_tasks_local_cache';
 
 let supabase = null;
 let supabaseCacheKey = '';
@@ -173,7 +178,7 @@ async function getSupabaseClient(databaseConfig) {
     return supabase;
 }
 
-async function loadCloudRecord(accessKey) {
+export async function loadCloudRecord(accessKey) {
     if (typeof window === 'undefined') return null;
     const databaseConfig = readDatabaseConfig();
     if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
@@ -199,20 +204,20 @@ async function loadCloudRecord(accessKey) {
     return data;
 }
 
-async function saveCloudRecord(accessKey, content, updatedAt) {
-    if (typeof window === 'undefined') return;
+export async function saveCloudRecord(accessKey, content, updatedAt) {
+    if (typeof window === 'undefined') return false;
     const databaseConfig = readDatabaseConfig();
     if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
-        return;
+        return false;
     }
 
     if (shouldUseCustomHttpAdapter(databaseConfig)) {
         await upsertRestRecord(databaseConfig, accessKey, content, updatedAt);
-        return;
+        return true;
     }
 
     const client = await getSupabaseClient(databaseConfig);
-    if (!client) return;
+    if (!client) return false;
     const { error } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
         .upsert({ user_key: accessKey, content, updated_at: updatedAt }, { onConflict: 'user_key' });
@@ -220,6 +225,7 @@ async function saveCloudRecord(accessKey, content, updatedAt) {
     if (error) {
         throw error;
     }
+    return true;
 }
 
 async function deleteCloudRecord(accessKey) {
@@ -260,12 +266,22 @@ function createTaskStore() {
         tasks: [],
         templates: [],
         scheduledTasks: [],
+        overtimeRecords: [],
+        leaveRecords: [],
         accessKey: null,
         syncStatus: 'idle',
         lastCloudStr: ''
     });
 
     let saveTimer = null;
+    // Cloud load lifecycle. Local writes are held while the first GET is in
+    // flight; otherwise a two-second debounce can upsert a one-task blob over
+    // the full cloud record before it has even been read.
+    let loadState = 'idle'; // idle | loading | ready | disabled
+    let pendingLocalChange = false;
+    // Last cloud document we know about. Used as the baseline for the per-item
+    // merge so offline edits/deletions can be told apart from cloud changes.
+    let localCloudSnapshotStr = '';
     // 用户最近一次"任务相关操作"的时间戳，用于心跳空闲检测。
     // 仅记录用户主动的数据变更；自动生成（checkScheduled）不计入。
     let lastActivityAt = Date.now();
@@ -280,9 +296,92 @@ function createTaskStore() {
         return readDatabaseConfig().tableName || DEFAULT_TABLE_NAME;
     }
 
+    /**
+     * Local copy of the task data. Tasks used to live only in memory until the
+     * cloud write succeeded, so anything created while the backend was down
+     * disappeared on reload. Every mutation now writes this cache first.
+     */
+    function readLocalCache(accessKey) {
+        if (typeof window === 'undefined' || !accessKey) return null;
+        try {
+            const raw = localStorage.getItem(LOCAL_CACHE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || parsed.accessKey !== accessKey) return null;
+            return {
+                accessKey,
+                tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+                templates: Array.isArray(parsed.templates) ? parsed.templates : [],
+                scheduledTasks: Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [],
+                overtimeRecords: Array.isArray(parsed.overtimeRecords) ? parsed.overtimeRecords : [],
+                leaveRecords: Array.isArray(parsed.leaveRecords) ? parsed.leaveRecords : [],
+                cloudSnapshot: typeof parsed.cloudSnapshot === 'string' ? parsed.cloudSnapshot : '',
+                savedAt: Number(parsed.savedAt) || 0
+            };
+        } catch (error) {
+            console.warn('Failed to read local task cache:', error?.message || error);
+            return null;
+        }
+    }
+
+    function persistLocalCache(state, cloudSnapshot = localCloudSnapshotStr) {
+        if (typeof window === 'undefined' || !state?.accessKey) return;
+        try {
+            localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({
+                accessKey: state.accessKey,
+                tasks: state.tasks || [],
+                templates: state.templates || [],
+                scheduledTasks: state.scheduledTasks || [],
+                overtimeRecords: state.overtimeRecords || [],
+                leaveRecords: state.leaveRecords || [],
+                cloudSnapshot: cloudSnapshot || '',
+                savedAt: Date.now()
+            }));
+        } catch (error) {
+            console.warn('Failed to persist local task cache:', error?.message || error);
+            // The snapshot can be as large as the task list itself. If quota is
+            // tight, keep the current data and drop the baseline; a later
+            // reconnect still merges cloud-only items, it just cannot detect
+            // offline deletions.
+            try {
+                localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({
+                    accessKey: state.accessKey,
+                    tasks: state.tasks || [],
+                    templates: state.templates || [],
+                    scheduledTasks: state.scheduledTasks || [],
+                    overtimeRecords: state.overtimeRecords || [],
+                    leaveRecords: state.leaveRecords || [],
+                    cloudSnapshot: '',
+                    savedAt: Date.now()
+                }));
+            } catch {
+                // Storage is full; nothing else we can do locally.
+            }
+        }
+    }
+
+    function clearLocalCache() {
+        if (typeof window === 'undefined') return;
+        try {
+            localStorage.removeItem(LOCAL_CACHE_KEY);
+        } catch {
+            // ignore
+        }
+    }
+
+    function parseSnapshot(value) {
+        if (!value) return null;
+        try {
+            const parsed = JSON.parse(value);
+            return normalizeSyncPayload(parsed);
+        } catch {
+            return null;
+        }
+    }
+
     function getPureDataString(data) {
         const copy = JSON.parse(JSON.stringify(data));
-        ['tasks', 'templates', 'scheduledTasks'].forEach(key => {
+        ['tasks', 'templates', 'scheduledTasks', 'overtimeRecords', 'leaveRecords'].forEach(key => {
             if (copy[key]) {
                 copy[key].forEach(item => {
                     delete item.expanded;
@@ -294,34 +393,85 @@ function createTaskStore() {
     }
 
     async function loadData(accessKey) {
+        if (loadState === 'loading') return;
         const databaseConfig = readDatabaseConfig();
         if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
+            loadState = 'disabled';
             update(s => ({ ...s, syncStatus: 'idle' }));
             return;
         }
+        loadState = 'loading';
+        pendingLocalChange = false;
+        const baselineStr = localCloudSnapshotStr || '';
+        const baselineData = parseSnapshot(baselineStr);
         update(s => ({ ...s, syncStatus: 'syncing' }));
         try {
             const data = await loadCloudRecord(accessKey);
+            const current = get({ subscribe });
+            const localData = {
+                tasks: current.tasks,
+                templates: current.templates,
+                scheduledTasks: current.scheduledTasks,
+                overtimeRecords: current.overtimeRecords,
+                leaveRecords: current.leaveRecords
+            };
+            const localStr = getPureDataString(localData);
+            const hasLocalChanges = localStr !== baselineStr;
 
             if (data && data.content) {
-                const json = data.content;
-                const cloudStr = getPureDataString({
-                    tasks: json.tasks || [],
-                    templates: json.templates || [],
-                    scheduledTasks: json.scheduledTasks || []
-                });
-                update(s => ({
-                    ...s,
-                    tasks: json.tasks || [],
-                    templates: json.templates || [],
-                    scheduledTasks: json.scheduledTasks || [],
-                    syncStatus: 'done',
-                    lastCloudStr: cloudStr
-                }));
+                const remoteData = normalizeSyncPayload(data.content);
+                const remoteStr = getPureDataString(remoteData);
+                loadState = 'ready';
+                pendingLocalChange = false;
+
+                if (remoteStr === localStr) {
+                    localCloudSnapshotStr = remoteStr;
+                    update(s => ({ ...s, syncStatus: 'done', lastCloudStr: remoteStr }));
+                    persistLocalCache(current, remoteStr);
+                    return;
+                }
+
+                if (!hasLocalChanges) {
+                    // No offline work: the cloud document is authoritative.
+                    localCloudSnapshotStr = remoteStr;
+                    update(s => ({
+                        ...s,
+                        tasks: remoteData.tasks,
+                        templates: remoteData.templates,
+                        scheduledTasks: remoteData.scheduledTasks,
+                        overtimeRecords: remoteData.overtimeRecords,
+                        leaveRecords: remoteData.leaveRecords,
+                        syncStatus: 'done',
+                        lastCloudStr: remoteStr
+                    }));
+                    persistLocalCache({ ...current, ...remoteData }, remoteStr);
+                    return;
+                }
+
+                // Offline work exists. Merge per item instead of letting the
+                // pull wipe the newly created/changed tasks, then push the merge.
+                const merged = mergeSyncState(localData, remoteData, baselineData);
+                const mergedState = { ...current, ...merged };
+                const mergedStr = getPureDataString(merged);
+                localCloudSnapshotStr = remoteStr;
+                update(s => ({ ...s, ...merged, syncStatus: 'idle', lastCloudStr: remoteStr }));
+                persistLocalCache(mergedState, remoteStr);
+                if (mergedStr !== remoteStr) {
+                    saveData(get({ subscribe }));
+                }
             } else {
-                update(s => ({ ...s, syncStatus: 'idle' }));
+                loadState = 'ready';
+                pendingLocalChange = false;
+                // No cloud record yet: keep the local cache and upload it.
+                localCloudSnapshotStr = '';
+                update(s => ({ ...s, syncStatus: 'idle', lastCloudStr: '' }));
+                persistLocalCache(current, '');
+                if (localStr !== getPureDataString({ tasks: [], templates: [], scheduledTasks: [], overtimeRecords: [], leaveRecords: [] })) {
+                    saveData(get({ subscribe }));
+                }
             }
         } catch (e) {
+            loadState = 'ready';
             const msg = e?.message || '';
             if (e?.code === 'PGRST116' || msg.includes('not find')) {
                 update(s => ({ ...s, syncStatus: 'idle' }));
@@ -340,13 +490,46 @@ function createTaskStore() {
     async function saveData(state) {
         if (!state.accessKey) return;
 
+        // Always keep a local copy first. If the cloud write fails (offline,
+        // backend down, quota) the user's new tasks still survive a reload.
+        persistLocalCache(state);
+
+        if (loadState === 'loading') {
+            // Defer until the initial GET settles; loadData() merges/re-saves
+            // after it detects edits made while loading.
+            pendingLocalChange = true;
+            return;
+        }
+
+        const databaseConfig = readDatabaseConfig();
+        if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
+            // Nothing was uploaded. Keep lastCloudStr untouched so a later
+            // enable/heartbeat pushes these edits instead of trusting them as synced.
+            return;
+        }
+
+        // Cloud was disabled when the session started and has just been enabled.
+        // Pull + merge before the first upload so the local task list does not
+        // blindly replace an existing cloud document.
+        if (loadState === 'disabled') {
+            loadState = 'idle';
+            loadData(state.accessKey);
+            return;
+        }
+
         const currentPureStr = getPureDataString({
             tasks: state.tasks,
             templates: state.templates,
-            scheduledTasks: state.scheduledTasks
+            scheduledTasks: state.scheduledTasks,
+            overtimeRecords: state.overtimeRecords,
+            leaveRecords: state.leaveRecords
         });
 
-        if (currentPureStr === state.lastCloudStr) return;
+        if (currentPureStr === state.lastCloudStr) {
+            localCloudSnapshotStr = currentPureStr;
+            persistLocalCache(state, currentPureStr);
+            return;
+        }
 
         // Every mutator calls saveData() from inside its own update() callback, so a
         // synchronous update() here would be clobbered by the outer callback's return
@@ -358,7 +541,14 @@ function createTaskStore() {
             try {
                 const nowTimestamp = Date.now();
                 const rawData = JSON.parse(currentPureStr);
-                await saveCloudRecord(state.accessKey, rawData, nowTimestamp);
+                const uploaded = await saveCloudRecord(state.accessKey, rawData, nowTimestamp);
+                if (uploaded === false) {
+                    // Sync backend unavailable: do not claim the data is cloud-current.
+                    update(s => ({ ...s, syncStatus: 'idle' }));
+                    return;
+                }
+                localCloudSnapshotStr = currentPureStr;
+                persistLocalCache(state, currentPureStr);
                 update(s => ({ ...s, syncStatus: 'done', lastCloudStr: currentPureStr }));
                 setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
             } catch (e) {
@@ -371,7 +561,7 @@ function createTaskStore() {
     // 心跳同步：用户空闲时由 +layout 定时调用。先推（本地未保存改动）后拉（其他设备的更新）。
     // 沿用现有"单 blob、最后写入胜出"模型，不做字段级合并。
     async function heartbeatSync() {
-        if (heartbeatRunning) return;
+        if (heartbeatRunning || loadState === 'loading') return;
 
         const databaseConfig = readDatabaseConfig();
         if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) return;
@@ -387,90 +577,123 @@ function createTaskStore() {
         }
 
         try {
-            const localPureStr = getPureDataString({
+            const localData = {
                 tasks: state.tasks,
                 templates: state.templates,
-                scheduledTasks: state.scheduledTasks
-            });
+                scheduledTasks: state.scheduledTasks,
+                overtimeRecords: state.overtimeRecords,
+                leaveRecords: state.leaveRecords
+            };
+            const localPureStr = getPureDataString(localData);
+            const baselineStr = localCloudSnapshotStr || '';
+            const localDirty = localPureStr !== baselineStr;
 
-            // 1) 先推：本地有未同步改动时上传。
-            if (localPureStr !== state.lastCloudStr) {
-                update(s => ({ ...s, syncStatus: 'syncing' }));
-                const rawData = JSON.parse(localPureStr);
-                await saveCloudRecord(state.accessKey, rawData, Date.now());
-                update(s => ({ ...s, syncStatus: 'done', lastCloudStr: localPureStr }));
-                setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
+            const data = await loadCloudRecord(state.accessKey);
+            // A missing record is not the same as an intentionally emptied one:
+            // never wipe the local list just because the row disappeared.
+            if (!data && !localDirty) {
+                lastHeartbeatAt = Date.now();
+                return;
+            }
+            const remoteData = data?.content
+                ? normalizeSyncPayload(data.content)
+                : { tasks: [], templates: [], scheduledTasks: [], overtimeRecords: [], leaveRecords: [] };
+            const remoteStr = getPureDataString(remoteData);
+
+            if (!localDirty) {
+                if (remoteStr !== localPureStr) {
+                    localCloudSnapshotStr = remoteStr;
+                    update(s => ({
+                        ...s,
+                        tasks: remoteData.tasks,
+                        templates: remoteData.templates,
+                        scheduledTasks: remoteData.scheduledTasks,
+                        overtimeRecords: remoteData.overtimeRecords,
+                        leaveRecords: remoteData.leaveRecords,
+                        syncStatus: 'done',
+                        lastCloudStr: remoteStr
+                    }));
+                    persistLocalCache({ ...state, ...remoteData }, remoteStr);
+                    setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
+                } else {
+                    localCloudSnapshotStr = remoteStr;
+                    persistLocalCache(state, remoteStr);
+                }
                 lastHeartbeatAt = Date.now();
                 return;
             }
 
-            // 2) 后拉：本地已是最新，检查远端是否被其他设备更新。
-            const data = await loadCloudRecord(state.accessKey);
-            if (data && data.content) {
-                const json = data.content;
-                const cloudStr = getPureDataString({
-                    tasks: json.tasks || [],
-                    templates: json.templates || [],
-                    scheduledTasks: json.scheduledTasks || []
-                });
-                if (cloudStr !== localPureStr) {
-                    update(s => ({
-                        ...s,
-                        tasks: json.tasks || [],
-                        templates: json.templates || [],
-                        scheduledTasks: json.scheduledTasks || [],
-                        syncStatus: 'done',
-                        lastCloudStr: cloudStr
-                    }));
-                    setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
+            // Unsynced local work: merge with the cloud copy before uploading so
+            // neither the offline tasks nor another device's changes disappear.
+            update(s => ({ ...s, syncStatus: 'syncing' }));
+            const merged = mergeSyncState(localData, remoteData, parseSnapshot(baselineStr));
+            const mergedStr = getPureDataString(merged);
+            const mergedState = { ...state, ...merged };
+            update(s => ({ ...s, ...merged }));
+            localCloudSnapshotStr = remoteStr;
+            persistLocalCache(mergedState, remoteStr);
+
+            if (mergedStr !== remoteStr) {
+                const uploaded = await saveCloudRecord(state.accessKey, merged, Date.now());
+                if (uploaded === false) {
+                    update(s => ({ ...s, syncStatus: 'idle' }));
+                    lastHeartbeatAt = Date.now();
+                    return;
                 }
+                localCloudSnapshotStr = mergedStr;
+                persistLocalCache(mergedState, mergedStr);
+                update(s => ({ ...s, syncStatus: 'done', lastCloudStr: mergedStr }));
+            } else {
+                update(s => ({ ...s, syncStatus: 'done', lastCloudStr: remoteStr }));
             }
+            setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
             lastHeartbeatAt = Date.now();
         } catch (e) {
             console.error('Heartbeat sync error:', e);
-            update(s => ({ ...s, syncStatus: 'error' }));
+            // Pull failed. If there is unsynced local data, still attempt an
+            // upload rather than leaving it stranded (best effort).
+            const localData = {
+                tasks: state.tasks,
+                templates: state.templates,
+                scheduledTasks: state.scheduledTasks,
+                overtimeRecords: state.overtimeRecords,
+                leaveRecords: state.leaveRecords
+            };
+            const localPureStr = getPureDataString(localData);
+            if (localPureStr !== (localCloudSnapshotStr || '')) {
+                try {
+                    const uploaded = await saveCloudRecord(state.accessKey, localData, Date.now());
+                    if (uploaded !== false) {
+                        localCloudSnapshotStr = localPureStr;
+                        persistLocalCache(state, localPureStr);
+                        update(s => ({ ...s, syncStatus: 'done', lastCloudStr: localPureStr }));
+                    } else {
+                        update(s => ({ ...s, syncStatus: 'error' }));
+                    }
+                } catch (pushError) {
+                    console.error('Heartbeat push fallback failed:', pushError);
+                    update(s => ({ ...s, syncStatus: 'error' }));
+                }
+            } else {
+                update(s => ({ ...s, syncStatus: 'error' }));
+            }
         } finally {
             heartbeatRunning = false;
         }
     }
 
     function checkScheduledTasks(state) {
-        const today = new Date().toISOString().split('T')[0];
-        const todayDate = new Date(today);
-        let addedCount = 0;
-        const newTasks = [...state.tasks];
-
-        state.scheduledTasks.forEach(sch => {
-            if (!sch.enabled) return;
-            let checkDate = sch.lastGeneratedDate
-                ? new Date(new Date(sch.lastGeneratedDate).setDate(new Date(sch.lastGeneratedDate).getDate() + 1))
-                : new Date(todayDate);
-
-            while (checkDate <= todayDate) {
-                const dayOfWeek = checkDate.getDay();
-                if (sch.repeatDays.includes(dayOfWeek)) {
-                    newTasks.push({
-                        id: Date.now() + Math.random().toString(36).substr(2, 5),
-                        title: sch.title,
-                        status: 'todo',
-                        priority: sch.priority || 'normal',
-                        date: checkDate.toISOString().split('T')[0] + 'T09:00',
-                        deadline: '',
-                        note: sch.note || '',
-                        subtasks: JSON.parse(JSON.stringify(sch.subtasks || [])),
-                        expanded: false,
-                        isFromSchedule: true
-                    });
-                    addedCount++;
-                }
-                checkDate.setDate(checkDate.getDate() + 1);
-            }
-            sch.lastGeneratedDate = today;
-        });
-
-        if (addedCount > 0) {
-            update(s => ({ ...s, tasks: newTasks }));
+        const result = buildScheduledInstances(state, new Date());
+        if (!result.changed) {
+            return state;
         }
+        const nextState = {
+            ...state,
+            tasks: result.instances.length > 0 ? [...state.tasks, ...result.instances] : state.tasks,
+            scheduledTasks: result.scheduledTasks
+        };
+        saveData(nextState);
+        return nextState;
     }
 
     return {
@@ -480,21 +703,63 @@ function createTaskStore() {
         login: (key) => {
             if (typeof window === 'undefined') return;
             localStorage.setItem('planpro_access_key', key);
-            update(s => ({ ...s, accessKey: key }));
+            // Never show another account's cached tasks.
+            try {
+                const raw = localStorage.getItem(LOCAL_CACHE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed?.accessKey !== key) clearLocalCache();
+                }
+            } catch {
+                clearLocalCache();
+            }
+            const cache = readLocalCache(key);
+            localCloudSnapshotStr = cache?.cloudSnapshot || '';
+            update(s => ({
+                ...s,
+                accessKey: key,
+                tasks: cache?.tasks || [],
+                templates: cache?.templates || [],
+                scheduledTasks: cache?.scheduledTasks || [],
+                overtimeRecords: cache?.overtimeRecords || [],
+                leaveRecords: cache?.leaveRecords || [],
+                lastCloudStr: cache?.cloudSnapshot || '',
+                syncStatus: 'idle'
+            }));
             loadData(key);
         },
         logout: () => {
             if (typeof window === 'undefined') return;
             localStorage.removeItem('planpro_access_key');
-            set({ tasks: [], templates: [], scheduledTasks: [], accessKey: null, syncStatus: 'idle', lastCloudStr: '' });
+            clearLocalCache();
+            localCloudSnapshotStr = '';
+            loadState = 'idle';
+            pendingLocalChange = false;
+            if (saveTimer) {
+                clearTimeout(saveTimer);
+                saveTimer = null;
+            }
+            set({ tasks: [], templates: [], scheduledTasks: [], overtimeRecords: [], leaveRecords: [], accessKey: null, syncStatus: 'idle', lastCloudStr: '' });
         },
         loadFromLocal: () => {
             if (typeof window === 'undefined') return;
             const savedKey = localStorage.getItem('planpro_access_key');
-            if (savedKey) {
-                update(s => ({ ...s, accessKey: savedKey }));
-                loadData(savedKey);
-            }
+            if (!savedKey) return;
+            const cache = readLocalCache(savedKey);
+            localCloudSnapshotStr = cache?.cloudSnapshot || '';
+            update(s => ({
+                ...s,
+                accessKey: savedKey,
+                ...(cache ? {
+                    tasks: cache.tasks,
+                    templates: cache.templates,
+                    scheduledTasks: cache.scheduledTasks,
+                    overtimeRecords: cache.overtimeRecords || [],
+                    leaveRecords: cache.leaveRecords || []
+                } : {}),
+                lastCloudStr: cache?.cloudSnapshot || ''
+            }));
+            loadData(savedKey);
         },
         addTask: (task) => update(s => {
             markActivity();
@@ -567,9 +832,54 @@ function createTaskStore() {
             saveData(newState);
             return newState;
         }),
-        checkScheduled: () => update(s => {
-            checkScheduledTasks(s);
-            return s;
+        checkScheduled: () => update(s => checkScheduledTasks(s)),
+        addOvertimeRecord: (record) => update(s => {
+            markActivity();
+            const newState = { ...s, overtimeRecords: [...(s.overtimeRecords || []), record] };
+            saveData(newState);
+            return newState;
+        }),
+        updateOvertimeRecord: (id, updates) => update(s => {
+            markActivity();
+            const overtimeRecords = (s.overtimeRecords || []).map(record => (
+                record.id === id ? { ...record, ...updates } : record
+            ));
+            const newState = { ...s, overtimeRecords };
+            saveData(newState);
+            return newState;
+        }),
+        deleteOvertimeRecord: (id) => update(s => {
+            markActivity();
+            const newState = {
+                ...s,
+                overtimeRecords: (s.overtimeRecords || []).filter(record => record.id !== id)
+            };
+            saveData(newState);
+            return newState;
+        }),
+        addLeaveRecord: (record) => update(s => {
+            markActivity();
+            const newState = { ...s, leaveRecords: [...(s.leaveRecords || []), record] };
+            saveData(newState);
+            return newState;
+        }),
+        updateLeaveRecord: (id, updates) => update(s => {
+            markActivity();
+            const leaveRecords = (s.leaveRecords || []).map(record => (
+                record.id === id ? { ...record, ...updates } : record
+            ));
+            const newState = { ...s, leaveRecords };
+            saveData(newState);
+            return newState;
+        }),
+        deleteLeaveRecord: (id) => update(s => {
+            markActivity();
+            const newState = {
+                ...s,
+                leaveRecords: (s.leaveRecords || []).filter(record => record.id !== id)
+            };
+            saveData(newState);
+            return newState;
         }),
         clearAllData: async (accessKey) => {
             try {
@@ -580,30 +890,69 @@ function createTaskStore() {
             if (typeof window !== 'undefined') {
                 localStorage.removeItem('planpro_access_key');
             }
-            set({ tasks: [], templates: [], scheduledTasks: [], accessKey: null, syncStatus: 'idle', lastCloudStr: '' });
+            clearLocalCache();
+            localCloudSnapshotStr = '';
+            set({ tasks: [], templates: [], scheduledTasks: [], overtimeRecords: [], leaveRecords: [], accessKey: null, syncStatus: 'idle', lastCloudStr: '' });
         },
         exportData: (state) => {
             return JSON.stringify({
                 tasks: state.tasks,
                 templates: state.templates,
-                scheduledTasks: state.scheduledTasks
+                scheduledTasks: state.scheduledTasks,
+                overtimeRecords: state.overtimeRecords,
+                leaveRecords: state.leaveRecords
             }, null, 2);
         },
         importData: (jsonStr) => {
             try {
                 const json = JSON.parse(jsonStr);
+                if (!json || typeof json !== 'object' || Array.isArray(json)) {
+                    throw new Error('备份文件格式不正确');
+                }
+
+                const cleanList = (value, predicate) => (
+                    Array.isArray(value) ? value.filter(item => item && typeof item === 'object' && predicate(item)) : null
+                );
+                const importedTasks = cleanList(json.tasks, item => (
+                    typeof item.title === 'string' &&
+                    typeof item.date === 'string' &&
+                    item.date.length > 0
+                ));
+                const importedTemplates = cleanList(json.templates, item => typeof item.title === 'string');
+                const importedScheduled = cleanList(json.scheduledTasks, item => typeof item.title === 'string');
+                const importedOvertime = cleanList(json.overtimeRecords, item => (
+                    typeof item.date === 'string' && item.date.length > 0
+                ))?.map(normalizeOvertimeRecord);
+                const importedLeave = cleanList(json.leaveRecords, item => (
+                    typeof item.startDate === 'string' && item.startDate.length > 0
+                ))?.map(normalizeLeaveRecord);
+
+                if (!importedTasks && !importedTemplates && !importedScheduled && !importedOvertime && !importedLeave) {
+                    throw new Error('备份文件里没有可导入的任务、模板、定时任务、加班或请假记录');
+                }
+
+                const rawCount = ['tasks', 'templates', 'scheduledTasks', 'overtimeRecords', 'leaveRecords']
+                    .reduce((sum, key) => sum + (Array.isArray(json[key]) ? json[key].length : 0), 0);
+                const cleanCount = (importedTasks?.length || 0)
+                    + (importedTemplates?.length || 0)
+                    + (importedScheduled?.length || 0)
+                    + (importedOvertime?.length || 0)
+                    + (importedLeave?.length || 0);
+
                 update(s => {
                     markActivity();
                     const newState = {
                         ...s,
-                        tasks: json.tasks || s.tasks,
-                        templates: json.templates || s.templates,
-                        scheduledTasks: json.scheduledTasks || s.scheduledTasks
+                        tasks: importedTasks ?? s.tasks,
+                        templates: importedTemplates ?? s.templates,
+                        scheduledTasks: importedScheduled ?? s.scheduledTasks,
+                        overtimeRecords: importedOvertime ?? s.overtimeRecords,
+                        leaveRecords: importedLeave ?? s.leaveRecords
                     };
                     saveData(newState);
                     return newState;
                 });
-                return { success: true };
+                return { success: true, skipped: Math.max(0, rawCount - cleanCount) };
             } catch (e) {
                 return { success: false, error: e.message };
             }
@@ -622,7 +971,7 @@ function createTaskStore() {
 
 export const taskStore = createTaskStore();
 
-const getToday = () => typeof window !== 'undefined' ? new Date().toISOString().split('T')[0] : '2024-01-01';
+const getToday = () => typeof window !== 'undefined' ? formatLocalDate(new Date()) : '2024-01-01';
 
 export const today = writable(getToday());
 export const viewDate = writable(getToday());
@@ -632,7 +981,7 @@ export const activeTask = writable(null);
 export const activeTasks = derived(
     [taskStore, viewDate, today],
     ([$store, $viewDate, $today]) => {
-        const now = new Date();
+        const nowText = formatLocalDateTime(new Date());
         const list = $store.tasks.filter(t => {
             const taskDate = t.date.split('T')[0];
             if (t.status === 'done') return false;
@@ -646,8 +995,8 @@ export const activeTasks = derived(
         return list.sort((a, b) => {
             const pDiff = pMap[b.priority] - pMap[a.priority];
             if (pDiff !== 0) return pDiff;
-            const aOver = a.deadline && a.deadline < now.toISOString() ? 1 : 0;
-            const bOver = b.deadline && b.deadline < now.toISOString() ? 1 : 0;
+            const aOver = a.deadline && a.deadline < nowText ? 1 : 0;
+            const bOver = b.deadline && b.deadline < nowText ? 1 : 0;
             if (aOver !== bOver) return bOver - aOver;
             const sDiff = sMap[b.status] - sMap[a.status];
             if (sDiff !== 0) return sDiff;
@@ -674,9 +1023,9 @@ export const futurePreviews = derived(
     [taskStore, viewDate, today],
     ([$store, $viewDate, $today]) => {
         if ($viewDate <= $today) return [];
-        const targetDay = new Date($viewDate).getDay();
+        const targetDay = parseLocalDate($viewDate).getDay();
         return $store.scheduledTasks
-            .filter(s => s.enabled && s.repeatDays.includes(targetDay === 0 ? 7 : targetDay))
+            .filter(s => s.enabled && normalizeRepeatDays(s.repeatDays).includes(targetDay))
             .map(s => ({ ...s, id: 'preview_' + s.id, status: 'todo', isPreview: true }));
     }
 );

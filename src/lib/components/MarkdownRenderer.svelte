@@ -4,6 +4,7 @@
     import { showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { copyText } from '../utils/clipboard.js';
     import 'highlight.js/styles/github-dark.css';
     import 'katex/dist/katex.min.css';
 
@@ -25,7 +26,9 @@
         if (!container) return;
         const codeBlocks = container.querySelectorAll('pre');
         codeBlocks.forEach(pre => {
-            if (pre.querySelector('.code-copy-btn')) return;
+            // The button lives in the wrapper (a sibling of <pre>), so checking
+            // inside the <pre> never matched and every update added another wrapper.
+            if (pre.parentElement?.classList?.contains('code-block-wrapper')) return;
             const wrapper = document.createElement('div');
             wrapper.className = 'code-block-wrapper';
             pre.parentNode.insertBefore(wrapper, pre);
@@ -39,8 +42,8 @@
                 e.stopPropagation();
                 const code = pre.querySelector('code');
                 const text = code ? code.textContent : pre.textContent;
-                try {
-                    await navigator.clipboard.writeText(text);
+                const ok = await copyText(text);
+                if (ok) {
                     btn.innerHTML = '<i class="ph ph-check"></i>';
                     btn.classList.add('copied');
                     showToast({ message: get(_)('common.code_copied'), type: 'success', duration: 1500 });
@@ -48,7 +51,7 @@
                         btn.innerHTML = '<i class="ph ph-copy"></i>';
                         btn.classList.remove('copied');
                     }, 2000);
-                } catch {
+                } else {
                     showToast({ message: get(_)('common.copy_failed'), type: 'error' });
                 }
             };

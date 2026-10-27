@@ -134,6 +134,7 @@ import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.window.OnBackInvokedCallback
@@ -371,7 +372,9 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
   @JavascriptInterface
   fun searchTree(rootUri: String, query: String, maxResults: Int): String {
     return wrapJson {
-      val root = DocumentFile.fromTreeUri(activity, Uri.parse(rootUri))
+      val rootDocumentUri = Uri.parse(rootUri)
+      requireUriPermission(rootDocumentUri, write = false)
+      val root = DocumentFile.fromTreeUri(activity, rootDocumentUri)
         ?: error("Unable to open authorized directory")
       val entries = JSONArray()
       walk(root, "", query.trim().lowercase(), maxResults.coerceIn(1, 200), entries)
@@ -382,8 +385,10 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
   @JavascriptInterface
   fun searchTreeInTree(rootUri: String, relativeRoot: String, query: String, maxResults: Int): String {
     return wrapJson {
+      val rootDocumentUri = Uri.parse(rootUri)
+      requireUriPermission(rootDocumentUri, write = false)
       val root = if (relativeRoot.isBlank()) {
-        DocumentFile.fromTreeUri(activity, Uri.parse(rootUri))
+        DocumentFile.fromTreeUri(activity, rootDocumentUri)
       } else {
         resolveDocument(rootUri, relativeRoot)
       } ?: error("Unable to open authorized directory: $relativeRoot")
@@ -397,24 +402,29 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
   @JavascriptInterface
   fun readTextFile(uri: String, maxBytes: Int): String {
     return wrapJson {
-      readText(Uri.parse(uri), maxBytes.coerceIn(512, 512000))
+      val documentUri = Uri.parse(uri)
+      requireUriPermission(documentUri, write = false)
+      readText(documentUri, maxBytes.coerceIn(512, 256000))
     }
   }
 
   @JavascriptInterface
   fun readTextFileInTree(rootUri: String, relativePath: String, maxBytes: Int): String {
     return wrapJson {
+      requireUriPermission(Uri.parse(rootUri), write = false)
       val doc = resolveDocument(rootUri, relativePath)
         ?: error("File not found: $relativePath")
       if (doc.isDirectory) error("Path is a directory: $relativePath")
-      readText(doc.uri, maxBytes.coerceIn(512, 512000))
+      readText(doc.uri, maxBytes.coerceIn(512, 256000))
     }
   }
 
   @JavascriptInterface
   fun writeTextFile(uri: String, content: String): String {
     return wrapJson {
-      writeText(Uri.parse(uri), content)
+      val documentUri = Uri.parse(uri)
+      requireUriPermission(documentUri, write = true)
+      writeText(documentUri, content)
       JSONObject()
         .put("path", uri)
         .put("action", "write")
@@ -425,6 +435,7 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
   @JavascriptInterface
   fun writeTextFileInTree(rootUri: String, relativePath: String, content: String): String {
     return wrapJson {
+      requireUriPermission(Uri.parse(rootUri), write = true)
       val doc = ensureFile(rootUri, relativePath)
       writeText(doc.uri, content)
       JSONObject()
@@ -437,7 +448,9 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
   @JavascriptInterface
   fun deleteDocument(uri: String): String {
     return wrapJson {
-      val doc = DocumentFile.fromSingleUri(activity, Uri.parse(uri))
+      val documentUri = Uri.parse(uri)
+      requireUriPermission(documentUri, write = true)
+      val doc = DocumentFile.fromSingleUri(activity, documentUri)
         ?: error("File not found: $uri")
       if (doc.isDirectory) error("Deleting directories is not supported")
       val size = doc.length()
@@ -452,6 +465,7 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
   @JavascriptInterface
   fun deleteDocumentInTree(rootUri: String, relativePath: String): String {
     return wrapJson {
+      requireUriPermission(Uri.parse(rootUri), write = true)
       val doc = resolveDocument(rootUri, relativePath)
         ?: error("File not found: $relativePath")
       if (doc.isDirectory) error("Deleting directories is not supported")
@@ -462,6 +476,26 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
         .put("action", "delete")
         .put("size", size)
     }
+  }
+
+  /**
+   * Only touch URIs this app actually holds a read/write grant for. Without
+   * this, a model-generated tool call could pass any content:// URI and use
+   * the app's broader storage permissions to read or overwrite unrelated files.
+   */
+  private fun requireUriPermission(uri: Uri, write: Boolean) {
+    val flag = if (write) {
+      Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    } else {
+      Intent.FLAG_GRANT_READ_URI_PERMISSION
+    }
+    val granted = activity.checkUriPermission(
+      uri,
+      Process.myPid(),
+      Process.myUid(),
+      flag
+    ) == PackageManager.PERMISSION_GRANTED
+    if (!granted) error("URI is not authorized: $uri")
   }
 
   private fun walk(file: DocumentFile, prefix: String, needle: String, maxResults: Int, entries: JSONArray) {

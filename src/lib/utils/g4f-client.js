@@ -6,39 +6,104 @@ let g4fLoadPromise = null;
 const G4F_PROVIDER_NAME_MAP = {
     default: 'G4F Auto',
     pollinations: 'Pollinations AI',
-    deepinfra: 'DeepInfra',
-    groq: 'Groq',
-    openrouter: 'OpenRouter',
-    nvidia: 'NVIDIA',
-    puter: 'Puter',
+    airforce: 'API Airforce',
+    community: 'G4F Community',
+    audio: 'Audio',
     gemini: 'Gemini',
     huggingface: 'Hugging Face',
+    nvidia: 'NVIDIA',
     ollama: 'Ollama',
-    azure: 'Azure',
-    audio: 'Audio',
-    'api.airforce': 'API Airforce',
+    swarm: 'Ollama Swarm',
+    openrouter: 'OpenRouter',
+    puter: 'Puter',
+    groq: 'Groq',
+    qwen: 'Qwen',
+    crowllm: 'CrowLLM',
+    eaon: 'Eaon',
+    orcarouter: 'OrcaRouter',
+    relayrouter: 'RelayRouter',
+    llm7: 'LLM7',
+    kilo: 'Kilo Gateway',
+    webgpu: 'WebGPU (Local)',
+    bonsai: 'Bonsai (Local)',
+    bonsai2: 'Bonsai 2 (Local)',
+    chromeai: 'Chrome AI (Local)',
+    // Providers dropped by newer g4f.dev builds. Kept last so that saved
+    // connection profiles still resolve to a readable name.
+    deepinfra: 'DeepInfra',
     perplexity: 'Perplexity'
 };
 
 const G4F_PROVIDER_ORDER = [
     'default',
     'pollinations',
-    'deepinfra',
+    'qwen',
+    'gemini',
     'groq',
     'openrouter',
     'nvidia',
-    'puter',
-    'gemini',
-    'huggingface',
     'ollama',
-    'azure',
+    'swarm',
+    'huggingface',
+    'puter',
+    'airforce',
+    'community',
+    'crowllm',
+    'eaon',
+    'orcarouter',
+    'relayrouter',
+    'llm7',
+    'kilo',
+    'webgpu',
+    'bonsai',
+    'bonsai2',
+    'chromeai',
     'audio',
-    'api.airforce',
+    'deepinfra',
     'perplexity'
 ];
 
-const G4F_PROVIDER_STORAGE_KEYS = g4fConfig?.providerLocalStorage || {};
+// g4f.dev renamed a few provider keys; keep old ids working after the upgrade.
+const LEGACY_PROVIDER_KEYS = {
+    'api.airforce': 'airforce',
+    master: 'default',
+    // Upstream dropped the Azure proxy and g4f.space/api/azure returns 404,
+    // so saved Azure profiles fall back to the auto provider.
+    azure: 'default'
+};
+
+function normalizeG4FProviderKey(key = '') {
+    return LEGACY_PROVIDER_KEYS[key] || key;
+}
+
+export function normalizeG4FProviderId(providerId = '') {
+    if (!isG4FProvider(providerId)) {
+        return providerId;
+    }
+    return `g4f-${normalizeG4FProviderKey(providerId.slice('g4f-'.length))}`;
+}
+
+
+// g4f.dev renamed a few localStorage keys over time; keep reading the keys
+// users already saved under the old provider names.
+const G4F_PROVIDER_STORAGE_KEYS = {
+    ...(g4fConfig?.providerLocalStorage || {})
+};
+G4F_PROVIDER_STORAGE_KEYS.airforce = G4F_PROVIDER_STORAGE_KEYS.airforce
+    || G4F_PROVIDER_STORAGE_KEYS['api.airforce']
+    || 'Airforce-api_key';
+G4F_PROVIDER_STORAGE_KEYS['api.airforce'] = G4F_PROVIDER_STORAGE_KEYS['api.airforce']
+    || G4F_PROVIDER_STORAGE_KEYS.airforce;
+G4F_PROVIDER_STORAGE_KEYS.deepinfra = G4F_PROVIDER_STORAGE_KEYS.deepinfra || 'DeepInfra-api_key';
+G4F_PROVIDER_STORAGE_KEYS.perplexity = G4F_PROVIDER_STORAGE_KEYS.perplexity || 'Perplexity-api_key';
+
+const LEGACY_STORAGE_KEY_ALIASES = {
+    airforce: ['ApiAirforce-api_key'],
+    pollinations: ['PollinationsAI-api_key']
+};
+
 const G4F_PROVIDER_SETTINGS = g4fConfig?.providers || {};
+const G4F_SERVER_DEFAULT_MODELS = g4fConfig?.serverDefaultModels || {};
 const G4F_PROVIDER_DEFAULT_MODELS = Object.fromEntries(
     Object.entries(g4fConfig?.defaultModels || {}).map(([key, value]) => [
         key,
@@ -46,20 +111,39 @@ const G4F_PROVIDER_DEFAULT_MODELS = Object.fromEntries(
     ])
 );
 
+function getServerDefaultModel(providerKey) {
+    const serverId = G4F_PROVIDER_SETTINGS[providerKey]?.id;
+    if (!serverId) return null;
+    return G4F_SERVER_DEFAULT_MODELS[serverId] || null;
+}
+
 const G4F_FALLBACK_MODELS = {
     default: ['auto', 'gpt-4o-mini', 'gpt-4o', 'claude-3.5-sonnet', 'claude-sonnet-4-6', 'deepseek-v3', 'deepseek-v3.2'],
-    pollinations: ['openai', 'openai-fast', 'deepseek', 'gemini', 'mistral', 'claude', 'llama'],
-    deepinfra: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct', 'microsoft/WizardLM-2-8x22B'],
+    pollinations: ['openai-fast', 'openai', 'deepseek', 'gemini', 'mistral', 'claude', 'llama'],
+    qwen: ['qwen3.8-max', 'qwen3-max', 'qwen-plus', 'qwen-turbo'],
+    gemini: ['models/gemini-flash-latest', 'models/gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'],
     groq: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'qwen-qwq-32b', 'deepseek-r1-distill-llama-70b'],
     openrouter: ['openrouter/free', 'openai/gpt-4o', 'openai/gpt-4.1-mini', 'anthropic/claude-sonnet-4-6', 'meta-llama/llama-3.3-70b-instruct:free'],
-    nvidia: ['deepseek-ai/deepseek-v3.2', 'meta/llama-3.3-70b-instruct', 'qwen/qwen2.5-72b-instruct', 'mistralai/mistral-large-2-instruct'],
-    puter: ['anthropic:anthropic/claude-sonnet-4-6', 'gpt-4o', 'gpt-4o-mini', 'grok-beta', 'deepseek-chat'],
-    gemini: ['models/gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    nvidia: ['nvidia/nemotron-3-super-120b-a12b', 'deepseek-ai/deepseek-v3.2', 'meta/llama-3.3-70b-instruct', 'qwen/qwen2.5-72b-instruct'],
+    ollama: ['nemotron-3-nano:30b', 'deepseek-v3.2', 'llama3.3', 'qwen2.5', 'gemma3'],
+    swarm: ['auto'],
     huggingface: ['meta-llama/Llama-3.3-70B-Instruct', 'meta-llama/Llama-3.2-3B-Instruct', 'Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B'],
-    ollama: ['deepseek-v3.2', 'llama3.3', 'qwen2.5', 'gemma3', 'mistral-small'],
-    azure: ['model-router3', 'model-router', 'gpt-4o', 'gpt-4.1-mini'],
+    puter: ['anthropic:anthropic/claude-opus-4-7', 'anthropic:anthropic/claude-sonnet-4-6', 'gpt-4o', 'gpt-4o-mini', 'deepseek-chat'],
+    airforce: ['unmoderated-gpt', 'gpt-4o', 'gpt-4.1-mini', 'claude-sonnet-4.5', 'deepseek-v3.2', 'gemini-2.5-pro'],
+    community: ['auto'],
+    crowllm: ['glm-5.2'],
+    eaon: ['auto'],
+    orcarouter: ['deepseek/deepseek-v4-pro-free', 'auto'],
+    relayrouter: ['auto'],
+    llm7: ['default'],
+    kilo: ['kilo-auto/free'],
+    webgpu: ['Llama-3.1-8B-Instruct-q4f32_1-MLC'],
+    bonsai: ['1.7b'],
+    bonsai2: ['27b'],
+    chromeai: ['gemini-nano'],
     audio: ['gpt-audio'],
-    'api.airforce': ['gpt-4o', 'gpt-4.1-mini', 'claude-sonnet-4.5', 'deepseek-v3.2', 'gemini-2.5-pro'],
+    // Providers removed from newer g4f.dev builds; models kept for saved profiles.
+    deepinfra: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct', 'microsoft/WizardLM-2-8x22B'],
     perplexity: ['turbo', 'sonar', 'sonar-pro', 'sonar-reasoning']
 };
 
@@ -68,7 +152,7 @@ export const G4F_PROVIDER_CATALOG = (() => {
         new Set([
             ...G4F_PROVIDER_ORDER,
             ...Object.keys(G4F_PROVIDER_SETTINGS)
-        ])
+        ].map(normalizeG4FProviderKey))
     ).filter((key) => key && key !== 'custom' && key !== 'master');
 
     return keys.map((key) => ({
@@ -96,11 +180,15 @@ async function loadG4FModule() {
                 Client: module.Client,
                 Pollinations: module.Pollinations,
                 DeepInfra: module.DeepInfra,
-                Together: module.Together,
                 Puter: module.Puter,
                 HuggingFace: module.HuggingFace,
-                Worker: module.Worker,
-                Audio: module.Audio
+                Audio: module.Audio,
+                WebGPU: module.WebGPU,
+                Bonsai: module.Bonsai,
+                Bonsai2: module.Bonsai2,
+                ChromeAI: module.ChromeAI,
+                LLM7: module.LLM7,
+                Kilo: module.Kilo
             };
             return g4fModule;
         } catch (error) {
@@ -113,17 +201,21 @@ async function loadG4FModule() {
 }
 
 function getProviderClass(module, providerKey) {
-    return {
+    const providerClasses = {
         default: module.Client,
         pollinations: module.Pollinations,
-        nectar: module.Pollinations,
         audio: module.Audio,
         deepinfra: module.DeepInfra,
         huggingface: module.HuggingFace,
         puter: module.Puter,
-        worker: module.Worker,
-        together: module.Together
-    }[providerKey] || module.Client;
+        webgpu: module.WebGPU,
+        bonsai: module.Bonsai,
+        bonsai2: module.Bonsai2,
+        chromeai: module.ChromeAI,
+        llm7: module.LLM7,
+        kilo: module.Kilo
+    };
+    return providerClasses[providerKey] || module.Client;
 }
 
 function getSessionToken() {
@@ -143,7 +235,20 @@ function getStoredProviderApiKey(providerKey) {
         return undefined;
     }
 
-    return localStorage.getItem(storageKey) || undefined;
+    const value = localStorage.getItem(storageKey);
+    if (value) {
+        return value;
+    }
+
+    const legacyKeys = LEGACY_STORAGE_KEY_ALIASES[providerKey] || [];
+    for (const legacyKey of legacyKeys) {
+        const legacyValue = localStorage.getItem(legacyKey);
+        if (legacyValue) {
+            return legacyValue;
+        }
+    }
+
+    return undefined;
 }
 
 export async function getG4FProvidersList() {
@@ -155,7 +260,7 @@ export async function getG4FProvidersList() {
 }
 
 export async function createG4FClient(providerId, options = {}) {
-    const providerKey = providerId.replace('g4f-', '');
+    const providerKey = normalizeG4FProviderKey(providerId.replace('g4f-', ''));
     const module = await loadG4FModule();
 
     if (!module) {
@@ -201,15 +306,17 @@ export async function createG4FClient(providerId, options = {}) {
         clientOptions.sleep = clientOptions.sleep || 10000;
     }
 
-    if (!clientOptions.defaultModel && g4fConfig?.defaultModels?.[providerKey]) {
-        clientOptions.defaultModel = g4fConfig.defaultModels[providerKey];
+    if (!clientOptions.defaultModel) {
+        clientOptions.defaultModel = getServerDefaultModel(providerKey)
+            || G4F_PROVIDER_DEFAULT_MODELS[providerKey]?.[0]
+            || G4F_FALLBACK_MODELS[providerKey]?.[0];
     }
 
     return new ProviderClass(clientOptions);
 }
 
 export async function fetchG4FModels(providerId, options = {}) {
-    const providerKey = providerId.replace('g4f-', '');
+    const providerKey = normalizeG4FProviderKey(providerId.replace('g4f-', ''));
 
     try {
         const client = await createG4FClient(providerId, options);
@@ -478,10 +585,11 @@ export function isG4FProvider(providerId) {
 }
 
 export function getG4FDefaultModels(providerId) {
-    const providerKey = providerId.replace('g4f-', '');
+    const providerKey = normalizeG4FProviderKey(providerId.replace('g4f-', ''));
+    const serverModel = getServerDefaultModel(providerKey);
     const configuredModels = G4F_PROVIDER_DEFAULT_MODELS[providerKey] || [];
     const fallbackModels = G4F_FALLBACK_MODELS[providerKey] || G4F_FALLBACK_MODELS.default;
-    return [...new Set([...configuredModels, ...fallbackModels])].filter(Boolean);
+    return [...new Set([serverModel, ...configuredModels, ...fallbackModels].filter(Boolean))];
 }
 
 export const G4F_DEFAULT_MODELS = G4F_FALLBACK_MODELS;

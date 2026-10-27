@@ -48,13 +48,7 @@
     function save() {
         if (!data.title.trim()) return;
 
-        if ($currentView === 'dashboard') {
-            if (editTask) {
-                taskStore.updateTask(data.id, data);
-            } else {
-                taskStore.addTask(data);
-            }
-        } else if ($currentView === 'templates') {
+        if ($currentView === 'templates') {
             if (editTask) {
                 taskStore.updateTemplate(data.id, data);
             } else {
@@ -65,6 +59,13 @@
                 taskStore.updateScheduledTask(data.id, data);
             } else {
                 taskStore.addScheduledTask(data);
+            }
+        } else {
+            // dashboard / statistics: both show real tasks
+            if (editTask) {
+                taskStore.updateTask(data.id, data);
+            } else {
+                taskStore.addTask(data);
             }
         }
 
@@ -208,7 +209,7 @@
                     </div>
                 </div>
 
-                {#if $currentView === 'dashboard'}
+                {#if $currentView !== 'templates' && $currentView !== 'scheduled'}
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label for="task-modal-date" class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.plan')}</label>

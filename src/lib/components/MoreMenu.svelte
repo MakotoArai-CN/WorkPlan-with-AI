@@ -1,5 +1,6 @@
 <script>
     import { currentView } from '../stores/tasks.js';
+    import { settingsStore } from '../stores/settings.js';
     import { pushNavigation } from '../stores/navigation.js';
     import { _ } from 'svelte-i18n';
 
@@ -29,6 +30,20 @@
             </div>
             <i class="ph-bold ph-caret-right text-slate-300"></i>
         </button>
+
+        {#if $settingsStore.enableOvertime}
+            <button on:click={() => navigateTo('worklog')}
+                class="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center gap-4 hover:bg-slate-50 transition">
+                <div class="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
+                    <i class="ph-fill ph-clipboard-text text-2xl text-orange-600"></i>
+                </div>
+                <div class="flex-1 text-left">
+                    <div class="font-bold text-slate-800">{$_('nav.worklog')}</div>
+                    <div class="text-xs text-slate-500">{$_('more.worklog_desc') || ''}</div>
+                </div>
+                <i class="ph-bold ph-caret-right text-slate-300"></i>
+            </button>
+        {/if}
 
         <button on:click={() => navigateTo('aichat')}
             class="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center gap-4 hover:bg-slate-50 transition">

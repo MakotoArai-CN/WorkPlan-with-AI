@@ -11,7 +11,8 @@ import {
     beginSessionWrapping,
     endSessionWrapping,
     needsMigration,
-    migrateEncryption
+    migrateEncryption,
+    deriveSyncSecret
 } from '../utils/crypto.js';
 import {
     getDeviceKey,
@@ -21,7 +22,9 @@ import {
     disableDeviceBinding,
     readBindingKey,
     storeBindingEnvelope,
+    markDeviceBindingEnabled,
     bindingKeyFromRecoveryCode,
+    normalizeRecoveryCode,
     generateRecoveryCode,
     clearDeviceKeyCache,
     enablePin,
@@ -99,7 +102,8 @@ function createPasswordsStore() {
 
     function saveSettings(settings) {
         if (typeof window === 'undefined') return;
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        const current = loadSettings();
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...current, ...settings }));
     }
 
     function load() {
@@ -141,7 +145,9 @@ function createPasswordsStore() {
 
         set({
             passwords,
-            categories: ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
+            categories: Array.isArray(settings.categories) && settings.categories.length > 0
+                ? settings.categories
+                : ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
             isUnlocked: sessionUnlocked,
             masterPasswordHash: masterHash,
             rememberSession: settings.rememberSession || false,
@@ -342,8 +348,11 @@ function createPasswordsStore() {
         },
         lock: () => {
             const state = get({ subscribe });
+            // An explicit lock must drop the decrypted key material from memory
+            // even when "remember session" is on (that flag only keeps the
+            // encrypted session blob for the next app start).
+            clearActiveSecrets();
             if (!state.rememberSession) {
-                clearActiveSecrets();
                 sessionToken = null;
                 clearSession();
             }
@@ -422,15 +431,67 @@ function createPasswordsStore() {
             return decrypt(encryptedPassword, vaultSecret);
         },
         getMasterPassword: () => currentMasterPassword,
+        /**
+         * Encrypted entries and categories for cloud sync. Entries are already
+         * encrypted under the vault secret; the sync layer wraps the whole
+         * payload again with a device-bound key before uploading.
+         */
+        getSyncPayload: () => {
+            if (!vaultSecret) return null;
+            const state = get({ subscribe });
+            return {
+                passwords: state.passwords,
+                categories: state.categories
+            };
+        },
+        /** Replace local entries with a decrypted remote snapshot (same vault secret). */
+        replaceFromSync: (payload) => {
+            if (!vaultSecret || !payload || !Array.isArray(payload.passwords)) {
+                return { success: false, error: '密码库未解锁或同步数据无效' };
+            }
+            const passwords = payload.passwords.filter(entry => (
+                entry && typeof entry.id === 'string' && typeof entry.password === 'string'
+            ));
+            const categories = Array.isArray(payload.categories) && payload.categories.length > 0
+                ? payload.categories
+                : get({ subscribe }).categories;
+            update(s => {
+                const next = { ...s, passwords, categories };
+                saveImmediate(next);
+                return next;
+            });
+            return { success: true, count: passwords.length };
+        },
+        /** A derived secret for sync encryption; never exposes the master password. */
+        getSyncSecret: async (accessKey) => {
+            if (!vaultSecret) return null;
+            const deviceKey = await getDeviceKey();
+            return deriveSyncSecret(vaultSecret, deviceKey || '', accessKey || '');
+        },
         addCategory: (category) => update(s => {
             if (s.categories.includes(category)) return s;
-            return { ...s, categories: [...s.categories, category] };
+            const categories = [...s.categories, category];
+            saveSettings({ categories });
+            return { ...s, categories };
         }),
         clearAll: () => {
             clearActiveSecrets();
             sessionToken = null;
             migrationDone = false;
             clearSession();
+            // A new vault must not inherit the previous vault's unlock paths:
+            // otherwise the old PIN/recovery code can still unlock (or bind) it.
+            try {
+                disableDeviceBinding();
+            } catch (error) {
+                console.warn('Failed to disable device binding during clear:', error);
+            }
+            try {
+                disableBiometric();
+            } catch (error) {
+                console.warn('Failed to disable biometric during clear:', error);
+            }
+            endSessionWrapping();
             if (typeof window !== 'undefined') {
                 localStorage.removeItem(STORAGE_KEY);
                 localStorage.removeItem(MASTER_KEY);
@@ -457,6 +518,7 @@ function createPasswordsStore() {
             const BATCH_SIZE = 50;
             const passwords = state.passwords;
             const reEncryptedPasswords = [];
+            const failedPasswords = [];
             const now = new Date().toISOString();
 
             // Re-encrypt against the derived secrets, not the raw passwords: with
@@ -475,28 +537,47 @@ function createPasswordsStore() {
                 await new Promise(resolve => setTimeout(resolve, 0));
                 const batch = passwords.slice(i, i + BATCH_SIZE);
                 for (const p of batch) {
-                    const plain = decrypt(p.password, oldSecret) || '';
+                    const plain = decrypt(p.password, oldSecret);
+                    if (plain === null) {
+                        // Never rewrite an entry we could not read: encrypt('') is
+                        // null and would permanently destroy the stored secret.
+                        failedPasswords.push(p.title || p.id);
+                        continue;
+                    }
                     reEncryptedPasswords.push({
                         ...p,
-                        password: encrypt(plain, newSecret),
+                        password: plain === '' ? '' : encrypt(plain, newSecret),
                         updatedAt: now
                     });
                 }
             }
 
+            if (failedPasswords.length > 0) {
+                return {
+                    success: false,
+                    error: `有 ${failedPasswords.length} 条记录无法用当前主密码解密，已取消修改（未改动任何数据）`
+                };
+            }
+
             const newHash = await hashPassword(newPassword);
             await setActiveSecrets(newPassword);
+
+            try {
+                update(s => {
+                    const newState = { ...s, passwords: reEncryptedPasswords, masterPasswordHash: newHash };
+                    saveImmediate(newState);
+                    return newState;
+                });
+            } catch (error) {
+                // Nothing reached disk: keep the old master usable in this session.
+                currentMasterPassword = oldPassword;
+                vaultSecret = oldSecret;
+                return { success: false, error: `主密码更新保存失败：${error.message || error}` };
+            }
 
             // Any PIN wrapper holds the old master password; drop it so the user
             // re-enrolls rather than silently unlocking with a stale secret.
             clearPin();
-
-            update(s => {
-                const newState = { ...s, passwords: reEncryptedPasswords, masterPasswordHash: newHash };
-                saveImmediate(newState);
-                return newState;
-            });
-
             clearSession();
             if (state.rememberSession) {
                 saveSession(newPassword);
@@ -540,7 +621,8 @@ function createPasswordsStore() {
             let recoveryCode;
             let bindingKey;
             try {
-                ({ recoveryCode, bindingKey } = await enableDeviceBinding());
+                // Arm the binding flag only after the entries are rewritten.
+                ({ recoveryCode, bindingKey } = await enableDeviceBinding({ deferFlag: true }));
             } catch (e) {
                 return { success: false, error: e.message || '设备绑定失败' };
             }
@@ -555,11 +637,18 @@ function createPasswordsStore() {
             });
 
             vaultSecret = boundSecret;
-            update(s => {
-                const next = { ...s, passwords: rebound };
-                saveImmediate(next);
-                return next;
-            });
+            try {
+                update(s => {
+                    const next = { ...s, passwords: rebound };
+                    saveImmediate(next);
+                    return next;
+                });
+                markDeviceBindingEnabled();
+            } catch (error) {
+                // Entries were not persisted: stay usable under the master alone.
+                vaultSecret = currentMasterPassword;
+                return { success: false, error: `设备绑定保存失败：${error.message || error}` };
+            }
 
             // The PIN wrapper is device-bound too; force re-enrollment.
             clearPin();
@@ -636,6 +725,9 @@ function createPasswordsStore() {
             if (!storeBindingEnvelope(oldBindingKey, newDeviceKey)) {
                 return { success: false, error: '绑定到本设备失败' };
             }
+            // Restoring the envelope is not enough: without the flag the next
+            // unlock derives the bare master and cannot decrypt the entries.
+            markDeviceBindingEnabled();
 
             currentMasterPassword = masterPassword;
             vaultSecret = oldSecret;
@@ -643,7 +735,9 @@ function createPasswordsStore() {
 
             update(s => ({ ...s, isUnlocked: true }));
 
-            return { success: true };
+            const normalizedCode = normalizeRecoveryCode(recoveryCode);
+            const displayCode = normalizedCode.replace(/(.{4})(?=.)/g, '$1-');
+            return { success: true, recoveryCode: displayCode };
         },
 
         /**
