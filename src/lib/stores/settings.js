@@ -188,13 +188,16 @@ function createSettingsStore() {
         if (shouldAnimate) {
             document.documentElement.classList.add('theme-switching');
             document.body.classList.add('theme-switching');
+            // Resolve the transition before swapping theme variables; otherwise
+            // the browser can paint the new palette without animating.
+            void document.documentElement.offsetHeight;
             if (themeTransitionTimer) {
                 clearTimeout(themeTransitionTimer);
             }
             themeTransitionTimer = setTimeout(() => {
                 document.documentElement.classList.remove('theme-switching');
                 document.body.classList.remove('theme-switching');
-            }, 320);
+            }, 620);
         }
 
         document.documentElement.classList.toggle('dark', isDark);
