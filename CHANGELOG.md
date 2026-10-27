@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.13] - 2026-10-28
+
+- 打开密码管理时，主密码输入框自动获得焦点，输入后可直接按回车解锁
+- 「从 Bitwarden / Vaultwarden 导入」从密码页菜单移到系统设置，只有开启密码库云同步后才显示入口，避免未启用同步时误导入
+- 删除自定义 AI 连接时同步清理 `providerConfigs` 中不再被任何连接使用的 API Key，修改连接时仍按原逻辑覆盖缓存
+- 外观主题和语言选项改为和左侧菜单一致的滑动背景块，切换时背景色块以 300ms 缓动移动
+- 把主题初始化脚本从 `app.html` 内联代码移到 `static/theme-init.js`，解决 Tauri CSP 对内联脚本的拦截；开发环境单独放行 Vite HMR 所需的 inline/eval 和 blob worker，生产 CSP 仍保持严格
+- 更新依赖锁文件中的可兼容版本，包含 docx、Svelte、PostCSS、Autoprefixer 及一批传递依赖
+- 保持 0.3.11 的 localStorage 数据格式兼容，未修改数据库 schema；旧的 task cache 缺少 `overtimeRecords`/`leaveRecords` 时仍按空数组加载
+
 ## [0.3.12] - 2026-10-27
 
 - 重写 README 和 `docs/sql/README.md`，去掉营销化描述，修正过期功能和命令，补全 Bitwarden/Vaultwarden、1Password、云同步和本地 SQLite 的当前状态
