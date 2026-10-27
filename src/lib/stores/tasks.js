@@ -287,6 +287,37 @@ function createTaskStore() {
     let lastActivityAt = Date.now();
     let lastHeartbeatAt = 0;
     let heartbeatRunning = false;
+    // When worklog records move to their own encrypted v2 record, the task
+    // blob must stop carrying them in plaintext. Initialize from settings before
+    // the first cloud read so a reload cannot re-upload the old plaintext blob.
+    let worklogCloudEncrypted = false;
+    if (typeof window !== 'undefined') {
+        try {
+            const savedSettings = JSON.parse(localStorage.getItem('planpro_system_settings') || '{}');
+            worklogCloudEncrypted = savedSettings.syncWorklog === true;
+        } catch {
+            worklogCloudEncrypted = false;
+        }
+    }
+
+    function cloudData(state) {
+        return {
+            tasks: state.tasks,
+            templates: state.templates,
+            scheduledTasks: state.scheduledTasks,
+            overtimeRecords: worklogCloudEncrypted ? [] : (state.overtimeRecords || []),
+            leaveRecords: worklogCloudEncrypted ? [] : (state.leaveRecords || [])
+        };
+    }
+
+    function mergeRemoteWorklog(current, remoteData) {
+        if (!worklogCloudEncrypted) return remoteData;
+        return {
+            ...remoteData,
+            overtimeRecords: current.overtimeRecords || [],
+            leaveRecords: current.leaveRecords || []
+        };
+    }
 
     function markActivity() {
         lastActivityAt = Date.now();
@@ -408,19 +439,14 @@ function createTaskStore() {
         try {
             const data = await loadCloudRecord(accessKey);
             const current = get({ subscribe });
-            const localData = {
-                tasks: current.tasks,
-                templates: current.templates,
-                scheduledTasks: current.scheduledTasks,
-                overtimeRecords: current.overtimeRecords,
-                leaveRecords: current.leaveRecords
-            };
+            const localData = cloudData(current);
             const localStr = getPureDataString(localData);
             const hasLocalChanges = localStr !== baselineStr;
 
             if (data && data.content) {
                 const remoteData = normalizeSyncPayload(data.content);
-                const remoteStr = getPureDataString(remoteData);
+                const remoteCloudData = cloudData(remoteData);
+                const remoteStr = getPureDataString(remoteCloudData);
                 loadState = 'ready';
                 pendingLocalChange = false;
 
@@ -433,28 +459,30 @@ function createTaskStore() {
 
                 if (!hasLocalChanges) {
                     // No offline work: the cloud document is authoritative.
+                    const applied = mergeRemoteWorklog(current, remoteData);
                     localCloudSnapshotStr = remoteStr;
                     update(s => ({
                         ...s,
-                        tasks: remoteData.tasks,
-                        templates: remoteData.templates,
-                        scheduledTasks: remoteData.scheduledTasks,
-                        overtimeRecords: remoteData.overtimeRecords,
-                        leaveRecords: remoteData.leaveRecords,
+                        tasks: applied.tasks,
+                        templates: applied.templates,
+                        scheduledTasks: applied.scheduledTasks,
+                        overtimeRecords: applied.overtimeRecords,
+                        leaveRecords: applied.leaveRecords,
                         syncStatus: 'done',
                         lastCloudStr: remoteStr
                     }));
-                    persistLocalCache({ ...current, ...remoteData }, remoteStr);
+                    persistLocalCache({ ...current, ...applied }, remoteStr);
                     return;
                 }
 
                 // Offline work exists. Merge per item instead of letting the
                 // pull wipe the newly created/changed tasks, then push the merge.
-                const merged = mergeSyncState(localData, remoteData, baselineData);
-                const mergedState = { ...current, ...merged };
+                const merged = mergeSyncState(localData, remoteCloudData, baselineData);
+                const mergedFull = mergeRemoteWorklog(current, merged);
+                const mergedState = { ...current, ...mergedFull };
                 const mergedStr = getPureDataString(merged);
                 localCloudSnapshotStr = remoteStr;
-                update(s => ({ ...s, ...merged, syncStatus: 'idle', lastCloudStr: remoteStr }));
+                update(s => ({ ...s, ...mergedFull, syncStatus: 'idle', lastCloudStr: remoteStr }));
                 persistLocalCache(mergedState, remoteStr);
                 if (mergedStr !== remoteStr) {
                     saveData(get({ subscribe }));
@@ -517,13 +545,7 @@ function createTaskStore() {
             return;
         }
 
-        const currentPureStr = getPureDataString({
-            tasks: state.tasks,
-            templates: state.templates,
-            scheduledTasks: state.scheduledTasks,
-            overtimeRecords: state.overtimeRecords,
-            leaveRecords: state.leaveRecords
-        });
+        const currentPureStr = getPureDataString(cloudData(state));
 
         if (currentPureStr === state.lastCloudStr) {
             localCloudSnapshotStr = currentPureStr;
@@ -577,13 +599,7 @@ function createTaskStore() {
         }
 
         try {
-            const localData = {
-                tasks: state.tasks,
-                templates: state.templates,
-                scheduledTasks: state.scheduledTasks,
-                overtimeRecords: state.overtimeRecords,
-                leaveRecords: state.leaveRecords
-            };
+            const localData = cloudData(state);
             const localPureStr = getPureDataString(localData);
             const baselineStr = localCloudSnapshotStr || '';
             const localDirty = localPureStr !== baselineStr;
@@ -598,22 +614,24 @@ function createTaskStore() {
             const remoteData = data?.content
                 ? normalizeSyncPayload(data.content)
                 : { tasks: [], templates: [], scheduledTasks: [], overtimeRecords: [], leaveRecords: [] };
-            const remoteStr = getPureDataString(remoteData);
+            const remoteCloudData = cloudData(remoteData);
+            const remoteStr = getPureDataString(remoteCloudData);
 
             if (!localDirty) {
                 if (remoteStr !== localPureStr) {
+                    const applied = mergeRemoteWorklog(state, remoteData);
                     localCloudSnapshotStr = remoteStr;
                     update(s => ({
                         ...s,
-                        tasks: remoteData.tasks,
-                        templates: remoteData.templates,
-                        scheduledTasks: remoteData.scheduledTasks,
-                        overtimeRecords: remoteData.overtimeRecords,
-                        leaveRecords: remoteData.leaveRecords,
+                        tasks: applied.tasks,
+                        templates: applied.templates,
+                        scheduledTasks: applied.scheduledTasks,
+                        overtimeRecords: applied.overtimeRecords,
+                        leaveRecords: applied.leaveRecords,
                         syncStatus: 'done',
                         lastCloudStr: remoteStr
                     }));
-                    persistLocalCache({ ...state, ...remoteData }, remoteStr);
+                    persistLocalCache({ ...state, ...applied }, remoteStr);
                     setTimeout(() => update(s => s.syncStatus === 'done' ? { ...s, syncStatus: 'idle' } : s), 3000);
                 } else {
                     localCloudSnapshotStr = remoteStr;
@@ -626,10 +644,11 @@ function createTaskStore() {
             // Unsynced local work: merge with the cloud copy before uploading so
             // neither the offline tasks nor another device's changes disappear.
             update(s => ({ ...s, syncStatus: 'syncing' }));
-            const merged = mergeSyncState(localData, remoteData, parseSnapshot(baselineStr));
+            const merged = mergeSyncState(localData, remoteCloudData, parseSnapshot(baselineStr));
+            const mergedFull = mergeRemoteWorklog(state, merged);
             const mergedStr = getPureDataString(merged);
-            const mergedState = { ...state, ...merged };
-            update(s => ({ ...s, ...merged }));
+            const mergedState = { ...state, ...mergedFull };
+            update(s => ({ ...s, ...mergedFull }));
             localCloudSnapshotStr = remoteStr;
             persistLocalCache(mergedState, remoteStr);
 
@@ -652,13 +671,7 @@ function createTaskStore() {
             console.error('Heartbeat sync error:', e);
             // Pull failed. If there is unsynced local data, still attempt an
             // upload rather than leaving it stranded (best effort).
-            const localData = {
-                tasks: state.tasks,
-                templates: state.templates,
-                scheduledTasks: state.scheduledTasks,
-                overtimeRecords: state.overtimeRecords,
-                leaveRecords: state.leaveRecords
-            };
+            const localData = cloudData(state);
             const localPureStr = getPureDataString(localData);
             if (localPureStr !== (localCloudSnapshotStr || '')) {
                 try {
@@ -959,6 +972,23 @@ function createTaskStore() {
         },
         markActivity,
         heartbeatSync,
+        setWorklogCloudEncrypted: (enabled) => {
+            worklogCloudEncrypted = enabled === true;
+            // Rewrite the task blob without plaintext worklog fields. The
+            // encrypted worklog record is uploaded separately.
+            if (worklogCloudEncrypted) {
+                saveData(get({ subscribe }));
+            }
+        },
+        replaceWorklogRecords: (overtimeRecords, leaveRecords) => update(s => {
+            const next = {
+                ...s,
+                overtimeRecords: Array.isArray(overtimeRecords) ? overtimeRecords : [],
+                leaveRecords: Array.isArray(leaveRecords) ? leaveRecords : []
+            };
+            persistLocalCache(next, s.lastCloudStr || '');
+            return next;
+        }),
         // 心跳入口：用户空闲达到 idleMs 且距上次心跳达到 minIntervalMs 时才同步。
         maybeHeartbeat: ({ idleMs = 300000, minIntervalMs = 300000 } = {}) => {
             const now = Date.now();
