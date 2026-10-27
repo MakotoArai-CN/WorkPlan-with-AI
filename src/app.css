@@ -129,12 +129,23 @@
 
 html.theme-switching,
 html.theme-switching body,
-html.theme-switching body *,
+html.theme-switching body *:not([data-pill]),
 body.theme-switching,
-body.theme-switching * {
+body.theme-switching *:not([data-pill]) {
     transition-property: background-color, color, border-color, box-shadow, fill, stroke, background-image;
-    transition-duration: 240ms;
-    transition-timing-function: ease;
+    transition-duration: 480ms;
+    transition-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+.appearance-pill {
+    transition:
+        left 480ms cubic-bezier(0.45, 0, 0.55, 1),
+        top 480ms cubic-bezier(0.45, 0, 0.55, 1),
+        width 480ms cubic-bezier(0.45, 0, 0.55, 1),
+        height 480ms cubic-bezier(0.45, 0, 0.55, 1),
+        background-color 480ms cubic-bezier(0.45, 0, 0.55, 1),
+        opacity 240ms ease;
+    will-change: left, top, width, height;
 }
 
 button,
