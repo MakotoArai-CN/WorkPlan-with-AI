@@ -5,9 +5,12 @@
     import Overtime from './Overtime.svelte';
     import Leave from './Leave.svelte';
     import WorklogExportModal from './WorklogExportModal.svelte';
+    import SegmentedControl from './SegmentedControl.svelte';
     import CareerAnalysis from './CareerAnalysis.svelte';
     import { getLeaveYearSummary, getMonthSummary, getYearSummary } from '../utils/overtime.js';
     import { tick } from 'svelte';
+    import { fly } from 'svelte/transition';
+    import { linear } from 'svelte/easing';
 
     let activeTab = 'overtime';
     let showExport = false;
@@ -43,9 +46,16 @@
         target?.openCreate();
     }
 
-    function switchTab(tab) {
-        activeTab = tab;
+    function slideDuration() {
+        if (typeof document !== 'undefined' && document.documentElement.classList.contains('reduce-animations')) return 0;
+        if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 0;
+        return 280;
     }
+
+    $: tabOptions = [
+        { value: 'overtime', label: $_('worklog.kind_overtime'), icon: 'ph-clock-afternoon', activeClass: 'font-bold text-orange-600' },
+        { value: 'leave', label: $_('worklog.kind_leave'), icon: 'ph-calendar-check', activeClass: 'font-bold text-rose-600' }
+    ];
 </script>
 
 <div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
@@ -58,26 +68,7 @@
                     </h1>
                     <div class="text-[10px] md:text-xs text-slate-500">{$_('worklog.subtitle')}</div>
                 </div>
-                <div class="flex bg-slate-100 p-1 rounded-lg gap-1 ml-1">
-                    <button on:click={() => switchTab('overtime')}
-                        class="px-3 py-1.5 text-[11px] rounded-md transition flex items-center gap-1"
-                        class:bg-white={activeTab === 'overtime'}
-                        class:shadow-sm={activeTab === 'overtime'}
-                        class:font-bold={activeTab === 'overtime'}
-                        class:text-orange-600={activeTab === 'overtime'}
-                        class:text-slate-500={activeTab !== 'overtime'}>
-                        <i class="ph ph-clock-afternoon"></i> {$_('worklog.kind_overtime')}
-                    </button>
-                    <button on:click={() => switchTab('leave')}
-                        class="px-3 py-1.5 text-[11px] rounded-md transition flex items-center gap-1"
-                        class:bg-white={activeTab === 'leave'}
-                        class:shadow-sm={activeTab === 'leave'}
-                        class:font-bold={activeTab === 'leave'}
-                        class:text-rose-600={activeTab === 'leave'}
-                        class:text-slate-500={activeTab !== 'leave'}>
-                        <i class="ph ph-calendar-check"></i> {$_('worklog.kind_leave')}
-                    </button>
-                </div>
+                <SegmentedControl bind:value={activeTab} options={tabOptions} className="ml-1" />
             </div>
             <div class="flex items-center gap-2 self-start md:self-auto">
                 <button on:click={() => showCareer = true}
@@ -99,11 +90,17 @@
     </header>
 
     <div class="flex-1 min-h-0 overflow-hidden">
-        {#if activeTab === 'overtime'}
-            <Overtime bind:this={overtimeRef} embedded />
-        {:else}
-            <Leave bind:this={leaveRef} embedded />
-        {/if}
+        {#key activeTab}
+            <div class="h-full"
+                in:fly={{ x: activeTab === 'leave' ? 72 : -72, duration: slideDuration(), easing: linear }}
+                out:fly={{ x: activeTab === 'leave' ? -72 : 72, duration: slideDuration(), easing: linear }}>
+                {#if activeTab === 'overtime'}
+                    <Overtime bind:this={overtimeRef} embedded />
+                {:else}
+                    <Leave bind:this={leaveRef} embedded />
+                {/if}
+            </div>
+        {/key}
     </div>
 </div>
 

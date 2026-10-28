@@ -13,6 +13,7 @@ import { DEFAULT_OVERTIME_CONFIG, normalizeOvertimeConfig } from '../utils/overt
 const DARK_THEMES = new Set(['dark', 'graphite']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
 const APP_VERSION = typeof __WORKPLAN_VERSION__ === 'string' ? __WORKPLAN_VERSION__ : '0.0.0';
+const AGREEMENT_VERSION = '1.1';
 let notificationChannelPromise = null;
 
 function isMobilePlatform() {
@@ -67,12 +68,14 @@ function getInitialSettings() {
             closeToQuit: false,
             androidPermissionsPrompted: false,
             agreementAccepted: false,
+            agreementVersion: AGREEMENT_VERSION,
             showAgreement: false,
             appVersion: APP_VERSION,
             dailyReportPrompt: '',
             weeklyReportPrompt: '',
             theme: 'auto',
             markdownEditor: 'vditor',
+            reduceAnimations: false,
             databaseConfig: getDefaultDatabaseConfig(),
             localFileConfig: getDefaultLocalFileConfig(),
             workspaceRoot: ''
@@ -99,13 +102,15 @@ function getInitialSettings() {
                 syncLockedNotes: parsed.syncLockedNotes === true,
                 closeToQuit: parsed.closeToQuit ?? false,
                 androidPermissionsPrompted: parsed.androidPermissionsPrompted ?? false,
-                agreementAccepted: parsed.agreementAccepted ?? false,
-                showAgreement: false,
+                agreementAccepted: parsed.agreementAccepted === true && parsed.agreementVersion === AGREEMENT_VERSION,
+                agreementVersion: parsed.agreementVersion || '',
+                showAgreement: parsed.agreementAccepted === true && parsed.agreementVersion !== AGREEMENT_VERSION,
                 appVersion: APP_VERSION,
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
                 theme: parsed.theme || 'auto',
                 markdownEditor: parsed.markdownEditor || 'vditor',
+                reduceAnimations: parsed.reduceAnimations === true,
                 databaseConfig: {
                     ...getDefaultDatabaseConfig(),
                     ...(parsed.databaseConfig || {})
@@ -138,12 +143,14 @@ function getDefaultSettings() {
         closeToQuit: false,
         androidPermissionsPrompted: false,
         agreementAccepted: false,
+        agreementVersion: AGREEMENT_VERSION,
         showAgreement: false,
         appVersion: APP_VERSION,
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         theme: 'auto',
         markdownEditor: 'vditor',
+        reduceAnimations: false,
         databaseConfig: getDefaultDatabaseConfig(),
         localFileConfig: getDefaultLocalFileConfig(),
         workspaceRoot: ''
@@ -170,10 +177,12 @@ function createSettingsStore() {
             closeToQuit: state.closeToQuit,
             androidPermissionsPrompted: state.androidPermissionsPrompted,
             agreementAccepted: state.agreementAccepted,
+            agreementVersion: state.agreementVersion || '',
             dailyReportPrompt: state.dailyReportPrompt,
             weeklyReportPrompt: state.weeklyReportPrompt,
             theme: state.theme,
             markdownEditor: state.markdownEditor,
+            reduceAnimations: state.reduceAnimations === true,
             databaseConfig: state.databaseConfig,
             localFileConfig: state.localFileConfig
         }));
@@ -442,6 +451,17 @@ function createSettingsStore() {
             save(newState);
             return newState;
         }),
+        setReduceAnimations: (value) => update(s => {
+            const next = value === true;
+            if (s.reduceAnimations === next) return s;
+            const newState = { ...s, reduceAnimations: next };
+            save(newState);
+            if (typeof document !== 'undefined') {
+                document.documentElement.classList.toggle('reduce-animations', next);
+            }
+            return newState;
+        }),
+
         setMarkdownEditor: (editor) => update(s => {
             if (s.markdownEditor === editor) return s;
             const newState = { ...s, markdownEditor: editor };
@@ -568,14 +588,18 @@ function createSettingsStore() {
             return newState;
         }),
         acceptAgreement: () => update(s => {
-            const newState = { ...s, agreementAccepted: true, showAgreement: false };
+            const newState = { ...s, agreementAccepted: true, agreementVersion: AGREEMENT_VERSION, showAgreement: false };
             save(newState);
             return newState;
         }),
         showAgreementModal: () => update(s => ({ ...s, showAgreement: true })),
         hideAgreementModal: () => update(s => ({ ...s, showAgreement: false })),
-        isAgreementAccepted: () => get({ subscribe }).agreementAccepted,
+        isAgreementAccepted: () => get({ subscribe }).agreementAccepted && get({ subscribe }).agreementVersion === AGREEMENT_VERSION,
     };
 }
 
 export const settingsStore = createSettingsStore();
+
+if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('reduce-animations', get(settingsStore).reduceAnimations === true);
+}

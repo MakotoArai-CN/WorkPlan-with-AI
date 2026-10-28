@@ -1,6 +1,7 @@
 <script>
     import { _ } from 'svelte-i18n';
     import { showToast } from '../stores/modal.js';
+    import AnimatedModal from './AnimatedModal.svelte';
     import {
         BOSS_FIELDS,
         BOSS_LEAVE_FIELDS,
@@ -124,16 +125,7 @@
     }
 </script>
 
-{#if show}
-    <div class="fixed inset-0 z-[60] flex items-center justify-center p-4">
-        <div
-            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            on:click={onClose}
-            on:keydown={(event) => event.key === 'Escape' && onClose()}
-            role="button"
-            tabindex="0"
-        ></div>
-        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg relative flex flex-col max-h-[92vh] overflow-hidden">
+<AnimatedModal bind:show {onClose} zIndex={60} panelClass="max-w-lg">
             <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/40">
                 <div>
                     <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100">{$_('worklog.export_title')}</h3>
@@ -268,6 +260,4 @@
                     {exporting ? $_('worklog.exporting') : $_('worklog.export')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
