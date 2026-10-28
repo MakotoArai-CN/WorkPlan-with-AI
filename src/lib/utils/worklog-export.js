@@ -1,16 +1,16 @@
 // Shared, field-configurable export for worklog records.
 //
-// The "boss" preset intentionally excludes pay/compensation so a timesheet can
-// be shared without exposing salary information. Custom mode lets the user pick
-// exactly which columns go into CSV/Excel/JSON.
+// The "clean" preset intentionally excludes pay/compensation so a timesheet
+// can be shared without exposing salary information. Custom mode lets the user
+// pick exactly which columns go into CSV/Excel/JSON.
 
 import { exportToCSV, exportToExcel, exportToJSON } from './export.js';
 import { calculateRecordPay } from './overtime.js';
 
 export const OVERTIME_FIELDS = ['date', 'start', 'end', 'hours', 'type', 'compensation', 'pay', 'note'];
 export const LEAVE_FIELDS = ['startDate', 'endDate', 'duration', 'unit', 'type', 'paid', 'note'];
-export const BOSS_FIELDS = ['date', 'kind', 'hours', 'note'];
-export const BOSS_LEAVE_FIELDS = ['startDate', 'endDate', 'kind', 'duration', 'note'];
+export const BOSS_FIELDS = ['date', 'hours', 'note'];
+export const BOSS_LEAVE_FIELDS = ['startDate', 'endDate', 'duration', 'note'];
 
 export const WORKLOG_PRESETS = ['boss', 'full', 'custom'];
 
@@ -49,6 +49,28 @@ function leaveValue(record, field, context) {
     }
 }
 
+export function filterWorklogRecords(kind, records, scope, year, month) {
+    const list = Array.isArray(records) ? records : [];
+    if (scope === 'all') return list;
+    if (scope === 'month') {
+        const prefix = `${year}-${String(month).padStart(2, '0')}`;
+        if (kind === 'leave') {
+            const last = new Date(Number(year), Number(month), 0).getDate();
+            const start = `${prefix}-01`;
+            const end = `${prefix}-${String(last).padStart(2, '0')}`;
+            return list.filter(record => record.startDate <= end && record.endDate >= start);
+        }
+        return list.filter(record => String(record.date || '').startsWith(prefix));
+    }
+    return list.filter(record => {
+        if (kind === 'leave') {
+            return String(record.startDate || '').slice(0, 4) <= String(year)
+                && String(record.endDate || '').slice(0, 4) >= String(year);
+        }
+        return String(record.date || '').slice(0, 4) === String(year);
+    });
+}
+
 export function buildWorklogRows(kind, records, fields, context = {}) {
     const value = kind === 'leave' ? leaveValue : overtimeValue;
     const labelMap = context.fieldLabels || {};
@@ -68,6 +90,7 @@ export async function exportWorklog({
     format,
     scope,
     year,
+    month,
     fieldLabels,
     labels,
     config,
@@ -80,13 +103,19 @@ export async function exportWorklog({
         showToast?.({ message: labels?.noExport || '没有可导出的记录', type: 'warning' });
         return { success: false, empty: true };
     }
-    const suffix = scope === 'year' ? String(year) : 'all';
+    const monthValue = String(Number(month) || 1).padStart(2, '0');
+    const suffix = scope === 'year'
+        ? String(year)
+        : scope === 'month'
+            ? `${year}-${monthValue}`
+            : 'all';
     const filenameBase = `worklog_${kind}_${suffix}`;
     if (format === 'json') {
         return await exportToJSON({
             exportedAt: new Date().toISOString(),
             kind,
-            year: scope === 'year' ? year : 'all',
+            year: scope === 'year' ? year : scope === 'month' ? `${year}-${monthValue}` : 'all',
+            month: scope === 'month' ? Number(month) : null,
             fields,
             records: rows
         }, `${filenameBase}.json`, { showToast });
