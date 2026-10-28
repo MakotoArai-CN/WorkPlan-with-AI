@@ -2,6 +2,7 @@
     import { _ } from 'svelte-i18n';
     import DatePicker from './DatePicker.svelte';
     import AnimatedModal from './AnimatedModal.svelte';
+    import SelectMenu from './SelectMenu.svelte';
     import { getPayCycle, parseDateValue, setActualSalary } from '../utils/payroll.js';
     import {
         BANK_PRESETS,
@@ -32,6 +33,12 @@
     let rawRows = [];
     let presetId = 'generic';
     let mapping = { date: -1, amount: -1, income: -1, expense: -1, description: -1 };
+    $: encodingOptions = [
+        { value: 'utf-8', label: 'UTF-8' },
+        { value: 'gb18030', label: 'GBK / GB18030' }
+    ];
+    $: presetOptions = BANK_PRESETS.map(preset => ({ value: preset.id, label: preset.name }));
+    $: headerOptions = [{ value: -1, label: '—' }, ...headers.map((header, index) => ({ value: index, label: header }))];
     let transactions = [];
     let salaryOnly = true;
     let selected = {};
@@ -292,11 +299,7 @@
                             </label>
                             <label class="flex flex-col gap-1">
                                 <span class="text-[10px] font-bold text-slate-500">{$_('salary_history.encoding')}</span>
-                                <select bind:value={encoding}
-                                    class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm">
-                                    <option value="utf-8">UTF-8</option>
-                                    <option value="gb18030">GBK / GB18030</option>
-                                </select>
+                                <SelectMenu bind:value={encoding} options={encodingOptions} className="w-full" />
                             </label>
                         </div>
 
@@ -305,12 +308,7 @@
                             <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
                                 <label class="flex flex-col gap-1">
                                     <span class="text-[10px] font-bold text-slate-500">{$_('salary_history.bank_preset')}</span>
-                                    <select bind:value={presetId} on:change={applyPreset}
-                                        class="border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-900 text-xs">
-                                        {#each BANK_PRESETS as preset}
-                                            <option value={preset.id}>{preset.name}</option>
-                                        {/each}
-                                    </select>
+                                    <SelectMenu bind:value={presetId} options={presetOptions} onchange={applyPreset} className="w-full" />
                                 </label>
                                 {#each [
                                     ['date', 'salary_history.column_date'],
@@ -321,13 +319,7 @@
                                 ] as [field, labelKey]}
                                     <label class="flex flex-col gap-1">
                                         <span class="text-[10px] font-bold text-slate-500">{$_(labelKey)}</span>
-                                        <select bind:value={mapping[field]} on:change={rebuildTransactions}
-                                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-900 text-xs">
-                                            <option value={-1}>—</option>
-                                            {#each headers as header, index}
-                                                <option value={index}>{header}</option>
-                                            {/each}
-                                        </select>
+                                        <SelectMenu bind:value={mapping[field]} options={headerOptions} onchange={rebuildTransactions} className="w-full" />
                                     </label>
                                 {/each}
                             </div>

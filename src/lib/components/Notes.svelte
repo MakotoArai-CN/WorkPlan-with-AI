@@ -33,6 +33,8 @@
     let searchQuery = "";
     let previewElement;
     let showSidebar = false;
+    let noteListEl;
+    let notePill = { top: 0, height: 0, ready: false };
     let showExportMenu = false;
     let editingTitle = false;
     let isMobile = false;
@@ -110,8 +112,18 @@
         }
     });
 
+    function measureNotePill() {
+        const active = noteListEl?.querySelector('[data-note-item][data-active="true"]');
+        if (!active) {
+            notePill = { top: 0, height: 0, ready: false };
+            return;
+        }
+        notePill = { top: active.offsetTop, height: active.offsetHeight, ready: true };
+    }
+
     function handleResize() {
         isMobile = window.innerWidth < 768;
+        tick().then(measureNotePill);
     }
 
     function handleKeydown(e) {
@@ -727,6 +739,11 @@
     function selectCategory(cat) {
         selectedCategory = cat;
         if (isMobile) showSidebar = false;
+        tick().then(measureNotePill);
+    }
+
+    $: if (noteListEl && (filteredNotes.length || $activeNote?.id || selectedCategory || searchQuery)) {
+        tick().then(measureNotePill);
     }
 
     async function requestAiSuggestion(currentText) {
@@ -894,7 +911,9 @@
                     </button>
                 {/if}
             </div>
-            <div class="flex-1 overflow-y-auto">
+            <div bind:this={noteListEl} class="flex-1 overflow-y-auto relative">
+                <div class="pointer-events-none absolute left-2 right-2 z-0 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 transition-transform duration-300 ease-out"
+                    style={`top:0;height:${notePill.height}px;transform:translate3d(0,${notePill.top}px,0);opacity:${notePill.ready ? 1 : 0}`}></div>
                 {#if filteredNotes.length === 0}
                     <div class="text-center py-8 text-slate-400 text-sm">
                         <i class="ph ph-note-blank text-3xl mb-2"></i>
@@ -903,11 +922,10 @@
                 {:else}
                     {#each filteredNotes as note (note.id)}
                         <button
+                            data-note-item
+                            data-active={$activeNote?.id === note.id || selectedNoteIds.has(note.id)}
                             on:click={() => selectMode ? toggleNoteSelection(note.id) : selectNote(note)}
-                            class="w-full text-left p-3 border-b border-slate-100 hover:bg-slate-50 transition"
-                            class:bg-emerald-50={$activeNote?.id === note.id || selectedNoteIds.has(note.id)}
-                            class:border-l-4={$activeNote?.id === note.id || selectedNoteIds.has(note.id)}
-                            class:border-l-emerald-500={$activeNote?.id === note.id || selectedNoteIds.has(note.id)}
+                            class="relative z-10 w-full h-[104px] text-left p-3 border-b border-slate-100 hover:bg-slate-50/70 transition-colors flex flex-col justify-between"
                         >
                             <div class="flex items-center gap-1 mb-0.5">
                                 {#if selectMode}
@@ -924,9 +942,11 @@
                                     <span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded font-bold">{note.category}</span>
                                 {/if}
                             </div>
-                            <div class="font-bold text-slate-700 text-sm truncate">{note.title}</div>
-                            <div class="text-xs text-slate-400 mt-1 truncate">{note.content.slice(0, 50) || $_('notes.blank_note')}</div>
-                            <div class="text-[10px] text-slate-300 mt-1">{formatDate(note.updatedAt)}</div>
+                            <div class="min-w-0">
+                                <div class="font-bold text-slate-700 text-sm truncate">{note.title}</div>
+                                <div class="text-xs text-slate-400 mt-1 truncate">{note.content.slice(0, 50) || $_('notes.blank_note')}</div>
+                            </div>
+                            <div class="text-[10px] text-slate-300">{formatDate(note.updatedAt)}</div>
                         </button>
                     {/each}
                 {/if}
