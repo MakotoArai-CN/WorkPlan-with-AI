@@ -20,7 +20,8 @@
     import { settingsStore } from "../stores/settings.js";
     import { connectorConfig } from "../stores/connector.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
+    import { fly, fade } from "svelte/transition";
     import { _ } from 'svelte-i18n';
     import AnimatedModal from './AnimatedModal.svelte';
     import { get } from 'svelte/store';
@@ -40,6 +41,16 @@
     let currentModels = [];
     let currentProvider = null;
     let activeTab = "basic";
+    let tabListEl;
+    let tabPill = { left: 0, width: 0, ready: false };
+
+    function measureTabPill() {
+        const active = tabListEl?.querySelector('[data-ai-tab][data-active="true"]');
+        if (!active) return;
+        tabPill = { left: active.offsetLeft, width: active.offsetWidth, ready: true };
+    }
+
+    $: if (tabListEl && activeTab) tick().then(measureTabPill);
     let dailyPrompt = "";
     let weeklyPrompt = "";
     let profileNameDraft = "";
@@ -411,7 +422,7 @@
     ];
 </script>
 
-<AnimatedModal show={$showAiSettings} onClose={handleClose} zIndex={50} panelClass="max-w-2xl">
+<AnimatedModal show={$showAiSettings} onClose={handleClose} zIndex={50} panelClass="max-w-2xl ai-settings-panel">
             <div
                 class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-100 flex justify-between items-center bg-rose-50"
             >
@@ -429,35 +440,37 @@
                 </button>
             </div>
 
-            <div
-                class="flex border-b border-slate-100 bg-white shrink-0 overflow-x-auto"
+            <div bind:this={tabListEl}
+                class="relative flex border-b border-slate-100 bg-white shrink-0 overflow-x-auto"
             >
+                <div class="pointer-events-none absolute bottom-0 z-0 h-0.5 rounded-full bg-rose-500 transition-[transform,width] duration-300 ease-out"
+                    style={`left:0;width:${tabPill.width}px;transform:translate3d(${tabPill.left}px,0,0);opacity:${tabPill.ready ? 1 : 0}`}></div>
                 <button
+                    data-ai-tab
+                    data-active={activeTab === "basic"}
                     on:click={() => (activeTab = "basic")}
-                    class="px-4 md:px-6 py-2.5 md:py-3 text-xs md:text-sm font-bold border-b-2 transition whitespace-nowrap"
-                    class:border-rose-500={activeTab === "basic"}
+                    class="relative z-10 px-4 md:px-6 py-2.5 md:py-3 text-xs md:text-sm font-bold transition-colors whitespace-nowrap"
                     class:text-rose-600={activeTab === "basic"}
-                    class:border-transparent={activeTab !== "basic"}
                     class:text-slate-500={activeTab !== "basic"}
                 >
                     {$_('ai_settings_page.tab_basic')}
                 </button>
                 <button
+                    data-ai-tab
+                    data-active={activeTab === "advanced"}
                     on:click={() => (activeTab = "advanced")}
-                    class="px-4 md:px-6 py-2.5 md:py-3 text-xs md:text-sm font-bold border-b-2 transition whitespace-nowrap"
-                    class:border-rose-500={activeTab === "advanced"}
+                    class="relative z-10 px-4 md:px-6 py-2.5 md:py-3 text-xs md:text-sm font-bold transition-colors whitespace-nowrap"
                     class:text-rose-600={activeTab === "advanced"}
-                    class:border-transparent={activeTab !== "advanced"}
                     class:text-slate-500={activeTab !== "advanced"}
                 >
                     {$_('ai_settings_page.tab_advanced')}
                 </button>
                 <button
+                    data-ai-tab
+                    data-active={activeTab === "prompts"}
                     on:click={() => (activeTab = "prompts")}
-                    class="px-4 md:px-6 py-2.5 md:py-3 text-xs md:text-sm font-bold border-b-2 transition whitespace-nowrap"
-                    class:border-rose-500={activeTab === "prompts"}
+                    class="relative z-10 px-4 md:px-6 py-2.5 md:py-3 text-xs md:text-sm font-bold transition-colors whitespace-nowrap"
                     class:text-rose-600={activeTab === "prompts"}
-                    class:border-transparent={activeTab !== "prompts"}
                     class:text-slate-500={activeTab !== "prompts"}
                 >
                     {$_('ai_settings_page.tab_prompts')}
@@ -467,6 +480,9 @@
             <div
                 class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6"
             >
+                {#key activeTab}
+<div in:fly={{ y: 8, duration: 200 }}
+     out:fade={{ duration: 120 }}>
                 {#if activeTab === "basic"}
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
                         <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -871,6 +887,8 @@
                         </div>
                     </div>
                 {/if}
+</div>
+                {/key}
             </div>
 
             <div
@@ -888,3 +906,37 @@
                 >
             </div>
 </AnimatedModal>
+
+<style>
+    :global(.ai-settings-panel button) {
+        transition:
+            background-color 0.18s ease,
+            border-color 0.18s ease,
+            color 0.18s ease,
+            box-shadow 0.18s ease,
+            transform 0.14s ease,
+            opacity 0.18s ease;
+    }
+
+    :global(.ai-settings-panel button:not(:disabled):active) {
+        transform: scale(0.97);
+    }
+
+    :global(.ai-settings-panel input:not([type="checkbox"]):not([type="radio"])),
+    :global(.ai-settings-panel textarea) {
+        transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease,
+            background-color 0.18s ease;
+    }
+
+    :global(.ai-settings-panel input:not([type="checkbox"]):not([type="radio"]):focus),
+    :global(.ai-settings-panel textarea:focus) {
+        box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.1);
+    }
+
+    :global(.ai-settings-panel input[type="checkbox"]),
+    :global(.ai-settings-panel input[type="radio"]) {
+        transition: box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+</style>
