@@ -1,4 +1,5 @@
 <script>
+    import SelectMenu from './SelectMenu.svelte';
     import {
         aiConfig,
         showAiSettings,
@@ -35,6 +36,7 @@
 
     let testing = false;
     let providers = [];
+    $: providerOptions = providers.map(provider => ({ value: provider.id, label: provider.name }));
     let currentModels = [];
     let currentProvider = null;
     let activeTab = "basic";
@@ -532,41 +534,9 @@
                             class="text-xs font-bold text-slate-500 uppercase mb-2 block"
                             >{isG4FProvider($aiConfig.provider) ? "模型提供商" : $_('ai_settings_page.provider')}</label
                         >
-                        <select
-                            id="ai-provider"
-                            value={$aiConfig.provider}
-                            on:change={handleProviderChange}
-                            class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
-                        >
-                            <optgroup label={$_('ai_settings_page.group_g4f')}>
-                                {#each providers.filter((p) => p.id.startsWith("g4f-")) as provider}
-                                    <option value={provider.id}
-                                        >{provider.name}</option
-                                    >
-                                {/each}
-                            </optgroup>
-                            <optgroup label={$_('ai_settings_page.group_international')}>
-                                {#each providers.filter((p) => !p.id.startsWith("g4f-") && ["openai", "anthropic", "google", "mistral", "cohere", "perplexity", "together", "fireworks", "openrouter", "groq", "huggingface", "novita", "cloudflare"].includes(p.id)) as provider}
-                                    <option value={provider.id}
-                                        >{provider.name}</option
-                                    >
-                                {/each}
-                            </optgroup>
-                            <optgroup label={$_('ai_settings_page.group_domestic')}>
-                                {#each providers.filter( (p) => ["deepseek", "zhipu", "qwen", "moonshot", "spark", "baidu", "hunyuan", "yi", "baichuan", "minimax", "stepfun", "doubao", "sensetime", "siliconflow", "mimo"].includes(p.id), ) as provider}
-                                    <option value={provider.id}
-                                        >{provider.name}</option
-                                    >
-                                {/each}
-                            </optgroup>
-                            <optgroup label={$_('ai_settings_page.group_local')}>
-                                {#each providers.filter((p) => localProviderIds.includes(p.id)) as provider}
-                                    <option value={provider.id}
-                                        >{provider.name}</option
-                                    >
-                                {/each}
-                            </optgroup>
-                        </select>
+                        <SelectMenu value={$aiConfig.provider} options={providerOptions}
+                            onchange={(value) => handleProviderChange({ target: { value } })}
+                            className="w-full" />
                         <div class="flex items-center gap-3 mt-2 flex-wrap">
                             {#if currentProviderDocUrl}
                                 <a
