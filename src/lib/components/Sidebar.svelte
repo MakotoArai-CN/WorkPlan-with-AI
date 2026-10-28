@@ -291,8 +291,8 @@
 
     <nav bind:this={navEl} class="relative flex-1 px-3 pb-3 space-y-1.5">
         <div
-            class="nav-active-pill pointer-events-none absolute left-3 right-3 rounded-2xl bg-slate-100 shadow-sm transition-all duration-300 ease-out"
-            style={`top:${pillTop}px;height:${pillHeight}px;opacity:${pillReady ? 1 : 0}`}
+            class="nav-active-pill pointer-events-none absolute left-3 right-3 top-0 rounded-2xl bg-slate-100 shadow-sm transition-transform duration-300 ease-out will-change-transform"
+            style={`transform:translate3d(0, ${pillTop}px, 0);height:${pillHeight}px;opacity:${pillReady ? 1 : 0}`}
         ></div>
         {#each navItems as item}
             <button
