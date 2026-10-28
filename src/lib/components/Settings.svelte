@@ -1,4 +1,5 @@
 <script>
+    import SelectMenu from './SelectMenu.svelte';
     import { settingsStore } from "../stores/settings.js";
     import { taskStore } from "../stores/tasks.js";
     import { passwordsStore } from "../stores/passwords.js";
@@ -22,6 +23,7 @@
     let isAndroid = false;
 
     let checkingUpdate = false;
+    $: databaseProviderOptions = DATABASE_PROVIDER_CATALOG.map(provider => ({ value: provider.id, label: provider.name }));
     let themeGridEl;
     let languageGridEl;
     let editorGridEl;
@@ -1005,16 +1007,10 @@
                                     <label for="database-service" class="text-xs font-bold text-slate-500 uppercase mb-2 block">
                                         数据库服务
                                     </label>
-                                    <select
-                                        id="database-service"
-                                        value={$settingsStore.databaseConfig?.service || 'supabase'}
-                                        on:change={(e) => updateDatabaseField('service', e.target.value)}
-                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400"
-                                    >
-                                        {#each DATABASE_PROVIDER_CATALOG as provider}
-                                            <option value={provider.id}>{provider.name}</option>
-                                        {/each}
-                                    </select>
+                                    <SelectMenu value={$settingsStore.databaseConfig?.service || 'supabase'}
+                                        options={databaseProviderOptions}
+                                        onchange={(value) => updateDatabaseField('service', value)}
+                                        className="w-full" />
                                 </div>
                                 <div>
                                     <div class="text-xs font-bold text-slate-500 uppercase mb-2 block">

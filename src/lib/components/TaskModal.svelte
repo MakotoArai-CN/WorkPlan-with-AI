@@ -1,4 +1,5 @@
 <script>
+    import SelectMenu from './SelectMenu.svelte';
     import { taskStore, currentView, viewDate, today } from '../stores/tasks.js';
     import { _ } from 'svelte-i18n';
     import AnimatedModal from './AnimatedModal.svelte';
@@ -131,13 +132,9 @@
             <div class="p-6 overflow-y-auto space-y-5">
                 {#if $currentView === 'dashboard' && !editTask && $taskStore.templates.length > 0}
                     <div class="bg-purple-50 border border-purple-100 rounded-lg p-3">
-                        <select on:change={loadTemplate}
-                            class="w-full bg-white border border-purple-200 rounded px-2 py-1.5 text-sm text-slate-700">
-                            <option value="">{$_('task_modal.load_template')}</option>
-                            {#each $taskStore.templates as t}
-                                <option value={t.id}>{t.title}</option>
-                            {/each}
-                        </select>
+                        <SelectMenu value="" options={templateOptions}
+                            onchange={(value) => value && loadTemplate({ target: { value } })}
+                            buttonClass="w-full bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800 rounded-lg px-2 py-1.5 text-sm text-slate-700 dark:text-slate-200 flex items-center justify-between gap-2" />
                     </div>
                 {/if}
 
