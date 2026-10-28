@@ -334,7 +334,18 @@
         "vaultwarden_bitwarden_eu": "Bitwarden.eu",
         "vaultwarden_self_hosted": "セルフホスト Vaultwarden",
         "vaultwarden_locked": "インポートする前にパスワード庫を解除してください",
-        "vaultwarden_required": "サーバー URL、メールアドレス、マスターパスワードを入力してください"
+        "vaultwarden_required": "サーバー URL、メールアドレス、マスターパスワードを入力してください",
+        "vaultwarden_push_title": "Bitwarden / Vaultwarden へプッシュ",
+        "vaultwarden_push_desc": "WorkPlan のパスワードを暗号化してサーバーへ書き込み、拡張機能の同期で反映します",
+        "vaultwarden_mode_import": "インポート",
+        "vaultwarden_mode_push": "プッシュ",
+        "vaultwarden_push_hint": "新規追加のみで上書きしません。同名かつ同一ユーザー名は重複としてスキップします。マスターパスワードは今回のみ使用し保存しません。プッシュ後に拡張機能を同期してください。",
+        "vaultwarden_push_empty": "プッシュできる WorkPlan のパスワードがありません。先に追加するか庫を解除してください。",
+        "vaultwarden_push_success": "{pushed} 件プッシュ、{skipped} 件スキップ、{failed} 件失敗",
+        "vaultwarden_push_count": "{count} 件のパスワードをプッシュします",
+        "vaultwarden_push_button": "サーバーへプッシュ",
+        "vaultwarden_pushing": "プッシュ中...",
+        "vaultwarden_push_locked": "プッシュする前にパスワード庫を解除してください"
     },
     "settings": {
         "title": "設定",
