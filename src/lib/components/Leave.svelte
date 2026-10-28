@@ -1,5 +1,6 @@
 <script>
     export let embedded = false;
+    export let hideSummary = false;
     import { taskStore } from '../stores/tasks.js';
     import { settingsStore } from '../stores/settings.js';
     import { showConfirm, showToast } from '../stores/modal.js';
@@ -355,6 +356,7 @@
 
     <div class="flex-1 overflow-y-auto overscroll-contain min-h-0" style="-webkit-overflow-scrolling: touch;">
         <div class="p-4 md:p-6 space-y-5 pb-32">
+            {#if !hideSummary}
             <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 p-4 md:p-5 flex flex-col md:flex-row md:items-center gap-4">
                 <div class="flex items-center gap-3 flex-1">
                     <div class="w-11 h-11 rounded-xl bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
@@ -399,6 +401,8 @@
                     <div class="text-[10px] text-rose-100 mt-1">{$_('leave.unit_day')}</div>
                 </div>
             </div>
+
+            {/if}
 
             <div class="flex items-center justify-between gap-2">
                 <div class="flex items-center gap-1">
