@@ -31,6 +31,7 @@
         { id: 'polarArea', name: $_('statistics_page.chart_polar'), icon: 'ph-circle-notch' }
     ];
 
+    $: chartOptions = chartTypes.map(chart => ({ value: chart.id, label: chart.name, icon: chart.icon }));
     $: statusOptions = [
         { value: 'all', label: $_('statistics_page.all_status') },
         { value: 'done', label: $_('statistics_page.done') },
@@ -280,19 +281,7 @@
                         <span class="font-bold text-slate-700 flex items-center gap-2">
                             <i class="ph-fill ph-chart-pie-slice"></i> {$_('statistics_page.chart')}
                         </span>
-                        <div class="flex flex-wrap gap-1">
-                            {#each chartTypes as chart}
-                                <button on:click={() => activeChartType = chart.id}
-                                    class="px-2 py-1 text-[10px] rounded font-bold transition"
-                                    class:bg-indigo-100={activeChartType === chart.id}
-                                    class:text-indigo-700={activeChartType === chart.id}
-                                    class:bg-slate-50={activeChartType !== chart.id}
-                                    class:text-slate-500={activeChartType !== chart.id}>
-                                    <i class="ph {chart.icon}"></i>
-                                    <span class="hidden md:inline ml-1">{chart.name}</span>
-                                </button>
-                            {/each}
-                        </div>
+                        <SegmentedControl bind:value={activeChartType} options={chartOptions} />
                     </div>
                     <div class="p-4 h-[250px] md:h-[300px]">
                         {#if statsData.list.length === 0}
@@ -352,10 +341,7 @@
     </div>
 </div>
 
-{#if showReport}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div on:click={closeReport} on:keydown={closeReport} role="button" tabindex="0" class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative flex flex-col max-h-[85vh] overflow-hidden">
+<AnimatedModal bind:show={showReport} onClose={closeReport} zIndex={50} panelClass="max-w-2xl">
             <div class="px-4 md:px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-indigo-50 shrink-0">
                 <h3 class="font-bold text-base md:text-lg text-indigo-700 flex items-center gap-2">
                     <i class="ph-fill ph-file-text"></i> {$_('statistics_page.report_title')}
@@ -379,6 +365,4 @@
                     <MarkdownRenderer content={reportContent} />
                 </div>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
