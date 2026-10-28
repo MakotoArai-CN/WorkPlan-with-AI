@@ -576,7 +576,7 @@
                                 id="ai-custom-endpoint"
                                 bind:value={$aiConfig.customEndpoint}
                                 type="url"
-                                placeholder="https://api.example.com/v1/chat/completions"
+                                placeholder="https://api.example.com/v1"
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
                             <div class="text-[10px] text-slate-400 mt-1">
@@ -655,7 +655,7 @@
                                 bind:value={$aiConfig.customEndpoint}
                                 type="url"
                                 placeholder={$aiConfig.provider === "ollama"
-                                    ? "http://localhost:11434/api/chat"
+                                    ? "http://localhost:11434"
                                     : "http://localhost:1234/v1/chat/completions"}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />

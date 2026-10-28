@@ -6,11 +6,18 @@
     import TaskCard from './TaskCard.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
+    import { fly, fade } from 'svelte/transition';
 
     export let openModal;
     export let openDetailPanel = null;
 
     let isAllExpanded = false;
+
+    function dateMotionDuration() {
+        if (typeof document !== 'undefined' && document.documentElement.classList.contains('reduce-animations')) return 0;
+        if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 0;
+        return 220;
+    }
 
     $: dateInfo = (() => {
         const date = parseLocalDate($viewDate);
@@ -88,12 +95,16 @@
             aria-label="上一天">
             <i class="ph-bold ph-caret-left"></i>
         </button>
-        <div class="flex flex-col items-center">
-            <DatePicker value={$viewDate} label={dateInfo.date} showIcon={false}
-                onchange={(value) => viewDate.set(value)}
-                buttonClass="text-xs md:text-lg font-bold text-slate-800 flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap bg-transparent border-0 p-0 w-auto" />
-            <div class="text-[10px] md:text-xs text-slate-500 font-medium whitespace-nowrap">{dateInfo.week}</div>
-        </div>
+        {#key $viewDate}
+            <div class="flex flex-col items-center"
+                in:fly={{ y: 7, duration: dateMotionDuration(), opacity: 0.4 }}
+                out:fade={{ duration: Math.round(dateMotionDuration() * 0.6) }}>
+                <DatePicker value={$viewDate} label={dateInfo.date} showIcon={false}
+                    onchange={(value) => viewDate.set(value)}
+                    buttonClass="text-xs md:text-lg font-bold text-slate-800 flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap bg-transparent border-0 p-0 w-auto" />
+                <div class="text-[10px] md:text-xs text-slate-500 font-medium whitespace-nowrap">{dateInfo.week}</div>
+            </div>
+        {/key}
         <button on:click={() => changeDate(1)}
             class="w-8 h-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600"
             aria-label="下一天">

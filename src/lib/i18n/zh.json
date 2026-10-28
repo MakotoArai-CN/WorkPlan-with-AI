@@ -66,7 +66,7 @@
         "error_title": "输入错误"
     },
     "dashboard": {
-        "title": "今日看板",
+        "title": "任务看板",
         "subtitle": "管理您的每日待办",
         "collapse": "收起",
         "expand": "展开",
@@ -160,7 +160,7 @@
         "export_word": "导出 Word"
     },
     "passwords": {
-        "title": "密码记录本",
+        "title": "密码管理",
         "subtitle": "加密存储",
         "count": "共 {count} 条",
         "new_password": "新建",
@@ -634,6 +634,11 @@
         "verifying": "正在验证…",
         "entering": "正在进入…",
         "generate_key": "随机生成 Key",
+        "tip_1": "数据默认保存在本地，云同步前建议先备份。",
+        "tip_2": "Access Key 是同步空间的唯一凭证，请妥善保存。",
+        "tip_3": "AI 修改任务、笔记或文件前都会请求确认。",
+        "tip_4": "密码库主密码无法找回，请同时保存恢复码。",
+        "tip_5": "Android 导出文件会打开系统保存对话框，请留意保存位置。",
         "error_title": "输入错误",
         "error_empty": "Key 不能为空",
         "error_short": "Key 长度至少需要 16 位，当前 {count} 位",
@@ -791,7 +796,7 @@
         "group_domestic": "国内服务商",
         "group_local": "本地部署",
         "custom_endpoint": "API 端点",
-        "custom_endpoint_hint": "OpenAI 兼容接口，通常以 /v1/chat/completions 结尾",
+        "custom_endpoint_hint": "填到 /v1 即可，应用会自动补全 /chat/completions，并自动兼容流式与普通响应",
         "custom_model": "模型名称",
         "custom_model_ph": "输入模型名称",
         "api_key_ph": "请输入 API Key",
