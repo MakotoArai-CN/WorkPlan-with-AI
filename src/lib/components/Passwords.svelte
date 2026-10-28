@@ -1,4 +1,5 @@
 <script>
+    import AnimatedModal from './AnimatedModal.svelte';
     import SelectMenu from './SelectMenu.svelte';
     import {
         passwordsStore,
@@ -1710,11 +1711,8 @@ async function handleChangeMasterPassword() {
     {/if}
 </div>
 
-{#if showImportPasswordModal}
-    <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+<AnimatedModal panelStyle="background-color:#ffffff" show={showImportPasswordModal} onClose={() => (showImportPasswordModal = false)} zIndex={50} panelClass="max-w-md">
+
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
@@ -1747,15 +1745,11 @@ async function handleChangeMasterPassword() {
                     {$_('passwords.decrypt_import')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showExportModal}
-    <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showExportModal} onClose={() => (showExportModal = false)} zIndex={50} panelClass="max-w-md">
+
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
@@ -1796,15 +1790,11 @@ async function handleChangeMasterPassword() {
             >
                 {$_('common.cancel')}
             </button>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showSetupModal}
-    <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showSetupModal} onClose={() => (showSetupModal = false)} zIndex={50} panelClass="max-w-md">
+
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
@@ -1851,15 +1841,11 @@ async function handleChangeMasterPassword() {
             >
                 {$_('passwords.create_master')}
             </button>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showUnlockModal}
-    <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showUnlockModal} onClose={() => (showUnlockModal = false)} zIndex={50} panelClass="max-w-md">
+
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
@@ -1962,15 +1948,11 @@ async function handleChangeMasterPassword() {
                     {$_('passwords.forgot_password')}
                 </button>
             {/if}
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showRecoveryCodeModal}
-    <div
-        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showRecoveryCodeModal} onClose={() => (showRecoveryCodeModal = false)} zIndex={60} panelClass="max-w-md">
+
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-key text-emerald-600"></i>
                 {$_('passwords.recovery_code_title')}
@@ -2001,15 +1983,11 @@ async function handleChangeMasterPassword() {
             >
                 {$_('passwords.recovery_code_saved')}
             </button>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showPinSetupModal}
-    <div
-        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showPinSetupModal} onClose={() => (showPinSetupModal = false)} zIndex={60} panelClass="max-w-md">
+
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-number-square-four text-amber-600"></i>
                 {$_('passwords.pin_set')}
@@ -2050,15 +2028,11 @@ async function handleChangeMasterPassword() {
                     {$_('common.confirm')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showBiometricSetupModal}
-    <div
-        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showBiometricSetupModal} onClose={() => (showBiometricSetupModal = false)} zIndex={60} panelClass="max-w-md">
+
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-fingerprint text-teal-600"></i>
                 {$_('passwords.biometric_title')}
@@ -2096,15 +2070,11 @@ async function handleChangeMasterPassword() {
                     {$_('common.confirm')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showRecoverModal}
-    <div
-        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showRecoverModal} onClose={() => (showRecoverModal = false)} zIndex={60} panelClass="max-w-md">
+
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-lifebuoy text-emerald-600"></i>
                 {$_('passwords.recover_title')}
@@ -2139,17 +2109,11 @@ async function handleChangeMasterPassword() {
                     {$_('passwords.recover_btn')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showAddModal}
-    <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div
-            class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
-        >
+
+<AnimatedModal panelStyle="background-color:#ffffff" show={showAddModal} onClose={() => (showAddModal = false)} zIndex={50} panelClass="max-w-lg">
+
             <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.new_title')}</h3>
             <div class="space-y-3">
                 <div>
@@ -2252,17 +2216,10 @@ async function handleChangeMasterPassword() {
                     {$_('common.save')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showEditModal && editingPassword}
-    <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-    >
-        <div
-            class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
-        >
+<AnimatedModal panelStyle="background-color:#ffffff" show={showEditModal && editingPassword} onClose={() => (showEditModal = false)} zIndex={50} panelClass="max-w-lg">
+
             <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.edit_title')}</h3>
             <div class="space-y-3">
                 <div>
@@ -2362,18 +2319,10 @@ async function handleChangeMasterPassword() {
                     {$_('common.save')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-{#if showChangeMasterPasswordModal}
-    <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
-        on:keydown={(e) => e.key === "Escape" && (showChangeMasterPasswordModal = false)}
-        role="dialog"
-        tabindex="-1"
-    >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+<AnimatedModal panelStyle="background-color:#ffffff" show={showChangeMasterPasswordModal} onClose={() => (showChangeMasterPasswordModal = false)} zIndex={60} panelClass="max-w-md">
+
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
             >
@@ -2440,51 +2389,5 @@ async function handleChangeMasterPassword() {
                     {$_('passwords.confirm_change')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
-<style>
-    .password-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 1rem;
-        align-items: start;
-    }
-
-    @media (min-width: 640px) {
-        .password-grid {
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        }
-    }
-
-    @media (min-width: 1280px) {
-        .password-grid {
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-        }
-    }
-
-    .line-clamp-2 {
-        line-clamp: 2;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-
-    .password-card {
-        animation: fadeIn 0.3s ease-out forwards;
-        opacity: 0;
-    }
-
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-            transform: translateY(10px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-</style>
