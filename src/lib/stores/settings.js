@@ -13,7 +13,6 @@ import { DEFAULT_OVERTIME_CONFIG, normalizeOvertimeConfig } from '../utils/overt
 const DARK_THEMES = new Set(['dark', 'graphite']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
 const APP_VERSION = typeof __WORKPLAN_VERSION__ === 'string' ? __WORKPLAN_VERSION__ : '0.0.0';
-let themeTransitionTimer = null;
 let notificationChannelPromise = null;
 
 function isMobilePlatform() {
@@ -180,47 +179,35 @@ function createSettingsStore() {
         }));
     }
 
-    function applyTheme(theme, options = {}) {
+    function applyTheme(theme) {
         if (typeof window === 'undefined') return;
-        const shouldAnimate = options.animate ?? false;
         const resolvedTheme = theme === 'auto'
             ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
             : theme;
         const isDark = DARK_THEMES.has(resolvedTheme);
 
-        if (shouldAnimate) {
-            document.documentElement.classList.add('theme-switching');
-            document.body.classList.add('theme-switching');
-            // Resolve the transition before swapping theme variables; otherwise
-            // the browser can paint the new palette without animating.
-            void document.documentElement.offsetHeight;
-            if (themeTransitionTimer) {
-                clearTimeout(themeTransitionTimer);
+        const apply = () => {
+            document.documentElement.classList.toggle('dark', isDark);
+            document.body.classList.toggle('dark', isDark);
+            document.documentElement.dataset.theme = resolvedTheme;
+            document.body.dataset.theme = resolvedTheme;
+            document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+            const metaTheme = document.querySelector('meta[name="theme-color"]');
+            if (metaTheme) {
+                const themeColorMap = {
+                    light: '#ffffff',
+                    dark: '#0f172a',
+                    ocean: '#e0f2fe',
+                    forest: '#ecfdf5',
+                    sunset: '#fff7ed',
+                    rose: '#fff1f2',
+                    graphite: '#080b16'
+                };
+                metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
             }
-            themeTransitionTimer = setTimeout(() => {
-                document.documentElement.classList.remove('theme-switching');
-                document.body.classList.remove('theme-switching');
-            }, 620);
-        }
+        };
 
-        document.documentElement.classList.toggle('dark', isDark);
-        document.body.classList.toggle('dark', isDark);
-        document.documentElement.dataset.theme = resolvedTheme;
-        document.body.dataset.theme = resolvedTheme;
-        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-        const metaTheme = document.querySelector('meta[name="theme-color"]');
-        if (metaTheme) {
-            const themeColorMap = {
-                light: '#ffffff',
-                dark: '#0f172a',
-                ocean: '#e0f2fe',
-                forest: '#ecfdf5',
-                sunset: '#fff7ed',
-                rose: '#fff1f2',
-                graphite: '#080b16'
-            };
-            metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
-        }
+        apply();
     }
 
     async function ensureNotificationChannel() {
