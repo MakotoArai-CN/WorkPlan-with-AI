@@ -7,6 +7,7 @@
     import PayrollPanel from './PayrollPanel.svelte';
     import SalarySettings from './SalarySettings.svelte';
     import DatePicker from './DatePicker.svelte';
+    import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
     import { formatLocalDate } from '../utils/datetime.js';
@@ -68,6 +69,22 @@
     $: monthDays = Array.from({ length: new Date(cursorYear, cursorMonth, 0).getDate() }, (_, index) => index + 1);
     $: firstWeekday = (new Date(cursorYear, cursorMonth - 1, 1).getDay() + 6) % 7;
     $: calendarCells = [...Array.from({ length: firstWeekday }, () => null), ...monthDays];
+    $: monthRows = records
+        .filter(record => record.date?.startsWith(`${cursorYear}-${String(cursorMonth).padStart(2, '0')}`))
+        .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
+        .map(record => ({
+            record,
+            dateMain: record.date.slice(8, 10),
+            dateSub: new Date(`${record.date}T00:00:00`).toLocaleDateString(localeCode, { weekday: 'short' }),
+            badge: $_('overtime.type_' + record.type),
+            badgeClass: TYPE_STYLES[record.type] || TYPE_STYLES.weekday,
+            title: `${record.start} - ${record.end}`,
+            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
+            note: record.note || '',
+            metric: hours(record.hours),
+            amount: money(calculateRecordPay(record, config)),
+            amountClass: 'text-orange-600'
+        }));
     $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
         month: index + 1,
         summary: getMonthSummary(records, cursorYear, index + 1, config)
@@ -463,32 +480,25 @@
                         </div>
                     {:else}
                         <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
-                            {#each monthDays as day}
-                                {@const dayRecords = monthRecordsByDay.get(`${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`) || []}
-                                <button on:click={() => selectDay(day)}
-                                    class="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-orange-50/40 dark:hover:bg-slate-700/40 transition">
-                                    <div class="w-10 text-center shrink-0">
-                                        <div class="text-lg font-black {dayRecords.length ? 'text-orange-600' : 'text-slate-300'}">{String(day).padStart(2, '0')}</div>
-                                        <div class="text-[9px] text-slate-400">
-                                            {new Date(cursorYear, cursorMonth - 1, day).toLocaleDateString(localeCode, { weekday: 'short' })}
-                                        </div>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        {#if dayRecords.length}
-                                            <div class="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">
-                                                {dayRecords.map(record => `${record.start}-${record.end}`).join(' / ')}
-                                            </div>
-                                            <div class="text-[10px] text-slate-500 mt-0.5">
-                                                {hours(dayRecords.reduce((sum, record) => sum + record.hours, 0))}
-                                                · {money(dayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0))}
-                                            </div>
-                                        {:else}
-                                            <div class="text-xs text-slate-400">{$_('overtime.no_records')}</div>
-                                        {/if}
-                                    </div>
-                                    <i class="ph-bold ph-caret-right text-slate-200"></i>
-                                </button>
+                            {#each monthRows as row}
+                                <WorklogRecordRow
+                                    {...row}
+                                    editLabel={$_('overtime.edit_record')}
+                                    deleteLabel={$_('overtime.delete')}
+                                    onEdit={() => openEdit(row.record)}
+                                    onDelete={() => deleteRecord(row.record)}
+                                />
                             {/each}
+                            {#if monthRows.length === 0}
+                                <div class="py-12 text-center text-slate-400">
+                                    <i class="ph ph-clock-afternoon text-4xl mb-2 opacity-40"></i>
+                                    <div class="text-sm font-bold">{$_('overtime.empty')}</div>
+                                    <div class="text-xs mt-1">{$_('overtime.empty_desc')}</div>
+                                    <button on:click={openCreate} class="mt-3 text-xs font-bold text-orange-600 hover:text-orange-700">
+                                        + {$_('overtime.add_record')}
+                                    </button>
+                                </div>
+                            {/if}
                         </div>
                     {/if}
                 </div>
@@ -507,42 +517,21 @@
                     {#if selectedDayRecords.length}
                         <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
                             {#each selectedDayRecords as record}
-                                <div class="px-4 py-3 flex items-start gap-3">
-                                    <div class="w-12 text-center shrink-0">
-                                        <div class="text-xs font-black text-slate-700 dark:text-slate-200">{record.start}</div>
-                                        <div class="text-[9px] text-slate-400">{record.end}</div>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="flex items-center gap-2 flex-wrap">
-                                            <span class="px-1.5 py-0.5 text-[10px] rounded border {TYPE_STYLES[record.type] || TYPE_STYLES.weekday}">
-                                                {$_('overtime.type_' + record.type)}
-                                            </span>
-                                            <span class="text-xs font-bold text-slate-700 dark:text-slate-200">{hours(record.hours)}</span>
-                                            <span class="text-xs font-bold {COMP_STYLES[record.compensation] || COMP_STYLES.pay}">
-                                                {money(calculateRecordPay(record, config))}
-                                            </span>
-                                            <span class="text-[10px] text-slate-400">{$_('overtime.comp_' + (record.compensation || 'pay'))}</span>
-                                            {#if record.aiLocked}
-                                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300" title={$_('overtime.ai_locked')}>
-                                                    <i class="ph ph-lock-simple"></i>
-                                                </span>
-                                            {/if}
-                                        </div>
-                                        {#if record.note}
-                                            <div class="text-[10px] text-slate-500 mt-1 truncate">{record.note}</div>
-                                        {/if}
-                                    </div>
-                                    <div class="flex items-center gap-1 shrink-0">
-                                        <button on:click={() => openEdit(record)} aria-label={$_('overtime.edit_record')}
-                                            class="w-7 h-7 rounded-lg text-slate-400 hover:text-orange-600 hover:bg-orange-50 flex items-center justify-center">
-                                            <i class="ph ph-pencil-simple"></i>
-                                        </button>
-                                        <button on:click={() => deleteRecord(record)} aria-label={$_('overtime.delete')}
-                                            class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center">
-                                            <i class="ph ph-trash"></i>
-                                        </button>
-                                    </div>
-                                </div>
+                                <WorklogRecordRow
+                                    dateMain={record.start}
+                                    dateSub={record.end}
+                                    badge={$_('overtime.type_' + record.type)}
+                                    badgeClass={TYPE_STYLES[record.type] || TYPE_STYLES.weekday}
+                                    title={hours(record.hours)}
+                                    detail={$_('overtime.comp_' + (record.compensation || 'pay'))}
+                                    note={record.note || ''}
+                                    metric={money(calculateRecordPay(record, config))}
+                                    amountClass={record.compensation === 'pay' ? 'text-orange-600' : 'text-slate-500'}
+                                    editLabel={$_('overtime.edit_record')}
+                                    deleteLabel={$_('overtime.delete')}
+                                    onEdit={() => openEdit(record)}
+                                    onDelete={() => deleteRecord(record)}
+                                />
                             {/each}
                         </div>
                     {:else}
