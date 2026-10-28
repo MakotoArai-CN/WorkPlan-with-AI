@@ -1,4 +1,5 @@
 <script>
+    import SegmentedControl from './SegmentedControl.svelte';
     import { onMount, tick } from "svelte";
     import {
         aiChatHistory,
@@ -64,6 +65,7 @@
         inputText = $aiChatDraft;
     }
 
+    $: chatStyleOptions = chatStyles.map(style => ({ value: style.id, label: style.name, icon: style.icon }));
     $: chatStyles = [
         {
             id: "default",
@@ -359,10 +361,34 @@
         showSessionDrawer = false;
     }
 
-    function handleSelectSession(sessionId) {
+    function sessionRects() {
+        const rects = new Map();
+        for (const node of document.querySelectorAll('[data-session-card]')) {
+            rects.set(node.dataset.sessionCard, node.getBoundingClientRect());
+        }
+        return rects;
+    }
+
+    async function handleSelectSession(sessionId) {
         if ($isAiLoading) return;
+        const before = sessionRects();
         selectAiChatSession(sessionId);
         showSessionDrawer = false;
+        await tick();
+        if (document.documentElement.classList.contains('reduce-animations')
+            || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+        for (const node of document.querySelectorAll('[data-session-card]')) {
+            const previous = before.get(node.dataset.sessionCard);
+            if (!previous) continue;
+            const current = node.getBoundingClientRect();
+            const dx = previous.left - current.left;
+            const dy = previous.top - current.top;
+            if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+            node.animate([
+                { transform: `translate(${dx}px, ${dy}px)` },
+                { transform: 'translate(0, 0)' }
+            ], { duration: 320, easing: 'cubic-bezier(0.22, 0.8, 0.24, 1)' });
+        }
     }
 
     function copyMessage(content) {
@@ -876,6 +902,7 @@
         <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-800">
             {#each $aiChatSessions as session}
                 <div
+                    data-session-card={session.id}
                     on:click={() => handleSelectSession(session.id)}
                     on:keydown={(e) => (e.key === "Enter" || e.key === " ") && handleSelectSession(session.id)}
                     tabindex="0"
@@ -1012,19 +1039,7 @@
         <div
             class="px-3 md:px-4 py-2 md:py-3 bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 overflow-x-auto shrink-0"
         >
-            <div class="flex gap-1.5 md:gap-2 min-w-max">
-                {#each chatStyles as style}
-                    <button
-                        on:click={() => (chatStyle = style.id)}
-                        class="px-2 md:px-3 py-1 md:py-1.5 rounded-full text-[16px] md:text-xs font-bold flex items-center gap-1 md:gap-1.5 transition-all whitespace-nowrap {chatStyle === style.id
-                            ? 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-700'
-                            : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600'}"
-                    >
-                        <i class="ph {style.icon}"></i>
-                        {style.name}
-                    </button>
-                {/each}
-            </div>
+            <SegmentedControl bind:value={chatStyle} options={chatStyleOptions} className="min-w-max" />
         </div>
 
         <div class="px-3 md:px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 shrink-0">

@@ -1,4 +1,5 @@
 <script>
+    import SelectMenu from './SelectMenu.svelte';
     import {
         passwordsStore,
         isPasswordsUnlocked,
@@ -66,6 +67,14 @@
     let showExportModal = false;
     let searchQuery = "";
     let selectedCategory = "__ALL__";
+    let categoryListEl;
+    let categoryPill = { top: 0, height: 0, ready: false };
+
+    function measureCategoryPill() {
+        const active = categoryListEl?.querySelector('[data-category-button][data-active="true"]');
+        if (!active) return;
+        categoryPill = { top: active.offsetTop, height: active.offsetHeight, ready: true };
+    }
     let showPasswordValue = {};
     let editingPassword = null;
     let showSidebar = false;
@@ -1143,6 +1152,7 @@ async function handleChangeMasterPassword() {
 
     function selectCategory(category) {
         selectedCategory = category;
+        tick().then(measureCategoryPill);
         displayCount = 50;
         decryptedCache = {};
         showPasswordValue = {};
@@ -1159,6 +1169,8 @@ async function handleChangeMasterPassword() {
         });
     }
 
+    $: if (categoryListEl && (selectedCategory || $passwordCategories.length)) tick().then(measureCategoryPill);
+    $: categoryOptions = $passwordCategories.map(category => ({ value: category, label: category }));
     $: filteredPasswords = $passwordsList.filter((p) => {
         const matchesSearch =
             p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1435,28 +1447,31 @@ async function handleChangeMasterPassword() {
                         class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-400"
                     />
                 </div>
-                <div class="flex-1 overflow-y-auto py-2">
+                <div bind:this={categoryListEl} class="flex-1 overflow-y-auto py-2 relative">
+                    <div class="pointer-events-none absolute left-2 right-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 transition-transform duration-300 ease-out"
+                        style={`top:0;height:${categoryPill.height}px;transform:translate3d(0,${categoryPill.top}px,0);opacity:${categoryPill.ready ? 1 : 0}`}></div>
                     <button
+                        data-category-button
+                        data-active={selectedCategory === "__ALL__"}
                         on:click={() => selectCategory("__ALL__")}
-                        class="w-full text-left px-4 py-2.5 text-sm transition"
-                        class:bg-amber-50={selectedCategory === "__ALL__"}
+                        class="relative z-10 w-full text-left px-4 py-2.5 text-sm transition"
                         class:text-amber-700={selectedCategory === "__ALL__"}
                         class:font-bold={selectedCategory === "__ALL__"}
                         class:text-slate-600={selectedCategory !== "__ALL__"}
-                        class:hover:bg-slate-50={selectedCategory !== "__ALL__"}
+                        class:hover:text-amber-700={selectedCategory !== "__ALL__"}
                     >
                         <i class="ph ph-folder-open mr-2"></i> {$_('common.all')}
                     </button>
                     {#each $passwordCategories as category}
                         <button
+                            data-category-button
+                            data-active={selectedCategory === category}
                             on:click={() => selectCategory(category)}
-                            class="w-full text-left px-4 py-2.5 text-sm transition"
-                            class:bg-amber-50={selectedCategory === category}
+                            class="relative z-10 w-full text-left px-4 py-2.5 text-sm transition"
                             class:text-amber-700={selectedCategory === category}
                             class:font-bold={selectedCategory === category}
                             class:text-slate-600={selectedCategory !== category}
-                            class:hover:bg-slate-50={selectedCategory !==
-                                category}
+                            class:hover:text-amber-700={selectedCategory !== category}
                         >
                             <i class="ph ph-folder mr-2"></i>
                             {category}
@@ -2205,15 +2220,8 @@ async function handleChangeMasterPassword() {
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_category')}</label
                     >
-                    <select
-                        id="password-new-category"
-                        bind:value={newPassword.category}
-                        class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
-                    >
-                        {#each $passwordCategories as cat}
-                            <option value={cat}>{cat}</option>
-                        {/each}
-                    </select>
+                    <SelectMenu bind:value={newPassword.category} options={categoryOptions}
+                        className="w-full" />
                 </div>
                 <div>
                     <label
@@ -2320,15 +2328,8 @@ async function handleChangeMasterPassword() {
                         class="text-xs font-bold text-slate-500 uppercase mb-1 block"
                         >{$_('passwords.label_category')}</label
                     >
-                    <select
-                        id="password-edit-category"
-                        bind:value={editingPassword.category}
-                        class="w-full border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400"
-                    >
-                        {#each $passwordCategories as cat}
-                            <option value={cat}>{cat}</option>
-                        {/each}
-                    </select>
+                    <SelectMenu bind:value={editingPassword.category} options={categoryOptions}
+                        className="w-full" />
                 </div>
                 <div>
                     <label

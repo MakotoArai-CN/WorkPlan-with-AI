@@ -499,6 +499,18 @@
                         {/each}
                     </div>
                 </div>
+                <div class="pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3">
+                    <div>
+                        <div class="text-sm font-bold text-slate-700 dark:text-slate-200">{$_('settings.reduce_animations')}</div>
+                        <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mt-0.5">{$_('settings.reduce_animations_desc')}</div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input type="checkbox" checked={$settingsStore.reduceAnimations}
+                            on:change={(event) => settingsStore.setReduceAnimations(event.currentTarget.checked)}
+                            class="sr-only peer" />
+                        <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                    </label>
+                </div>
             </div>
         </div>
 
