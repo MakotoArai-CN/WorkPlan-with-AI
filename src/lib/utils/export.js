@@ -543,6 +543,8 @@ export async function exportNotesToWord(notes, filename = 'notes.docx', options 
  * The module is loaded lazily so it only costs bundle time when used.
  */
 export async function exportToExcel(data, filename = 'export.xlsx', options = {}) {
+    const exportFont = 'Segoe UI';
+    const exportFontSize = 11;
     const { showToast, sheetName = 'Sheet1' } = options;
 
     try {
@@ -580,11 +582,25 @@ export async function exportToExcel(data, filename = 'export.xlsx', options = {}
         }
 
         const headerRow = worksheet.getRow(1);
-        headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        headerRow.font = { name: exportFont, size: exportFontSize, bold: true, color: { argb: 'FFFFFFFF' } };
         headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
         headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
         headerRow.height = 22;
         worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+        worksheet.properties.defaultRowHeight = 20;
+        worksheet.eachRow((row, rowNumber) => {
+            row.height = rowNumber === 1 ? 22 : 20;
+            row.eachCell(cell => {
+                cell.font = {
+                    name: exportFont,
+                    size: exportFontSize,
+                    bold: rowNumber === 1,
+                    color: rowNumber === 1 ? { argb: 'FFFFFFFF' } : undefined
+                };
+                cell.alignment = { vertical: 'middle', horizontal: rowNumber === 1 ? 'center' : 'left', wrapText: true };
+                if (typeof cell.value === 'number') cell.numFmt = '#,##0.00';
+            });
+        });
         if (headers.length > 0) {
             worksheet.autoFilter = {
                 from: { row: 1, column: 1 },
