@@ -1,5 +1,6 @@
 <script>
     import { _ } from 'svelte-i18n';
+    import AnimatedModal from './AnimatedModal.svelte';
     import { get } from 'svelte/store';
     import { showToast } from '../stores/modal.js';
     import { getEffectiveConfig, providerRequiresApiKey } from '../stores/ai.js';
@@ -95,16 +96,7 @@
     }
 </script>
 
-{#if show}
-    <div class="fixed inset-0 z-[70] flex items-center justify-center p-4">
-        <div
-            class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
-            on:click={onClose}
-            on:keydown={(event) => event.key === 'Escape' && onClose()}
-            role="button"
-            tabindex="0"
-        ></div>
-        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl relative flex flex-col max-h-[92vh] overflow-hidden">
+<AnimatedModal bind:show onClose={onClose} zIndex={70} panelClass="max-w-2xl">
             <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-900 dark:to-slate-900">
                 <div>
                     <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
@@ -188,6 +180,4 @@
                     {/if}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>

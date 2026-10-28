@@ -1,6 +1,7 @@
 <script>
     import { taskStore, currentView, viewDate, today } from '../stores/tasks.js';
     import { _ } from 'svelte-i18n';
+    import AnimatedModal from './AnimatedModal.svelte';
 
     export let show = false;
     export let editTask = null;
@@ -121,20 +122,7 @@
     ];
 </script>
 
-{#if show}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div
-            on:click={close}
-            on:keydown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    close();
-                }
-            }}
-            role="button"
-            tabindex="0"
-            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"
-        ></div>
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] overflow-hidden transform transition-all">
+<AnimatedModal bind:show onClose={close} zIndex={50} panelClass="max-w-lg">
             <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                 <h3 class="font-bold text-lg text-slate-800">{editTask ? $_('task_modal.edit') : $_('task_modal.new')}</h3>
                 <button on:click={close} aria-label={$_('common.close')}><i class="ph ph-x text-xl"></i></button>
@@ -231,6 +219,4 @@
                 <button on:click={save}
                     class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-bold shadow">{$_('task_modal.confirm')}</button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
