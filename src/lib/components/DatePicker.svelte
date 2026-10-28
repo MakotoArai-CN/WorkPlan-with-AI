@@ -5,10 +5,15 @@
 
     export let value = '';
     export let accent = 'orange';
+    export let label = '';
+    export let buttonClass = '';
+    export let showIcon = true;
     export let onchange = () => {};
 
     let open = false;
     let container;
+    let popover;
+    let popoverStyle = '';
     let viewYear = new Date().getFullYear();
     let viewMonth = new Date().getMonth() + 1;
 
@@ -70,28 +75,59 @@
         select(today.getDate());
     }
 
+    function portal(node) {
+        document.body.appendChild(node);
+        return { destroy() { node.remove(); } };
+    }
+
+    function positionPopover() {
+        if (!container || !popover) return;
+        const rect = container.getBoundingClientRect();
+        const menuRect = popover.getBoundingClientRect();
+        const gap = 6;
+        let top = rect.bottom + gap;
+        if (top + menuRect.height > window.innerHeight - 8) {
+            top = Math.max(8, rect.top - menuRect.height - gap);
+        }
+        let left = rect.left;
+        if (left + menuRect.width > window.innerWidth - 8) {
+            left = Math.max(8, window.innerWidth - menuRect.width - 8);
+        }
+        popoverStyle = `left:${left}px;top:${top}px;`;
+    }
+
     async function toggle() {
         open = !open;
-        if (open) await tick();
+        if (open) {
+            await tick();
+            positionPopover();
+            if (!document.documentElement.classList.contains('reduce-animations') && !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+                popover?.animate([
+                    { opacity: 0, transform: 'translateY(-4px) scale(0.97)' },
+                    { opacity: 1, transform: 'translateY(0) scale(1)' }
+                ], { duration: 160, easing: 'cubic-bezier(0.22, 0.8, 0.24, 1)' });
+            }
+        }
     }
 
     function handleWindowClick(event) {
-        if (!open || container?.contains(event.target)) return;
+        if (!open || container?.contains(event.target) || popover?.contains(event.target)) return;
         open = false;
     }
 </script>
 
-<svelte:window on:click={handleWindowClick} />
+<svelte:window on:click={handleWindowClick} on:scroll={() => (open = false)} on:resize={() => (open = false)} />
 
 <div bind:this={container} class="relative">
     <button type="button" on:click={toggle}
-        class="w-full border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-left text-slate-700 dark:text-slate-200 flex items-center justify-between gap-2 {accentStyle.button}">
-        <span class={value ? '' : 'text-slate-400'}>{value || $_('date_picker.placeholder')}</span>
-        <i class="ph ph-calendar-blank text-slate-400"></i>
+        class={buttonClass || `w-full border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-left text-slate-700 dark:text-slate-200 flex items-center justify-between gap-2 ${accentStyle.button}`}>
+        <span class={value || label ? '' : 'text-slate-400'}>{label || value || $_('date_picker.placeholder')}</span>
+        {#if showIcon}<i class="ph ph-calendar-blank text-slate-400"></i>{/if}
     </button>
 
     {#if open}
-        <div class="absolute z-50 mt-1 left-0 w-72 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-2xl p-3">
+        <div use:portal bind:this={popover} style={popoverStyle}
+            class="fixed z-[220] w-72 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-2xl p-3">
             <div class="flex items-center justify-between mb-2">
                 <button type="button" aria-label="previous month" on:click={() => shiftMonth(-1)}
                     class="w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-center {accentStyle.nav}">

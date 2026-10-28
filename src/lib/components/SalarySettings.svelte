@@ -1,6 +1,7 @@
 <script>
     import { _ } from 'svelte-i18n';
     import { SALARY_COMPONENT_TEMPLATE, normalizeOvertimeConfig } from '../utils/overtime.js';
+    import AnimatedModal from './AnimatedModal.svelte';
 
     export let show = false;
     export let config = {};
@@ -83,16 +84,8 @@
     }
 </script>
 
-{#if show}
-    <div class="fixed inset-0 z-[70] flex items-center justify-center p-4">
-        <div
-            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            on:click={close}
-            on:keydown={(event) => event.key === 'Escape' && close()}
-            role="button"
-            tabindex="0"
-        ></div>
-        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
+<AnimatedModal bind:show {onClose} zIndex={70} panelClass="max-w-2xl">
+
             <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-900/40">
                 <div>
                     <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
@@ -192,6 +185,4 @@
                     {$_('common.save')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>

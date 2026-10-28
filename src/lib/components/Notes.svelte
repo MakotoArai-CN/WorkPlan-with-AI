@@ -1,4 +1,5 @@
 <script>
+    import SelectMenu from './SelectMenu.svelte';
     import { notesStore, activeNote, notesList, noteCategories } from "../stores/notes.js";
     import { showConfirm, showToast } from "../stores/modal.js";
     import { renderMarkdown } from "../utils/markdown.js";
@@ -48,6 +49,7 @@
     let selectedCategory = null;
     let selectMode = false;
     let selectedNoteIds = new Set();
+    $: noteCategoryOptions = $noteCategories.map(category => ({ value: category, label: category }));
     $: if (selectedCategory === null) selectedCategory = $_('notes.category_all');
     let showCategoryPanel = false;
     let newCategoryName = '';
@@ -1074,19 +1076,10 @@
                                 <i class="ph ph-tag text-xs"></i>
                                 <span>{$_('notes.category')}</span>
                             </div>
-                            <div class="relative">
-                                <i class="ph ph-tag absolute left-3 top-1/2 -translate-y-1/2 text-sm text-emerald-500 pointer-events-none md:hidden"></i>
-                                <i class="ph ph-caret-down absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none"></i>
-                                <select
-                                    value={$activeNote.category || $_('notes.category_all')}
-                                    on:change={(e) => notesStore.updateNote($activeNote.id, { category: e.target.value })}
-                                    class="appearance-none h-10 min-w-[180px] md:min-w-[220px] rounded-2xl border border-transparent bg-slate-50 px-3 pr-10 md:pl-3 pl-9 text-sm font-semibold text-slate-700 transition focus:outline-none focus:border-emerald-300 focus:bg-white focus:ring-4 focus:ring-emerald-50"
-                                >
-                                    {#each $noteCategories as cat}
-                                        <option value={cat}>{cat}</option>
-                                    {/each}
-                                </select>
-                            </div>
+                            <SelectMenu value={$activeNote.category || $_('notes.category_all')}
+                                options={noteCategoryOptions}
+                                onchange={(value) => notesStore.updateNote($activeNote.id, { category: value })}
+                                buttonClass="h-10 min-w-[180px] md:min-w-[220px] rounded-2xl border border-transparent bg-slate-50 px-3 text-sm font-semibold text-slate-700 dark:bg-slate-900 dark:text-slate-200" />
                         </div>
                         <div class="ml-auto text-[10px] text-slate-400 font-medium hidden md:block">
                             {$_('notes.ai_panel_followup_hint')}
