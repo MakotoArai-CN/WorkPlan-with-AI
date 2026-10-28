@@ -184,7 +184,7 @@ async function requestJson(url, options) {
     return payload;
 }
 
-export async function importFromVaultwarden({ baseUrl, email, masterPassword }) {
+async function loginToVaultwarden({ baseUrl, email, masterPassword }) {
     const server = trimBaseUrl(baseUrl);
     const normalizedEmail = String(email || '').trim();
     if (!normalizedEmail || !masterPassword) {
@@ -234,6 +234,12 @@ export async function importFromVaultwarden({ baseUrl, email, masterPassword }) 
     if (userKeyBytes.length !== 32 && userKeyBytes.length !== 64) {
         throw new Error('Vaultwarden 用户密钥长度无效');
     }
+
+    return { server, accessToken, userKeyBytes };
+}
+
+export async function importFromVaultwarden({ baseUrl, email, masterPassword }) {
+    const { server, accessToken, userKeyBytes } = await loginToVaultwarden({ baseUrl, email, masterPassword });
 
     const sync = await requestJson(`${server}/api/sync`, {
         headers: {
@@ -301,6 +307,127 @@ export async function importFromVaultwarden({ baseUrl, email, masterPassword }) 
     }
 
     return { items, skipped, total: (sync?.ciphers || []).length };
+}
+
+
+async function encryptEncString(value, key) {
+    if (value === null || value === undefined || value === '') return null;
+    const data = encoder.encode(String(value));
+    const iv = crypto.getRandomValues(new Uint8Array(16));
+
+    if (key.length >= 64) {
+        const encKey = key.subarray(0, 32);
+        const macKey = key.subarray(32, 64);
+        const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+            { name: 'AES-CBC', iv },
+            await crypto.subtle.importKey('raw', encKey, 'AES-CBC', false, ['encrypt']),
+            data
+        ));
+        const mac = new Uint8Array(await crypto.subtle.sign(
+            'HMAC',
+            await crypto.subtle.importKey('raw', macKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
+            concatBytes(iv, ciphertext)
+        ));
+        return `2.${bytesToBase64(iv)}|${bytesToBase64(ciphertext)}|${bytesToBase64(mac)}`;
+    }
+
+    const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+        { name: 'AES-CBC', iv },
+        await crypto.subtle.importKey('raw', key.subarray(0, 32), 'AES-CBC', false, ['encrypt']),
+        data
+    ));
+    return `0.${bytesToBase64(iv)}|${bytesToBase64(ciphertext)}`;
+}
+
+function splitTotp(notes) {
+    const value = String(notes || '');
+    const match = value.match(/(?:^|\n)\s*TOTP:\s*([^\n]+)/i);
+    if (!match) return { totp: '', notes: value.trim() };
+    return {
+        totp: match[1].trim(),
+        notes: value.replace(match[0], '').trim()
+    };
+}
+
+function duplicateKey(title, username) {
+    return `${String(title || '').trim().toLowerCase()}\u0000${String(username || '').trim().toLowerCase()}`;
+}
+
+export async function pushToVaultwarden({ baseUrl, email, masterPassword, items = [] }) {
+    const { server, accessToken, userKeyBytes } = await loginToVaultwarden({ baseUrl, email, masterPassword });
+    if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('WorkPlan 密码库中没有可推送的条目');
+    }
+
+    const authHeaders = {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json'
+    };
+    const sync = await requestJson(`${server}/api/sync`, { headers: authHeaders });
+    const existing = new Set();
+    for (const cipher of sync?.ciphers || []) {
+        if (!cipher || cipher.deletedDate || Number(cipher.type) !== 1 || cipher.organizationId) continue;
+        try {
+            const title = await decryptEncString(cipher.name, userKeyBytes);
+            const username = await decryptEncString(cipher.login?.username, userKeyBytes);
+            existing.add(duplicateKey(title, username));
+        } catch {
+            // An unreadable item cannot be compared reliably; leave it alone.
+        }
+    }
+
+    let pushed = 0;
+    let skipped = 0;
+    let failed = 0;
+    const errors = [];
+
+    for (const item of items) {
+        const title = String(item?.title || '').trim() || '未命名条目';
+        const username = String(item?.username || '');
+        const dedupe = duplicateKey(title, username);
+        if (existing.has(dedupe)) {
+            skipped += 1;
+            continue;
+        }
+        if (!item || item.password === '解密失败') {
+            failed += 1;
+            if (errors.length < 5) errors.push(`${title}: 密码解密失败`);
+            continue;
+        }
+
+        try {
+            const noteInfo = splitTotp(item.notes);
+            const notes = noteInfo.notes;
+            const url = String(item.url || '').trim();
+            const payload = {
+                type: 1,
+                name: await encryptEncString(title, userKeyBytes),
+                notes: notes ? await encryptEncString(notes, userKeyBytes) : null,
+                favorite: false,
+                login: {
+                    username: username ? await encryptEncString(username, userKeyBytes) : null,
+                    password: item.password ? await encryptEncString(item.password, userKeyBytes) : null,
+                    totp: noteInfo.totp ? await encryptEncString(noteInfo.totp, userKeyBytes) : null,
+                    uris: url ? [{ uri: await encryptEncString(url, userKeyBytes), match: null }] : []
+                },
+                reprompt: 0,
+                folderId: null,
+                organizationId: null
+            };
+            await requestJson(`${server}/api/ciphers`, {
+                method: 'POST',
+                headers: { ...authHeaders, 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            existing.add(dedupe);
+            pushed += 1;
+        } catch (e) {
+            failed += 1;
+            if (errors.length < 5) errors.push(`${title}: ${e.message || e}`);
+        }
+    }
+
+    return { pushed, skipped, failed, errors, total: items.length };
 }
 
 export const importFromBitwarden = importFromVaultwarden;
