@@ -7,6 +7,9 @@
     import PayrollPanel from './PayrollPanel.svelte';
     import SalarySettings from './SalarySettings.svelte';
     import DatePicker from './DatePicker.svelte';
+    import AnimatedModal from './AnimatedModal.svelte';
+    import TimeSelect from './TimeSelect.svelte';
+    import SegmentedControl from './SegmentedControl.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
@@ -89,6 +92,15 @@
         month: index + 1,
         summary: getMonthSummary(records, cursorYear, index + 1, config)
     }));
+    $: viewOptions = [
+        { value: 'year', label: $_('overtime.view_year') },
+        { value: 'month', label: $_('overtime.view_month') },
+        { value: 'day', label: $_('overtime.view_day') }
+    ];
+    $: detailOptions = [
+        { value: 'list', label: $_('overtime.layout_list'), icon: 'ph-list-bullets' },
+        { value: 'calendar', label: $_('overtime.layout_calendar'), icon: 'ph-calendar-blank' }
+    ];
     $: cursorLabel = (() => {
         if (viewMode === 'year') {
             return new Date(cursorYear, 0, 1).toLocaleDateString(localeCode, { year: 'numeric' });
@@ -324,23 +336,7 @@
             </div>
         {/if}
         <div class={`flex items-center gap-2 w-full md:w-auto ${embedded ? 'md:ml-auto' : ''}`}>
-            <div class="flex bg-slate-100 p-1 rounded-lg gap-1">
-                {#each [
-                    { key: 'year', label: $_('overtime.view_year') },
-                    { key: 'month', label: $_('overtime.view_month') },
-                    { key: 'day', label: $_('overtime.view_day') }
-                ] as item}
-                    <button on:click={() => viewMode = item.key}
-                        class="px-2.5 py-1 text-[10px] rounded transition whitespace-nowrap"
-                        class:bg-white={viewMode === item.key}
-                        class:shadow-sm={viewMode === item.key}
-                        class:font-bold={viewMode === item.key}
-                        class:text-orange-600={viewMode === item.key}
-                        class:text-slate-500={viewMode !== item.key}>
-                        {item.label}
-                    </button>
-                {/each}
-            </div>
+            <SegmentedControl bind:value={viewMode} options={viewOptions} />
             {#if !embedded}
             <details bind:open={exportOpen} class="relative">
                 <summary class="list-none h-9 px-3 bg-white border border-orange-200 hover:bg-orange-50 text-orange-700 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer">
@@ -428,16 +424,7 @@
                                 <span class="mx-1 text-slate-300">·</span>
                                 {$_('overtime.total_pay')}: <span class="font-bold text-orange-600">{money(monthSummary.pay)}</span>
                             </div>
-                            <div class="flex bg-slate-100 dark:bg-slate-700 p-0.5 rounded-lg">
-                                <button on:click={() => (detailLayout = 'list')}
-                                    class="px-2 py-1 rounded-md text-[10px] font-bold {detailLayout === 'list' ? 'bg-white dark:bg-slate-800 text-orange-600 shadow-sm' : 'text-slate-500'}">
-                                    <i class="ph ph-list-bullets"></i> {$_('overtime.layout_list')}
-                                </button>
-                                <button on:click={() => (detailLayout = 'calendar')}
-                                    class="px-2 py-1 rounded-md text-[10px] font-bold {detailLayout === 'calendar' ? 'bg-white dark:bg-slate-800 text-orange-600 shadow-sm' : 'text-slate-500'}">
-                                    <i class="ph ph-calendar-blank"></i> {$_('overtime.layout_calendar')}
-                                </button>
-                            </div>
+                            <SegmentedControl bind:value={detailLayout} options={detailOptions} className="scale-95 origin-right" />
                         </div>
                     </div>
                     {#if detailLayout === 'calendar'}
@@ -550,16 +537,7 @@
     </div>
 </div>
 
-{#if showForm}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div
-            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            on:click={closeForm}
-            on:keydown={(event) => event.key === 'Escape' && closeForm()}
-            role="button"
-            tabindex="0"
-        ></div>
-        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] overflow-hidden">
+<AnimatedModal bind:show={showForm} onClose={closeForm} zIndex={50} panelClass="max-w-lg">
             <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/40">
                 <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100">
                     {editingId ? $_('overtime.edit_record') : $_('overtime.add_record')}
@@ -574,13 +552,11 @@
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.start_time')}</span>
-                        <input type="time" bind:value={form.start}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                        <TimeSelect bind:value={form.start} />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.end_time')}</span>
-                        <input type="time" bind:value={form.end}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                        <TimeSelect bind:value={form.end} />
                     </label>
                     <div class="col-span-2 flex items-center justify-between bg-orange-50 dark:bg-orange-900/20 rounded-xl px-4 py-3">
                         <div class="text-xs text-orange-700 dark:text-orange-300">
@@ -631,9 +607,7 @@
                     {editingId ? $_('overtime.save') : $_('overtime.add_record')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
 
 <SalarySettings
     bind:show={showSalarySettings}

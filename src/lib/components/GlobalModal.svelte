@@ -1,5 +1,6 @@
 <script>
     import { modalStore, toastStore } from '../stores/modal.js';
+    import AnimatedModal from './AnimatedModal.svelte';
 
     function getVariantStyles(variant) {
         const styles = {
@@ -24,52 +25,37 @@
     $: variantStyle = getVariantStyles($modalStore.variant);
 </script>
 
-{#if $modalStore.show}
-    <div class="fixed inset-0 z-[100] flex items-center justify-center p-4">
-        <div
-            on:click={$modalStore.onCancel || (() => {})}
-            on:keydown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    ($modalStore.onCancel || (() => {}))();
-                }
-            }}
-            role="button"
-            tabindex="0"
-            class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
-        ></div>
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden transform transition-all animate-modal-in">
-            <div class="p-6 text-center">
-                <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center">
-                    <i class="ph-fill {variantStyle.icon} text-3xl {variantStyle.iconColor}"></i>
-                </div>
-                <h3 class="text-xl font-bold text-slate-800 mb-2">{$modalStore.title}</h3>
-                <p class="text-slate-600 text-sm leading-relaxed whitespace-pre-wrap">{$modalStore.message}</p>
-            </div>
-            <div class="px-6 pb-6 flex gap-3">
-                {#if $modalStore.type === 'confirm' && $modalStore.onCancel}
-                    <button on:click={$modalStore.onCancel}
-                        class="flex-1 py-3 px-4 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
-                        {$modalStore.cancelText}
-                    </button>
-                {/if}
-                <button on:click={$modalStore.onConfirm}
-                    class="flex-1 py-3 px-4 {variantStyle.bg} text-white rounded-xl font-bold text-sm {variantStyle.hover} transition-colors shadow-lg">
-                    {$modalStore.confirmText}
-                </button>
-            </div>
+<AnimatedModal show={$modalStore.show} onClose={$modalStore.onCancel || (() => {})} zIndex={100} panelClass="max-w-md">
+    <div class="p-6 text-center">
+        <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+            <i class="ph-fill {variantStyle.icon} text-3xl {variantStyle.iconColor}"></i>
         </div>
+        <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">{$modalStore.title}</h3>
+        <p class="text-slate-600 dark:text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">{$modalStore.message}</p>
     </div>
-{/if}
+    <div class="px-6 pb-6 flex gap-3">
+        {#if $modalStore.type === 'confirm' && $modalStore.onCancel}
+            <button on:click={$modalStore.onCancel}
+                class="flex-1 py-3 px-4 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                {$modalStore.cancelText}
+            </button>
+        {/if}
+        <button on:click={$modalStore.onConfirm}
+            class="flex-1 py-3 px-4 {variantStyle.bg} text-white rounded-xl font-bold text-sm {variantStyle.hover} transition-colors shadow-lg">
+            {$modalStore.confirmText}
+        </button>
+    </div>
+</AnimatedModal>
 
 <div class="fixed top-4 right-4 z-[101] flex flex-col gap-2 pointer-events-none">
     {#each $toastStore as toast (toast.id)}
         {@const style = getToastStyles(toast.type)}
-        <div class="pointer-events-auto {style.bg} {style.border} border rounded-xl px-4 py-3 shadow-lg flex items-center gap-3 min-w-[280px] max-w-md animate-toast-in">
+        <div class="pointer-events-auto {style.bg} {style.border} border rounded-xl px-4 py-3 shadow-lg flex items-center gap-3 min-w-[280px] max-w-md animate-toast-in dark:bg-slate-800 dark:border-slate-700">
             <i class="ph-fill {style.icon} text-xl {style.iconColor}"></i>
-            <span class="flex-1 text-sm font-medium {style.text}">{toast.message}</span>
+            <span class="flex-1 text-sm font-medium {style.text} dark:text-slate-200">{toast.message}</span>
             <button
                 on:click={() => toastStore.remove(toast.id)}
-                class="text-slate-400 hover:text-slate-600"
+                class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                 aria-label="关闭通知"
             >
                 <i class="ph ph-x"></i>
@@ -79,14 +65,9 @@
 </div>
 
 <style>
-    @keyframes modal-in {
-        from { opacity: 0; transform: scale(0.95); }
-        to { opacity: 1; transform: scale(1); }
-    }
     @keyframes toast-in {
         from { opacity: 0; transform: translateX(100%); }
         to { opacity: 1; transform: translateX(0); }
     }
-    .animate-modal-in { animation: modal-in 0.2s ease-out; }
     .animate-toast-in { animation: toast-in 0.3s ease-out; }
 </style>

@@ -4,12 +4,18 @@
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { formatLocalDateTime } from '../utils/datetime.js';
+    import SelectMenu from './SelectMenu.svelte';
 
     export let task;
     export let openModal;
     export let onSelect;
 
     $: isOverdue = task.deadline && task.deadline < formatLocalDateTime(new Date());
+    $: priorityOptions = [
+        { value: 'normal', label: $_('task_priority.normal'), icon: 'ph-fill ph-flag' },
+        { value: 'urgent', label: $_('task_priority.urgent'), icon: 'ph-fill ph-flag' },
+        { value: 'critical', label: $_('task_priority.critical'), icon: 'ph-fill ph-flag' }
+    ];
 
     function getStatusStyle(status) {
         const styles = {
@@ -139,16 +145,10 @@
             <i class="ph-bold ph-caret-right text-lg"></i>
         </button>
 
-        <div class="relative w-14 md:w-24 shrink-0">
-            <select value={task.priority} on:change={updatePriority} on:click|stopPropagation
-                class="w-full appearance-none px-1 md:pl-7 md:pr-2 py-1.5 rounded-lg text-xs font-bold border bg-white focus:outline-none text-center md:text-left {getPriorityStyle(task.priority)}">
-                <option value="normal">{$_('task_priority.normal')}</option>
-                <option value="urgent">{$_('task_priority.urgent')}</option>
-                <option value="critical">{$_('task_priority.critical')}</option>
-            </select>
-            <div class="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none hidden md:block">
-                <i class="ph-fill ph-flag {getPriorityStyle(task.priority)}"></i>
-            </div>
+        <div class="w-14 md:w-24 shrink-0" on:click|stopPropagation role="presentation">
+            <SelectMenu value={task.priority} options={priorityOptions}
+                onchange={(value) => taskStore.updateTask(task.id, { priority: value })}
+                buttonClass={`w-full px-1 md:px-2 py-1.5 rounded-lg text-xs font-bold border bg-white dark:bg-slate-900 flex items-center justify-between gap-1 ${getPriorityStyle(task.priority)}`} />
         </div>
 
         <div class="relative w-16 md:w-28 shrink-0">
