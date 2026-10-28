@@ -4,6 +4,9 @@
     import { settingsStore } from '../stores/settings.js';
     import { showConfirm, showToast } from '../stores/modal.js';
     import { exportToCSV, exportToExcel, exportToJSON } from '../utils/export.js';
+    import PayrollPanel from './PayrollPanel.svelte';
+    import SalarySettings from './SalarySettings.svelte';
+    import DatePicker from './DatePicker.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
     import { formatLocalDate } from '../utils/datetime.js';
@@ -39,6 +42,8 @@
     let editingId = null;
     let saving = false;
     let exportOpen = false;
+    let showSalarySettings = false;
+    let detailLayout = 'list';
 
     const now = new Date();
     let cursorYear = now.getFullYear();
@@ -61,6 +66,8 @@
     }).sort((a, b) => a.start.localeCompare(b.start));
     $: monthRecordsByDay = groupRecordsByDay(records, cursorYear, cursorMonth);
     $: monthDays = Array.from({ length: new Date(cursorYear, cursorMonth, 0).getDate() }, (_, index) => index + 1);
+    $: firstWeekday = (new Date(cursorYear, cursorMonth - 1, 1).getDay() + 6) % 7;
+    $: calendarCells = [...Array.from({ length: firstWeekday }, () => null), ...monthDays];
     $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
         month: index + 1,
         summary: getMonthSummary(records, cursorYear, index + 1, config)
@@ -147,7 +154,7 @@
         viewMode = 'day';
     }
 
-    function openCreate() {
+    function openCreateInternal() {
         const date = viewMode === 'day'
             ? `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(cursorDay).padStart(2, '0')}`
             : (cursorYear === new Date().getFullYear() && cursorMonth === new Date().getMonth() + 1
@@ -156,6 +163,10 @@
         editingId = null;
         form = createEmptyForm(date);
         showForm = true;
+    }
+
+    export function openCreate() {
+        openCreateInternal();
     }
 
     function openEdit(record) {
@@ -329,111 +340,25 @@
                 </div>
             </details>
             {/if}
-            <button on:click={openCreate}
-                class="h-9 px-4 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-bold shadow-md shadow-orange-200 flex items-center gap-2">
-                <i class="ph-bold ph-plus"></i>
-                <span class="hidden sm:inline">{$_('overtime.add_record')}</span>
-            </button>
+            {#if !embedded}
+                <button on:click={openCreate}
+                    class="h-9 px-4 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-bold shadow-md shadow-orange-200 flex items-center gap-2">
+                    <i class="ph-bold ph-plus"></i>
+                    <span class="hidden sm:inline">{$_('overtime.add_record')}</span>
+                </button>
+            {/if}
         </div>
     </header>
 
     <div class="flex-1 overflow-y-auto overscroll-contain min-h-0" style="-webkit-overflow-scrolling: touch;">
         <div class="p-4 md:p-6 space-y-5 pb-32">
-            <!-- Salary & rules -->
-            <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
-                <div class="p-4 md:p-5 flex flex-col md:flex-row md:items-center gap-4">
-                    <div class="flex items-center gap-3 flex-1">
-                        <div class="w-11 h-11 rounded-xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-                            <i class="ph-fill ph-currency-cny text-xl text-orange-600 dark:text-orange-300"></i>
-                        </div>
-                        <div class="flex-1">
-                            <div class="text-[10px] md:text-xs font-bold text-slate-400 uppercase">{$_('overtime.salary')}</div>
-                            <div class="flex items-center gap-2 mt-1">
-                                <span class="text-sm text-slate-400">¥</span>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    step="100"
-                                    value={config.monthlySalary || ''}
-                                    on:change={(event) => updateConfig('monthlySalary', event.currentTarget.value)}
-                                    placeholder={$_('overtime.salary_placeholder')}
-                                    class="w-40 text-xl font-black text-slate-800 dark:text-slate-100 bg-transparent border-b border-dashed border-slate-300 dark:border-slate-600 focus:border-orange-400 outline-none"
-                                />
-                            </div>
-                            <div class="text-[10px] md:text-xs text-slate-500 mt-1">
-                                {$_('overtime.hourly_rate')}: <span class="font-bold text-orange-600">{money(estimate.hourlyRate)}/h</span>
-                            </div>
-                        </div>
-                    </div>
-                    <details class="md:w-72">
-                        <summary class="text-xs font-bold text-slate-500 cursor-pointer select-none">{$_('overtime.rules')}</summary>
-                        <div class="grid grid-cols-2 gap-2 mt-3 text-[10px] text-slate-500">
-                            <label class="flex flex-col gap-1">
-                                <span>{$_('overtime.workdays')}</span>
-                                <input type="number" min="1" max="31" step="0.25" value={config.workdaysPerMonth}
-                                    on:change={(e) => updateConfig('workdaysPerMonth', e.currentTarget.value)}
-                                    class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200" />
-                            </label>
-                            <label class="flex flex-col gap-1">
-                                <span>{$_('overtime.hours_per_day')}</span>
-                                <input type="number" min="1" max="24" step="0.5" value={config.hoursPerDay}
-                                    on:change={(e) => updateConfig('hoursPerDay', e.currentTarget.value)}
-                                    class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200" />
-                            </label>
-                            <label class="flex flex-col gap-1">
-                                <span>{$_('overtime.weekday_rate')}</span>
-                                <input type="number" min="1" max="5" step="0.5" value={config.weekdayMultiplier}
-                                    on:change={(e) => updateConfig('weekdayMultiplier', e.currentTarget.value)}
-                                    class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200" />
-                            </label>
-                            <label class="flex flex-col gap-1">
-                                <span>{$_('overtime.weekend_rate')}</span>
-                                <input type="number" min="1" max="5" step="0.5" value={config.weekendMultiplier}
-                                    on:change={(e) => updateConfig('weekendMultiplier', e.currentTarget.value)}
-                                    class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200" />
-                            </label>
-                            <label class="flex flex-col gap-1">
-                                <span>{$_('overtime.holiday_rate')}</span>
-                                <input type="number" min="1" max="5" step="0.5" value={config.holidayMultiplier}
-                                    on:change={(e) => updateConfig('holidayMultiplier', e.currentTarget.value)}
-                                    class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200" />
-                            </label>
-                        </div>
-                    </details>
-                </div>
-            </div>
-
-            <!-- Summary cards -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
-                    <div class="text-[10px] md:text-xs font-bold text-slate-400 uppercase mb-1">{$_('overtime.last_month_hours')}</div>
-                    <div class="text-xl md:text-2xl font-black text-slate-700 dark:text-slate-100">{hours(estimate.lastMonth.hours)}</div>
-                    <div class="text-[10px] text-slate-500 mt-1">{money(estimate.lastMonth.pay)}</div>
-                </div>
-                <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
-                    <div class="text-[10px] md:text-xs font-bold text-sky-500 uppercase mb-1">{$_('overtime.current_month_hours')}</div>
-                    <div class="text-xl md:text-2xl font-black text-sky-600">{hours(estimate.currentMonth.hours)}</div>
-                    <div class="text-[10px] text-slate-500 mt-1">{money(estimate.currentMonth.pay)}</div>
-                </div>
-                <div class="bg-gradient-to-br from-orange-500 to-amber-500 p-3 md:p-4 rounded-xl shadow-md shadow-orange-200 text-white">
-                    <div class="text-[10px] md:text-xs font-bold text-orange-100 uppercase mb-1">{$_('overtime.expected_pay')}</div>
-                    <div class="text-xl md:text-2xl font-black">{money(estimate.expectedPay)}</div>
-                    <div class="text-[10px] text-orange-100 mt-1">{$_('overtime.expected_hours')}: {hours(estimate.expectedHours)}</div>
-                </div>
-                <div class="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
-                    <div class="text-[10px] md:text-xs font-bold text-emerald-500 uppercase mb-1">{$_('overtime.year_hours')}</div>
-                    <div class="text-xl md:text-2xl font-black text-emerald-600">{hours(yearSummary.hours)}</div>
-                    <div class="text-[10px] text-slate-500 mt-1">{money(yearSummary.pay)}</div>
-                </div>
-            </div>
-
-            <div class="text-[10px] md:text-xs text-slate-500 flex items-center gap-1.5 -mt-1">
-                <i class="ph ph-magic-wand"></i>
-                <span>{basisLabel()}</span>
-                {#if estimate.basis === 'last_month'}
-                    <span class="text-slate-400">· {$_('overtime.expected_note')}</span>
-                {/if}
-            </div>
+            <PayrollPanel
+                records={records}
+                leaveRecords={$taskStore.leaveRecords || []}
+                {config}
+                onUpdateConfig={(updates) => settingsStore.updateOvertimeConfig(updates)}
+                onOpenSettings={() => (showSalarySettings = true)}
+            />
 
             <!-- Period navigation -->
             <div class="flex items-center justify-between gap-2">
@@ -478,42 +403,94 @@
                 </div>
             {:else if viewMode === 'month'}
                 <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between">
+                    <div class="px-4 py-3 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap">
                         <div class="font-bold text-sm text-slate-700 dark:text-slate-200">{$_('overtime.month_detail')}</div>
-                        <div class="text-[10px] text-slate-500">
-                            {$_('overtime.total_hours')}: <span class="font-bold">{hours(monthSummary.hours)}</span>
-                            <span class="mx-1 text-slate-300">·</span>
-                            {$_('overtime.total_pay')}: <span class="font-bold text-orange-600">{money(monthSummary.pay)}</span>
+                        <div class="flex items-center gap-3">
+                            <div class="text-[10px] text-slate-500">
+                                {$_('overtime.total_hours')}: <span class="font-bold">{hours(monthSummary.hours)}</span>
+                                <span class="mx-1 text-slate-300">·</span>
+                                {$_('overtime.total_pay')}: <span class="font-bold text-orange-600">{money(monthSummary.pay)}</span>
+                            </div>
+                            <div class="flex bg-slate-100 dark:bg-slate-700 p-0.5 rounded-lg">
+                                <button on:click={() => (detailLayout = 'list')}
+                                    class="px-2 py-1 rounded-md text-[10px] font-bold {detailLayout === 'list' ? 'bg-white dark:bg-slate-800 text-orange-600 shadow-sm' : 'text-slate-500'}">
+                                    <i class="ph ph-list-bullets"></i> {$_('overtime.layout_list')}
+                                </button>
+                                <button on:click={() => (detailLayout = 'calendar')}
+                                    class="px-2 py-1 rounded-md text-[10px] font-bold {detailLayout === 'calendar' ? 'bg-white dark:bg-slate-800 text-orange-600 shadow-sm' : 'text-slate-500'}">
+                                    <i class="ph ph-calendar-blank"></i> {$_('overtime.layout_calendar')}
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
-                        {#each monthDays as day}
-                            {@const dayRecords = monthRecordsByDay.get(`${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`) || []}
-                            <button on:click={() => selectDay(day)}
-                                class="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-orange-50/40 dark:hover:bg-slate-700/40 transition">
-                                <div class="w-10 text-center shrink-0">
-                                    <div class="text-lg font-black {dayRecords.length ? 'text-orange-600' : 'text-slate-300'}">{String(day).padStart(2, '0')}</div>
-                                    <div class="text-[9px] text-slate-400">
-                                        {new Date(cursorYear, cursorMonth - 1, day).toLocaleDateString(localeCode, { weekday: 'short' })}
-                                    </div>
-                                </div>
-                                <div class="flex-1 min-w-0">
-                                    {#if dayRecords.length}
-                                        <div class="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">
-                                            {dayRecords.map(record => `${record.start}-${record.end}`).join(' / ')}
-                                        </div>
-                                        <div class="text-[10px] text-slate-500 mt-0.5">
-                                            {hours(dayRecords.reduce((sum, record) => sum + record.hours, 0))}
-                                            · {money(dayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0))}
-                                        </div>
+                    {#if detailLayout === 'calendar'}
+                        <div class="p-3">
+                            <div class="grid grid-cols-7 gap-1 mb-1">
+                                {#each ['一', '二', '三', '四', '五', '六', '日'] as label}
+                                    <div class="h-7 flex items-center justify-center text-[10px] font-bold text-slate-400">{label}</div>
+                                {/each}
+                            </div>
+                            <div class="grid grid-cols-7 gap-1">
+                                {#each calendarCells as day}
+                                    {#if day}
+                                        {@const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
+                                        {@const dayRecords = monthRecordsByDay.get(dayKey) || []}
+                                        {@const dayHours = dayRecords.reduce((sum, record) => sum + record.hours, 0)}
+                                        {@const dayPay = dayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0)}
+                                        <button on:click={() => selectDay(day)}
+                                            class={`min-h-20 md:min-h-24 rounded-lg border p-1.5 text-left transition
+                                                ${dayRecords.length
+                                                    ? 'border-orange-200 bg-orange-50/70 dark:border-orange-800 dark:bg-orange-900/20'
+                                                    : 'border-slate-100 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-900/20 hover:border-orange-200'}`}>
+                                            <div class="text-[11px] font-black ${dayRecords.length ? 'text-orange-600' : 'text-slate-400'}">{day}</div>
+                                            {#if dayRecords.length}
+                                                <div class="mt-1 text-[9px] font-bold text-slate-600 dark:text-slate-300">{hours(dayHours)}</div>
+                                                <div class="text-[9px] text-orange-600 truncate">{money(dayPay)}</div>
+                                                <div class="mt-1 flex flex-wrap gap-0.5">
+                                                    {#each dayRecords.slice(0, 3) as record}
+                                                        <span class="w-1.5 h-1.5 rounded-full ${record.type === 'holiday' ? 'bg-rose-500' : record.type === 'weekend' ? 'bg-orange-400' : 'bg-indigo-400'}"></span>
+                                                    {/each}
+                                                </div>
+                                            {:else}
+                                                <div class="mt-2 text-[9px] text-slate-300 dark:text-slate-600">{$_('overtime.no_records')}</div>
+                                            {/if}
+                                        </button>
                                     {:else}
-                                        <div class="text-xs text-slate-400">{$_('overtime.no_records')}</div>
+                                        <div></div>
                                     {/if}
-                                </div>
-                                <i class="ph-bold ph-caret-right text-slate-200"></i>
-                            </button>
-                        {/each}
-                    </div>
+                                {/each}
+                            </div>
+                        </div>
+                    {:else}
+                        <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
+                            {#each monthDays as day}
+                                {@const dayRecords = monthRecordsByDay.get(`${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`) || []}
+                                <button on:click={() => selectDay(day)}
+                                    class="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-orange-50/40 dark:hover:bg-slate-700/40 transition">
+                                    <div class="w-10 text-center shrink-0">
+                                        <div class="text-lg font-black {dayRecords.length ? 'text-orange-600' : 'text-slate-300'}">{String(day).padStart(2, '0')}</div>
+                                        <div class="text-[9px] text-slate-400">
+                                            {new Date(cursorYear, cursorMonth - 1, day).toLocaleDateString(localeCode, { weekday: 'short' })}
+                                        </div>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        {#if dayRecords.length}
+                                            <div class="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">
+                                                {dayRecords.map(record => `${record.start}-${record.end}`).join(' / ')}
+                                            </div>
+                                            <div class="text-[10px] text-slate-500 mt-0.5">
+                                                {hours(dayRecords.reduce((sum, record) => sum + record.hours, 0))}
+                                                · {money(dayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0))}
+                                            </div>
+                                        {:else}
+                                            <div class="text-xs text-slate-400">{$_('overtime.no_records')}</div>
+                                        {/if}
+                                    </div>
+                                    <i class="ph-bold ph-caret-right text-slate-200"></i>
+                                </button>
+                            {/each}
+                        </div>
+                    {/if}
                 </div>
             {:else}
                 <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
@@ -604,8 +581,7 @@
                 <div class="grid grid-cols-2 gap-3">
                     <label class="col-span-2 flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.date')}</span>
-                        <input type="date" bind:value={form.date} on:change={updateFormDate}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                        <DatePicker bind:value={form.date} onchange={updateFormDate} />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.start_time')}</span>
@@ -669,3 +645,10 @@
         </div>
     </div>
 {/if}
+
+<SalarySettings
+    bind:show={showSalarySettings}
+    {config}
+    onSave={(next) => settingsStore.updateOvertimeConfig(next)}
+    onClose={() => (showSalarySettings = false)}
+/>

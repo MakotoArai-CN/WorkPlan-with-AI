@@ -4,6 +4,7 @@
     import { settingsStore } from '../stores/settings.js';
     import { showConfirm, showToast } from '../stores/modal.js';
     import { exportToCSV, exportToExcel, exportToJSON } from '../utils/export.js';
+    import DatePicker from './DatePicker.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
     import { formatLocalDate } from '../utils/datetime.js';
@@ -150,7 +151,7 @@
         viewMode = 'month';
     }
 
-    function openCreate() {
+    function openCreateInternal() {
         editingId = null;
         form = createEmptyForm();
         if (viewMode !== 'day' && !(cursorYear === now.getFullYear() && cursorMonth === now.getMonth() + 1)) {
@@ -159,6 +160,10 @@
         }
         form.duration = form.unit === 'day' ? calculateLeaveDays(form.startDate, form.endDate) : 1;
         showForm = true;
+    }
+
+    export function openCreate() {
+        openCreateInternal();
     }
 
     function openEdit(record) {
@@ -329,11 +334,13 @@
                 </div>
             </details>
             {/if}
-            <button on:click={openCreate}
-                class="h-9 px-4 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold shadow-md shadow-rose-200 flex items-center gap-2">
-                <i class="ph-bold ph-plus"></i>
-                <span class="hidden sm:inline">{$_('leave.add_record')}</span>
-            </button>
+            {#if !embedded}
+                <button on:click={openCreate}
+                    class="h-9 px-4 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-sm font-bold shadow-md shadow-rose-200 flex items-center gap-2">
+                    <i class="ph-bold ph-plus"></i>
+                    <span class="hidden sm:inline">{$_('leave.add_record')}</span>
+                </button>
+            {/if}
         </div>
     </header>
 
@@ -507,13 +514,11 @@
                 <div class="grid grid-cols-2 gap-3">
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.start_date')}</span>
-                        <input type="date" bind:value={form.startDate} on:change={syncDurationFromDates}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                        <DatePicker accent="rose" bind:value={form.startDate} onchange={syncDurationFromDates} />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.end_date')}</span>
-                        <input type="date" bind:value={form.endDate} on:change={syncDurationFromDates}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                        <DatePicker accent="rose" bind:value={form.endDate} onchange={syncDurationFromDates} />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.unit')}</span>
