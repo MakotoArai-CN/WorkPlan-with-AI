@@ -164,6 +164,15 @@
         });
     }
 
+    function handleVaultwardenPushed(result) {
+        showToast({
+            message: get(_)('passwords.vaultwarden_push_success', {
+                values: { pushed: result.pushed, skipped: result.skipped, failed: result.failed }
+            }),
+            type: result.pushed > 0 ? 'success' : 'warning'
+        });
+    }
+
     async function manualSyncPasswords() {
         const t = get(_);
         const result = await syncPasswordsNow({ manual: true });
@@ -698,7 +707,10 @@
                         <div class="pl-3 border-l-2 border-indigo-100 dark:border-indigo-800">
                             <VaultwardenImport
                                 disabled={!$passwordsStore.isUnlocked}
+                                itemCount={$passwordsStore.isUnlocked ? $passwordsStore.passwords.length : 0}
+                                getItems={() => passwordsStore.getDecryptedPasswords()}
                                 onImported={handleVaultwardenImported}
+                                onPushed={handleVaultwardenPushed}
                             />
                         </div>
                     {/if}
