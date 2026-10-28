@@ -6,7 +6,8 @@
         BOSS_LEAVE_FIELDS,
         LEAVE_FIELDS,
         OVERTIME_FIELDS,
-        exportWorklog
+        exportWorklog,
+        filterWorklogRecords
     } from '../utils/worklog-export.js';
 
     export let show = false;
@@ -18,6 +19,7 @@
 
     let format = 'xlsx';
     let scope = 'year';
+    let month = new Date().getMonth() + 1;
     let preset = 'boss';
     let customFields = new Set(kind === 'leave' ? LEAVE_FIELDS : OVERTIME_FIELDS);
     let exporting = false;
@@ -30,6 +32,9 @@
             ? allFields
             : allFields.filter(field => customFields.has(field));
     $: kindLabel = $_('worklog.kind_' + kind);
+    $: monthLabels = Array.from({ length: 12 }, (_, index) =>
+        new Intl.DateTimeFormat(undefined, { month: 'long' }).format(new Date(2026, index, 1))
+    );
     $: fieldLabels = {
         date: $_('worklog.field_date'),
         start: $_('worklog.field_start'),
@@ -87,12 +92,7 @@
             showToast({ message: $_('worklog.select_one_field'), type: 'warning' });
             return;
         }
-        const scopedRecords = scope === 'year'
-            ? records.filter(record => {
-                const date = kind === 'leave' ? record.startDate : record.date;
-                return String(date || '').slice(0, 4) === String(year);
-            })
-            : records;
+        const scopedRecords = filterWorklogRecords(kind, records, scope, year, month);
         exporting = true;
         const result = await exportWorklog({
             kind,
@@ -101,6 +101,7 @@
             format,
             scope,
             year,
+            month,
             fieldLabels,
             labels: {
                 type: typeLabels,
@@ -173,6 +174,13 @@
                             class:text-slate-500={scope !== 'year'}>
                             {$_('worklog.this_year')} ({year})
                         </button>
+                        <button on:click={() => scope = 'month'}
+                            class="flex-1 py-1.5 text-[11px] rounded-md transition"
+                            class:bg-white={scope === 'month'} class:shadow-sm={scope === 'month'}
+                            class:font-bold={scope === 'month'} class:text-indigo-600={scope === 'month'}
+                            class:text-slate-500={scope !== 'month'}>
+                            {$_('worklog.this_month')}
+                        </button>
                         <button on:click={() => scope = 'all'}
                             class="flex-1 py-1.5 text-[11px] rounded-md transition"
                             class:bg-white={scope === 'all'} class:shadow-sm={scope === 'all'}
@@ -181,6 +189,17 @@
                             {$_('worklog.all')}
                         </button>
                     </div>
+                    {#if scope === 'month'}
+                        <div class="mt-2 flex items-center gap-2">
+                            <span class="text-[10px] text-slate-500">{$_('worklog.month')}</span>
+                            <select bind:value={month}
+                                class="border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-900 text-xs text-slate-600 dark:text-slate-300">
+                                {#each monthLabels as label, index}
+                                    <option value={index + 1}>{label}</option>
+                                {/each}
+                            </select>
+                        </div>
+                    {/if}
                 </div>
 
                 <div>

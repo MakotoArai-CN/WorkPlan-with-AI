@@ -1080,14 +1080,14 @@
         "kind_leave": "Leave",
         "export": "Export",
         "export_title": "Export worklog",
-        "export_desc": "Choose fields on demand; the boss preset omits pay",
+        "export_desc": "Choose fields on demand; the clean preset omits pay",
         "format": "Format",
         "scope": "Range",
         "this_year": "This year",
         "all": "All",
         "preset": "Export preset",
-        "preset_boss": "Boss version (no pay)",
-        "preset_boss_desc": "Date, overtime/leave type, duration and description only",
+        "preset_boss": "Clean version",
+        "preset_boss_desc": "Only dates, duration and notes; no salary or compensation information",
         "preset_full": "Full version",
         "preset_full_desc": "All fields including pay, compensation and notes",
         "preset_custom": "Custom fields",
@@ -1113,7 +1113,9 @@
         "field_duration": "Duration",
         "field_unit": "Unit",
         "field_paid": "Paid",
-        "field_kind": "Type"
+        "field_kind": "Type",
+        "this_month": "Month",
+        "month": "Month"
     },
     "career": {
         "entry": "AI review",
