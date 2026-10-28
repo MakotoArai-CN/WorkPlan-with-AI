@@ -5,6 +5,7 @@
     export let onClose = () => {};
     export let zIndex = 60;
     export let panelClass = 'max-w-lg';
+    export let panelStyle = '';
     export let closeOnBackdrop = true;
     export let dismissible = true;
     export let ariaLabel = '';
@@ -13,7 +14,7 @@
     let content;
     let backdrop;
     let wasShown = false;
-    let closedInternally = false;
+    let rendered = false;
     let closing = false;
     let animations = [];
     let originRect = null;
@@ -49,7 +50,7 @@
 
     async function open() {
         await tick();
-        if (!panel || !show || closedInternally) return;
+        if (!panel || !show || !rendered) return;
         cancelAnimations();
         closing = false;
         const target = panel.getBoundingClientRect();
@@ -91,11 +92,13 @@
         ], { duration, easing: 'ease-out', fill: 'both' });
     }
 
-    async function close() {
-        if (closing || closedInternally) return;
+    async function close(notify = true) {
+        if (closing || !rendered) return;
         if (!panel || reducedMotion()) {
-            closedInternally = true;
-            onClose();
+            rendered = false;
+            wasShown = false;
+            closing = false;
+            if (notify) onClose();
             return;
         }
         closing = true;
@@ -118,8 +121,10 @@
         ], { duration: 260, easing: 'ease-in', fill: 'both' });
 
         await new Promise(resolve => setTimeout(resolve, 310));
-        closedInternally = true;
-        onClose();
+        closing = false;
+        wasShown = false;
+        if (!show) rendered = false;
+        if (notify) onClose();
     }
 
     function handleBackdrop() {
@@ -135,13 +140,13 @@
 
     $: if (show && !wasShown) {
         wasShown = true;
-        closedInternally = false;
+        rendered = true;
+        closing = false;
         open();
     }
     $: if (!show && wasShown) {
         wasShown = false;
-        closedInternally = false;
-        cancelAnimations();
+        close(false);
     }
 
     onDestroy(cancelAnimations);
@@ -149,7 +154,7 @@
 
 <svelte:window on:keydown={handleKey} />
 
-{#if show && !closedInternally}
+{#if rendered}
     <div class="fixed inset-0 flex items-center justify-center p-4" style={`z-index:${zIndex}`} role="dialog" aria-modal="true" aria-label={ariaLabel || undefined}>
         <div bind:this={backdrop}
             class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
@@ -158,7 +163,7 @@
             on:keydown={(event) => dismissible && event.key === 'Enter' && handleBackdrop()}></div>
         <div bind:this={panel}
             class={`relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full ${panelClass} max-h-[92vh] flex flex-col overflow-hidden`}
-            style="opacity:0; transform-origin:center center;">
+            style={`opacity:0; transform-origin:center center; ${panelStyle}`}>
             <div bind:this={content} class="flex flex-col min-h-0 flex-1 overflow-hidden">
                 <slot />
             </div>
