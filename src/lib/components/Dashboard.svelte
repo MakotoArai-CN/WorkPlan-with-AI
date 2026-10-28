@@ -1,4 +1,5 @@
 <script>
+    import DatePicker from './DatePicker.svelte';
     import { taskStore, viewDate, today, activeTasks, completedTasks, futurePreviews, activeTask } from '../stores/tasks.js';
     import { addLocalDays, formatLocalDate, parseLocalDate } from '../utils/datetime.js';
     import { configureAiPanel, showAiPanel } from '../stores/ai.js';
@@ -88,13 +89,9 @@
             <i class="ph-bold ph-caret-left"></i>
         </button>
         <div class="flex flex-col items-center">
-            <div class="relative group w-full text-center">
-                <input type="date" value={$viewDate} on:change={handleDateInput}
-                    class="absolute inset-0 opacity-0 cursor-pointer z-10 w-full">
-                <h2 class="text-xs md:text-lg font-bold text-slate-800 flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap">
-                    {dateInfo.date} <i class="ph-fill ph-caret-down text-xs text-slate-400"></i>
-                </h2>
-            </div>
+            <DatePicker value={$viewDate} label={dateInfo.date} showIcon={false}
+                onchange={(value) => viewDate.set(value)}
+                buttonClass="text-xs md:text-lg font-bold text-slate-800 flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap bg-transparent border-0 p-0 w-auto" />
             <div class="text-[10px] md:text-xs text-slate-500 font-medium whitespace-nowrap">{dateInfo.week}</div>
         </div>
         <button on:click={() => changeDate(1)}

@@ -1,6 +1,7 @@
 <script>
     import { _ } from 'svelte-i18n';
     import DatePicker from './DatePicker.svelte';
+    import AnimatedModal from './AnimatedModal.svelte';
     import { getPayCycle, parseDateValue, setActualSalary } from '../utils/payroll.js';
     import {
         BANK_PRESETS,
@@ -168,11 +169,8 @@
     }
 </script>
 
-{#if show}
-    <div class="fixed inset-0 z-[75] flex items-center justify-center p-3 md:p-4">
-        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" on:click={close}
-            on:keydown={(event) => event.key === 'Escape' && close()} role="button" tabindex="0"></div>
-        <div class="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
+<AnimatedModal bind:show {onClose} zIndex={75} panelClass="max-w-3xl">
+
             <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-start justify-between gap-3">
                 <div>
                     <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
@@ -382,6 +380,4 @@
                     </div>
                 {/if}
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>

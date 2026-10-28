@@ -31,6 +31,21 @@
         { id: 'polarArea', name: $_('statistics_page.chart_polar'), icon: 'ph-circle-notch' }
     ];
 
+    $: statusOptions = [
+        { value: 'all', label: $_('statistics_page.all_status') },
+        { value: 'done', label: $_('statistics_page.done') },
+        { value: 'incomplete', label: $_('statistics_page.undone') },
+        { value: 'doing', label: $_('statistics_page.doing') },
+        { value: 'todo', label: $_('statistics_page.todo') }
+    ];
+    $: rangeOptions = [
+        { value: 'today', label: $_('statistics_page.today') },
+        { value: 'yesterday', label: $_('statistics_page.yesterday') },
+        { value: 'week', label: $_('statistics_page.this_week') },
+        { value: 'lastWeek', label: $_('statistics_page.last_week') },
+        { value: 'month', label: $_('statistics_page.this_month') },
+        { value: 'lastMonth', label: $_('statistics_page.last_month') }
+    ];
     $: statsData = (() => {
         let list = $taskStore.tasks.filter(t => {
             const d = t.date.split('T')[0];
@@ -173,6 +188,9 @@
     }
 
     setStatsRange('week');
+    import SelectMenu from './SelectMenu.svelte';
+    import SegmentedControl from './SegmentedControl.svelte';
+    import DatePicker from './DatePicker.svelte';
 </script>
 
 <div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
@@ -187,40 +205,14 @@
             >
                 <i class="ph ph-sparkle"></i> AI
             </button>
-            <select bind:value={statsStatus}
-                class="w-full md:w-auto text-xs border border-slate-200 rounded px-2 py-1.5 outline-none bg-white text-slate-600 font-bold">
-                <option value="all">{$_('statistics_page.all_status')}</option>
-                <option value="done">{$_('statistics_page.done')}</option>
-                <option value="incomplete">{$_('statistics_page.undone')}</option>
-                <option value="doing">{$_('statistics_page.doing')}</option>
-                <option value="todo">{$_('statistics_page.todo')}</option>
-            </select>
-            <div class="w-full md:w-auto flex bg-slate-100 p-1 rounded-lg gap-1 overflow-x-auto justify-start">
-                {#each [
-                    { key: 'today', label: $_('statistics_page.today') },
-                    { key: 'yesterday', label: $_('statistics_page.yesterday') },
-                    { key: 'week', label: $_('statistics_page.this_week') },
-                    { key: 'lastWeek', label: $_('statistics_page.last_week') },
-                    { key: 'month', label: $_('statistics_page.this_month') },
-                    { key: 'lastMonth', label: $_('statistics_page.last_month') }
-                ] as item}
-                    <button on:click={() => setStatsRange(item.key)}
-                        class="px-2 py-1 text-[10px] rounded hover:bg-white hover:shadow-sm transition whitespace-nowrap"
-                        class:bg-white={statsRangeType === item.key}
-                        class:shadow-sm={statsRangeType === item.key}
-                        class:font-bold={statsRangeType === item.key}
-                        class:text-indigo-600={statsRangeType === item.key}
-                        class:text-slate-500={statsRangeType !== item.key}>
-                        {item.label}
-                    </button>
-                {/each}
+            <SelectMenu bind:value={statsStatus} options={statusOptions} className="w-full md:w-36" />
+            <div class="w-full md:w-auto max-w-full overflow-x-auto">
+                <SegmentedControl bind:value={statsRangeType} options={rangeOptions} onchange={setStatsRange} />
             </div>
-            <div class="w-full md:w-auto flex items-center justify-center gap-1 bg-white border border-slate-200 rounded-md px-2 py-0.5">
-                <input type="date" bind:value={statsStart} on:change={() => statsRangeType = 'custom'}
-                    class="text-[10px] outline-none text-slate-500 w-24 text-center">
+            <div class="w-full md:w-auto flex items-center justify-center gap-1 bg-white border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-md px-2 py-1">
+                <div class="w-28"><DatePicker bind:value={statsStart} onchange={() => (statsRangeType = 'custom')} /></div>
                 <span class="text-slate-300">-</span>
-                <input type="date" bind:value={statsEnd} on:change={() => statsRangeType = 'custom'}
-                    class="text-[10px] outline-none text-slate-500 w-24 text-center">
+                <div class="w-28"><DatePicker bind:value={statsEnd} onchange={() => (statsRangeType = 'custom')} /></div>
             </div>
         </div>
     </header>
