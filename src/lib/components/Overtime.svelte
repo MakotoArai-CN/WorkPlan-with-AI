@@ -13,6 +13,7 @@
     import SegmentedControl from './SegmentedControl.svelte';
     import SelectMenu from './SelectMenu.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
+    import WorklogDetailCard from './WorklogDetailCard.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
     import { formatLocalDate } from '../utils/datetime.js';
@@ -134,6 +135,22 @@
     $: formPay = config.monthlySalary > 0
         ? calculateRecordPay({ ...form, hours: formHours, type: form.type }, config)
         : 0;
+
+    function makeOvertimeRow(record) {
+        return {
+            record,
+            dateMain: record.date.slice(8, 10),
+            dateSub: new Date(`${record.date}T00:00:00`).toLocaleDateString(localeCode, { weekday: 'short' }),
+            badge: $_('overtime.type_' + record.type),
+            badgeClass: TYPE_STYLES[record.type] || TYPE_STYLES.weekday,
+            title: `${record.start} - ${record.end}`,
+            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
+            note: record.note || '',
+            metric: hours(record.hours),
+            amount: money(calculateRecordPay(record, config)),
+            amountClass: 'text-orange-600'
+        };
+    }
 
     function createEmptyForm(date = formatLocalDate(new Date())) {
         return {
@@ -429,20 +446,22 @@
                     {/each}
                 </div>
             {:else if viewMode === 'month'}
-                <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap">
-                        <div class="font-bold text-sm text-slate-700 dark:text-slate-200">{$_('overtime.month_detail')}</div>
-                        <div class="flex items-center gap-3">
-                            <div class="text-[10px] text-slate-500">
-                                {$_('overtime.total_hours')}: <span class="font-bold">{hours(monthSummary.hours)}</span>
-                                <span class="mx-1 text-slate-300">·</span>
-                                {$_('overtime.total_pay')}: <span class="font-bold text-orange-600">{money(monthSummary.pay)}</span>
-                            </div>
-                            <SegmentedControl bind:value={detailLayout} options={detailOptions} className="scale-95 origin-right" />
-                        </div>
-                    </div>
-                    {#if detailLayout === 'calendar'}
-                        <div class="p-3">
+                <WorklogDetailCard
+                    title={$_('overtime.month_detail')}
+                    summary={`${$_('overtime.total_hours')}: ${hours(monthSummary.hours)} · ${$_('overtime.total_pay')}: ${money(monthSummary.pay)}`}
+                    rows={monthRows}
+                    bind:layout={detailLayout}
+                    showLayout
+                    emptyTitle={$_('overtime.empty')}
+                    emptyDesc={$_('overtime.empty_desc')}
+                    addLabel={$_('overtime.add_record')}
+                    onAdd={openCreate}
+                    onEdit={openEdit}
+                    onDelete={deleteRecord}
+                    editLabel={$_('overtime.edit_record')}
+                    deleteLabel={$_('overtime.delete')}
+                >
+                    <div slot="calendar" class="p-3">
                             <div class="grid grid-cols-7 gap-1 mb-1">
                                 {#each ['一', '二', '三', '四', '五', '六', '日'] as label}
                                     <div class="h-7 flex items-center justify-center text-[10px] font-bold text-slate-400">{label}</div>
@@ -479,73 +498,21 @@
                                 {/each}
                             </div>
                         </div>
-                    {:else}
-                        <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
-                            {#each monthRows as row}
-                                <WorklogRecordRow
-                                    {...row}
-                                    editLabel={$_('overtime.edit_record')}
-                                    deleteLabel={$_('overtime.delete')}
-                                    onEdit={() => openEdit(row.record)}
-                                    onDelete={() => deleteRecord(row.record)}
-                                />
-                            {/each}
-                            {#if monthRows.length === 0}
-                                <div class="py-12 text-center text-slate-400">
-                                    <i class="ph ph-clock-afternoon text-4xl mb-2 opacity-40"></i>
-                                    <div class="text-sm font-bold">{$_('overtime.empty')}</div>
-                                    <div class="text-xs mt-1">{$_('overtime.empty_desc')}</div>
-                                    <button on:click={openCreate} class="mt-3 text-xs font-bold text-orange-600 hover:text-orange-700">
-                                        + {$_('overtime.add_record')}
-                                    </button>
-                                </div>
-                            {/if}
-                        </div>
-                    {/if}
-                </div>
+                </WorklogDetailCard>
             {:else}
-                <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between">
-                        <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
-                            {new Date(cursorYear, cursorMonth - 1, cursorDay).toLocaleDateString(localeCode, { month: 'long', day: 'numeric', weekday: 'short' })}
-                        </div>
-                        <div class="text-[10px] text-slate-500">
-                            {hours(selectedDayRecords.reduce((sum, record) => sum + record.hours, 0))}
-                            <span class="mx-1 text-slate-300">·</span>
-                            <span class="font-bold text-orange-600">{money(selectedDayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0))}</span>
-                        </div>
-                    </div>
-                    {#if selectedDayRecords.length}
-                        <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
-                            {#each selectedDayRecords as record}
-                                <WorklogRecordRow
-                                    dateMain={record.start}
-                                    dateSub={record.end}
-                                    badge={$_('overtime.type_' + record.type)}
-                                    badgeClass={TYPE_STYLES[record.type] || TYPE_STYLES.weekday}
-                                    title={hours(record.hours)}
-                                    detail={$_('overtime.comp_' + (record.compensation || 'pay'))}
-                                    note={record.note || ''}
-                                    metric={money(calculateRecordPay(record, config))}
-                                    amountClass={record.compensation === 'pay' ? 'text-orange-600' : 'text-slate-500'}
-                                    editLabel={$_('overtime.edit_record')}
-                                    deleteLabel={$_('overtime.delete')}
-                                    onEdit={() => openEdit(record)}
-                                    onDelete={() => deleteRecord(record)}
-                                />
-                            {/each}
-                        </div>
-                    {:else}
-                        <div class="py-12 text-center text-slate-400">
-                            <i class="ph ph-clock-afternoon text-4xl mb-2 opacity-40"></i>
-                            <div class="text-sm font-bold">{$_('overtime.empty')}</div>
-                            <div class="text-xs mt-1">{$_('overtime.empty_desc')}</div>
-                            <button on:click={openCreate} class="mt-3 text-xs font-bold text-orange-600 hover:text-orange-700">
-                                + {$_('overtime.add_record')}
-                            </button>
-                        </div>
-                    {/if}
-                </div>
+                <WorklogDetailCard
+                    title={new Date(cursorYear, cursorMonth - 1, cursorDay).toLocaleDateString(localeCode, { month: 'long', day: 'numeric', weekday: 'short' })}
+                    summary={`${hours(selectedDayRecords.reduce((sum, record) => sum + record.hours, 0))} · ${money(selectedDayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0))}`}
+                    rows={selectedDayRecords.map(makeOvertimeRow)}
+                    emptyTitle={$_('overtime.empty')}
+                    emptyDesc={$_('overtime.empty_desc')}
+                    addLabel={$_('overtime.add_record')}
+                    onAdd={openCreate}
+                    onEdit={openEdit}
+                    onDelete={deleteRecord}
+                    editLabel={$_('overtime.edit_record')}
+                    deleteLabel={$_('overtime.delete')}
+                />
             {/if}
         </div>
     </div>
