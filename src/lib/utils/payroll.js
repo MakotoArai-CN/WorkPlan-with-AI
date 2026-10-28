@@ -18,6 +18,7 @@ import {
     summarizeLeaveRecords,
     summarizeOvertimeRecords
 } from './overtime.js';
+import { getSalaryGrowth } from './bank-import.js';
 
 const pad = value => String(value).padStart(2, '0');
 
@@ -137,6 +138,44 @@ export function getPayrollEstimate(records = [], leaveRecords = [], referenceDat
     const previousCycle = getPayCycle(addDays(cycle.start, -1), normalized);
     const current = cycleEstimate(records, leaveRecords, cycle, normalized);
     const previous = cycleEstimate(records, leaveRecords, previousCycle, normalized);
+
+    const recent = [];
+    let historyCursor = previousCycle;
+    for (let index = 0; index < 3; index += 1) {
+        const estimate = cycleEstimate(records, leaveRecords, historyCursor, normalized);
+        recent.push({
+            cycle: historyCursor,
+            overtimePay: estimate.overtimePay,
+            leaveDeduction: estimate.leaveDeduction,
+            estimated: estimate.estimated,
+            actual: (normalized.salaryActuals || []).find(item => item.periodEnd === historyCursor.end) || null
+        });
+        historyCursor = getPayCycle(addDays(historyCursor.start, -1), normalized);
+    }
+    const average = values => values.length
+        ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 100) / 100
+        : 0;
+    const averageOvertimePay = average(recent.map(item => item.overtimePay));
+    const averageLeaveDeduction = average(recent.map(item => item.leaveDeduction));
+    const hasHistory = recent.some(item => item.overtimePay > 0 || item.leaveDeduction > 0);
+    // Blend the current cycle with the trailing average. When there is no
+    // overtime/leave history yet, the current records are the only signal.
+    const smartOvertimePay = hasHistory
+        ? Math.round(((current.overtimePay * 2 + averageOvertimePay) / 3) * 100) / 100
+        : current.overtimePay;
+    const smartLeaveDeduction = hasHistory
+        ? Math.round(((current.leaveDeduction * 2 + averageLeaveDeduction) / 3) * 100) / 100
+        : current.leaveDeduction;
+    const smart = {
+        sample: recent.length,
+        averageOvertimePay,
+        averageLeaveDeduction,
+        overtimePay: smartOvertimePay,
+        leaveDeduction: smartLeaveDeduction,
+        estimated: Math.round((current.fixed + smartOvertimePay - smartLeaveDeduction) * 100) / 100,
+        history: recent
+    };
+
     const actual = (normalized.salaryActuals || [])
         .filter(item => item.periodEnd === previousCycle.end)
         .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0] || null;
@@ -146,6 +185,8 @@ export function getPayrollEstimate(records = [], leaveRecords = [], referenceDat
         current,
         previous,
         actual,
+        smart,
+        salaryGrowth: getSalaryGrowth(normalized.salaryActuals || []),
         actualDifference: actual ? Math.round((actual.amount - previous.estimated) * 100) / 100 : 0,
         fixedTotal: current.fixed,
         overtimeBase: getOvertimeBaseSalary(normalized),
@@ -155,7 +196,7 @@ export function getPayrollEstimate(records = [], leaveRecords = [], referenceDat
     };
 }
 
-export function setActualSalary(config, cycle, amount, note = '') {
+export function setActualSalary(config, cycle, amount, note = '', source = 'manual') {
     const normalized = normalizeOvertimeConfig(config);
     const value = Number(amount);
     if (!Number.isFinite(value) || value < 0) return normalized.salaryActuals;
@@ -167,6 +208,7 @@ export function setActualSalary(config, cycle, amount, note = '') {
         paydayDate: cycle.paydayDate,
         amount: Math.round(value * 100) / 100,
         note,
+        source,
         updatedAt: new Date().toISOString()
     });
     return next;
