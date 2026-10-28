@@ -1080,14 +1080,14 @@
         "kind_leave": "休暇",
         "export": "エクスポート",
         "export_title": "勤怠記録をエクスポート",
-        "export_desc": "必要な項目を選択。上司向けは残業代を含みません",
+        "export_desc": "必要な項目を選択できます。クリーン版には給与情報が含まれません",
         "format": "形式",
         "scope": "範囲",
         "this_year": "今年",
         "all": "すべて",
         "preset": "テンプレート",
-        "preset_boss": "上司向け（残業代なし）",
-        "preset_boss_desc": "日付・残業/休暇区分・時間・内容のみ",
+        "preset_boss": "クリーン版",
+        "preset_boss_desc": "日付・時間・メモのみ。給与や補償情報は含みません",
         "preset_full": "完全版",
         "preset_full_desc": "残業代・補償・メモなど全項目",
         "preset_custom": "カスタム項目",
@@ -1113,7 +1113,9 @@
         "field_duration": "期間",
         "field_unit": "単位",
         "field_paid": "有給",
-        "field_kind": "種別"
+        "field_kind": "種別",
+        "this_month": "月別",
+        "month": "月"
     },
     "career": {
         "entry": "AI 分析",

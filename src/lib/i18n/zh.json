@@ -1080,14 +1080,14 @@
         "kind_leave": "请假",
         "export": "导出",
         "export_title": "导出工时记录",
-        "export_desc": "按需选择字段，老板版不包含工资信息",
+        "export_desc": "按需选择字段；纯净版不包含工资信息",
         "format": "格式",
         "scope": "范围",
         "this_year": "本年",
         "all": "全部",
         "preset": "导出模板",
-        "preset_boss": "老板版（不含工资）",
-        "preset_boss_desc": "只保留日期、加班/请假类型、时长和事项说明",
+        "preset_boss": "纯净版",
+        "preset_boss_desc": "只保留日期、时长和事项说明，不包含工资和补偿信息",
         "preset_full": "完整版",
         "preset_full_desc": "包含全部字段（工资/补偿方式/备注等）",
         "preset_custom": "自定义字段",
@@ -1113,7 +1113,9 @@
         "field_duration": "时长",
         "field_unit": "单位",
         "field_paid": "带薪",
-        "field_kind": "类型"
+        "field_kind": "类型",
+        "this_month": "按月",
+        "month": "月份"
     },
     "career": {
         "entry": "AI 分析",
