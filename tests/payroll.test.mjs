@@ -76,6 +76,14 @@ describe('payroll estimate', () => {
         expect(payroll.current.estimated).toBeCloseTo(10500 + 2 * 8000 / 174 * 1.5 - dailyRate, 2);
     });
 
+    test('smart estimate falls back to the current cycle without history', () => {
+        const records = [
+            { id: 'ot1', date: '2026-10-20', start: '18:00', end: '20:00', hours: 2, type: 'weekday', compensation: 'pay' }
+        ];
+        const payroll = getPayrollEstimate(records, [], new Date(2026, 9, 28), CONFIG);
+        expect(payroll.smart.estimated).toBeCloseTo(payroll.current.estimated, 2);
+    });
+
     test('stores and reads the actual salary for the previous cycle', () => {
         const payroll = getPayrollEstimate([], [], new Date(2026, 9, 28), CONFIG);
         expect(payroll.previousCycle.end).toBe('2026-10-15');
