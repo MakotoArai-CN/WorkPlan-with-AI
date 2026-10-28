@@ -18,11 +18,63 @@ export const DEFAULT_OVERTIME_CONFIG = Object.freeze({
     weekdayMultiplier: 1.5,
     weekendMultiplier: 2,
     holidayMultiplier: 3,
-    annualLeaveQuota: 0
+    annualLeaveQuota: 0,
+    payday: 15,
+    salaryCycleMode: 'payday',
+    overtimeBaseMode: 'base',
+    leaveDeductionMode: 'fixed',
+    salaryComponents: [],
+    salaryActuals: []
 });
+
+export const SALARY_COMPONENT_TEMPLATE = Object.freeze([
+    { id: 'base', name: '底薪', amount: 0, inOvertimeBase: true },
+    { id: 'performance', name: '绩效', amount: 0, inOvertimeBase: false },
+    { id: 'transport', name: '交通补贴', amount: 0, inOvertimeBase: false },
+    { id: 'social', name: '社保补贴', amount: 0, inOvertimeBase: false }
+]);
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME_PATTERN = /^(\d{2}):(\d{2})$/;
+
+function normalizeSalaryComponents(components, monthlySalary) {
+    const source = Array.isArray(components) && components.length > 0
+        ? components
+        : (monthlySalary > 0
+            ? [{ id: 'base', name: '底薪', amount: monthlySalary, inOvertimeBase: true }]
+            : []);
+    return source
+        .filter(item => item && typeof item === 'object')
+        .map((item, index) => {
+            const amount = Number(item.amount);
+            return {
+                id: typeof item.id === 'string' && item.id ? item.id : `component_${index + 1}`,
+                name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `项目 ${index + 1}`,
+                amount: Number.isFinite(amount) ? Math.min(100_000_000, Math.max(0, amount)) : 0,
+                inOvertimeBase: item.inOvertimeBase === true
+            };
+        });
+}
+
+export function getSalaryComponents(config = DEFAULT_OVERTIME_CONFIG) {
+    return normalizeOvertimeConfig(config).salaryComponents;
+}
+
+export function getFixedSalaryTotal(config = DEFAULT_OVERTIME_CONFIG) {
+    const components = getSalaryComponents(config);
+    return Math.round(components.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+}
+
+export function getOvertimeBaseSalary(config = DEFAULT_OVERTIME_CONFIG) {
+    const normalized = normalizeOvertimeConfig(config);
+    if (normalized.overtimeBaseMode === 'total') return getFixedSalaryTotal(normalized);
+    const components = normalized.salaryComponents;
+    const selected = components.filter(item => item.inOvertimeBase);
+    if (selected.length > 0) {
+        return Math.round(selected.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+    }
+    return normalized.monthlySalary;
+}
 
 export function normalizeOvertimeConfig(config = {}) {
     const merged = { ...DEFAULT_OVERTIME_CONFIG, ...(config || {}) };
@@ -32,15 +84,36 @@ export function normalizeOvertimeConfig(config = {}) {
         if (positive && parsed <= 0) return fallback;
         return Math.min(max, Math.max(min, parsed));
     };
+    const monthlySalary = number(merged.monthlySalary, 0, 0, 100_000_000);
+    const salaryComponents = normalizeSalaryComponents(merged.salaryComponents, monthlySalary);
+    const componentTotal = Math.round(salaryComponents.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+    const payday = Math.round(number(merged.payday, 15, 1, 31, true));
+    const salaryActuals = (Array.isArray(merged.salaryActuals) ? merged.salaryActuals : [])
+        .filter(item => item && typeof item === 'object')
+        .map(item => ({
+            id: typeof item.id === 'string' && item.id ? item.id : `actual_${item.periodEnd || ''}`,
+            periodStart: isValidDate(item.periodStart) ? item.periodStart : '',
+            periodEnd: isValidDate(item.periodEnd) ? item.periodEnd : '',
+            paydayDate: isValidDate(item.paydayDate) ? item.paydayDate : '',
+            amount: number(item.amount, 0, 0, 100_000_000),
+            note: typeof item.note === 'string' ? item.note : '',
+            updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : ''
+        }));
     return {
-        monthlySalary: number(merged.monthlySalary, 0, 0, 100_000_000),
+        monthlySalary: componentTotal > 0 ? componentTotal : monthlySalary,
         currency: typeof merged.currency === 'string' && merged.currency ? merged.currency : 'CNY',
         workdaysPerMonth: number(merged.workdaysPerMonth, 21.75, 1, 31, true),
         hoursPerDay: number(merged.hoursPerDay, 8, 1, 24, true),
         weekdayMultiplier: number(merged.weekdayMultiplier, 1.5, 1, 5),
         weekendMultiplier: number(merged.weekendMultiplier, 2, 1, 5),
         holidayMultiplier: number(merged.holidayMultiplier, 3, 1, 5),
-        annualLeaveQuota: number(merged.annualLeaveQuota, 0, 0, 365)
+        annualLeaveQuota: number(merged.annualLeaveQuota, 0, 0, 365),
+        payday,
+        salaryCycleMode: merged.salaryCycleMode === 'calendar' ? 'calendar' : 'payday',
+        overtimeBaseMode: merged.overtimeBaseMode === 'total' ? 'total' : 'base',
+        leaveDeductionMode: merged.leaveDeductionMode === 'base' ? 'base' : 'fixed',
+        salaryComponents,
+        salaryActuals
     };
 }
 
@@ -89,7 +162,7 @@ export function getHourlyRate(config = DEFAULT_OVERTIME_CONFIG) {
     const normalized = normalizeOvertimeConfig(config);
     const monthlyHours = normalized.workdaysPerMonth * normalized.hoursPerDay;
     if (!(monthlyHours > 0)) return 0;
-    return normalized.monthlySalary / monthlyHours;
+    return getOvertimeBaseSalary(normalized) / monthlyHours;
 }
 
 /** Suggested type from a local date: weekends default to the weekend rate. */
@@ -291,6 +364,12 @@ function overlapDays(startDay, endDay, periodStartDay, periodEndDay) {
 
 function periodRange(period = {}) {
     const { year, month, day } = period;
+    if (isValidDate(period.startDate) && isValidDate(period.endDate)) {
+        return {
+            from: dateToUtcDay(period.startDate),
+            to: dateToUtcDay(period.endDate)
+        };
+    }
     if (year && month && day) {
         const value = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const dayNumber = dateToUtcDay(value);

@@ -984,7 +984,9 @@
         "export_excel_year": "导出 Excel（本年）",
         "export_excel_all": "导出 Excel（全部）",
         "ai_locked": "AI 不可访问",
-        "ai_locked_hint": "开启后 AI 无法读取或修改此条记录"
+        "ai_locked_hint": "开启后 AI 无法读取或修改此条记录",
+        "layout_list": "列表",
+        "layout_calendar": "日历"
     },
     "leave": {
         "title": "请假记录",
@@ -1121,5 +1123,46 @@
         "copy_failed": "复制失败",
         "empty": "AI 没有返回内容",
         "ai_unavailable": "当前 AI 服务需要 API Key，请先在 AI 设置中配置"
+    },
+    "payroll": {
+        "settings_title": "工资与发薪设置",
+        "settings_desc": "按工资组成和发薪日计算，不再只用一个固定月薪",
+        "settings": "工资设置",
+        "current_cycle": "当前工资周期",
+        "payday": "发薪日",
+        "cycle_mode": "周期模式",
+        "cycle_payday": "按发薪日（推荐）",
+        "cycle_calendar": "按自然月",
+        "workdays": "月计薪天数",
+        "hours_per_day": "每日工时",
+        "overtime_base_mode": "加班基数",
+        "base_mode_base": "仅计入勾选项目（底薪）",
+        "base_mode_total": "全部固定工资",
+        "leave_deduction_mode": "请假扣款基数",
+        "leave_fixed": "固定工资总额",
+        "leave_base": "加班基数",
+        "components": "工资组成",
+        "components_desc": "底薪、绩效、补贴等分别填写；勾选的项目计入加班基数",
+        "load_template": "载入通用模板",
+        "add_component": "添加项目",
+        "component_name": "项目名称",
+        "in_overtime_base": "计入加班基数",
+        "no_components": "还没有工资项目",
+        "total_hint": "固定工资合计",
+        "fixed_salary": "固定工资",
+        "overtime_pay": "本期加班费",
+        "leave_deduction": "请假扣款",
+        "estimated": "本期预估",
+        "hourly_base": "加班基数",
+        "hourly_rate": "时薪",
+        "unpaid_days": "不带薪假",
+        "last_cycle_actual": "上期实发工资",
+        "actual_placeholder": "填写上月实发",
+        "previous_estimated": "上期预估",
+        "difference": "差额"
+    },
+    "date_picker": {
+        "placeholder": "选择日期",
+        "today": "今天"
     }
 }
