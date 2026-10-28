@@ -24,8 +24,10 @@
     let checkingUpdate = false;
     let themeGridEl;
     let languageGridEl;
+    let editorGridEl;
     let themePill = { left: 0, top: 0, width: 0, height: 0, ready: false };
     let languagePill = { left: 0, top: 0, width: 0, height: 0, ready: false };
+    let editorPill = { left: 0, top: 0, width: 0, height: 0, ready: false };
 
     function measurePill(container, attribute, value) {
         if (!container) return { left: 0, top: 0, width: 0, height: 0, ready: false };
@@ -43,6 +45,7 @@
     function updateAppearancePills() {
         themePill = measurePill(themeGridEl, 'theme-id', get(settingsStore).theme);
         languagePill = measurePill(languageGridEl, 'language', get(locale));
+        editorPill = measurePill(editorGridEl, 'editor-id', get(settingsStore).markdownEditor);
     }
 
     $: if (themeGridEl) {
@@ -52,6 +55,11 @@
 
     $: if (languageGridEl) {
         $locale;
+        tick().then(updateAppearancePills);
+    }
+
+    $: if (editorGridEl) {
+        $settingsStore.markdownEditor;
         tick().then(updateAppearancePills);
     }
 
@@ -393,6 +401,7 @@
     }
 
     function handleEditorChange(editor) {
+        editorPill = measurePill(editorGridEl, 'editor-id', editor);
         settingsStore.setMarkdownEditor(editor);
     }
 
@@ -545,10 +554,13 @@
                 <div>
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.markdown_editor')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.editor_desc')}</div>
-                    <div class="grid grid-cols-2 gap-2">
+                    <div bind:this={editorGridEl} class="relative grid grid-cols-2 gap-2">
+                        <div data-pill="editor" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
+                            style={`width:${editorPill.width}px;height:${editorPill.height}px;transform:translate3d(${editorPill.left}px, ${editorPill.top}px, 0);opacity:${editorPill.ready ? 1 : 0}`}></div>
                         <button
+                            data-editor-id="vditor"
                             on:click={() => handleEditorChange('vditor')}
-                            class="flex items-center gap-3 p-3 rounded-xl border-2 transition-all {$settingsStore.markdownEditor === 'vditor' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
+                            class="relative z-10 flex items-center gap-3 p-3 rounded-xl border-2 transition-all {$settingsStore.markdownEditor === 'vditor' ? 'border-blue-500' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
                         >
                             <div class="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
                                 <i class="ph ph-file-text text-xl text-green-600"></i>
@@ -559,8 +571,9 @@
                             </div>
                         </button>
                         <button
+                            data-editor-id="milkdown"
                             on:click={() => handleEditorChange('milkdown')}
-                            class="flex items-center gap-3 p-3 rounded-xl border-2 transition-all {$settingsStore.markdownEditor === 'milkdown' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
+                            class="relative z-10 flex items-center gap-3 p-3 rounded-xl border-2 transition-all {$settingsStore.markdownEditor === 'milkdown' ? 'border-blue-500' : 'border-slate-200 dark:border-slate-600 hover:border-slate-300'}"
                         >
                             <div class="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
                                 <i class="ph ph-notebook text-xl text-purple-600"></i>
