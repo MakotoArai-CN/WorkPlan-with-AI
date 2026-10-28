@@ -16,6 +16,7 @@
     let wasShown = false;
     let rendered = false;
     let closing = false;
+    let animationToken = 0;
     let animations = [];
     let originRect = null;
 
@@ -49,7 +50,9 @@
     }
 
     async function open() {
+        const token = ++animationToken;
         await tick();
+        if (token !== animationToken) return;
         if (!panel || !show || !rendered) return;
         cancelAnimations();
         closing = false;
@@ -102,6 +105,7 @@
             return;
         }
         closing = true;
+        const token = ++animationToken;
         cancelAnimations();
         const target = panel.getBoundingClientRect();
         const origin = originRect || triggerRect();
@@ -121,10 +125,24 @@
         ], { duration: 260, easing: 'ease-in', fill: 'both' });
 
         await new Promise(resolve => setTimeout(resolve, 310));
+        if (token !== animationToken) return;
         closing = false;
+
+        if (notify) {
+            wasShown = false;
+            rendered = false;
+            onClose();
+            return;
+        }
+
+        if (show) {
+            wasShown = false;
+            open();
+            return;
+        }
+
         wasShown = false;
-        if (!show) rendered = false;
-        if (notify) onClose();
+        rendered = false;
     }
 
     function handleBackdrop() {

@@ -51,7 +51,7 @@
     ];
 </script>
 
-<div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
+<div class="worklog-page flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
     <header class="bg-white/90 backdrop-blur px-4 md:px-6 py-2 border-b border-slate-200 shrink-0 z-10">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
             <div class="flex items-center gap-3">
@@ -111,3 +111,38 @@
     {config}
     onClose={() => showExport = false}
 />
+
+<style>
+    :global(.worklog-page) {
+        font-size: 15px;
+    }
+
+    :global(.worklog-page [class*="text-[9px]"]) {
+        font-size: 11px !important;
+        line-height: 1.4;
+    }
+
+    :global(.worklog-page [class*="text-[10px]"]) {
+        font-size: 12px !important;
+        line-height: 1.45;
+    }
+
+    :global(.worklog-page [class*="text-[11px]"]) {
+        font-size: 13px !important;
+        line-height: 1.45;
+    }
+
+    :global(.worklog-page .text-xs) {
+        font-size: 14px !important;
+        line-height: 1.5;
+    }
+
+    :global(.worklog-page .text-sm) {
+        font-size: 16px !important;
+        line-height: 1.55;
+    }
+
+    :global(.worklog-page .text-base) {
+        font-size: 18px !important;
+    }
+</style>
