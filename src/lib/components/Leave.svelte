@@ -5,6 +5,8 @@
     import { showConfirm, showToast } from '../stores/modal.js';
     import { exportToCSV, exportToExcel, exportToJSON } from '../utils/export.js';
     import DatePicker from './DatePicker.svelte';
+    import AnimatedModal from './AnimatedModal.svelte';
+    import SegmentedControl from './SegmentedControl.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
@@ -63,6 +65,11 @@
         month: index + 1,
         summary: getLeaveMonthSummary(leaveRecords, cursorYear, index + 1, config)
     }));
+    $: viewOptions = [
+        { value: 'year', label: $_('leave.view_year') },
+        { value: 'month', label: $_('leave.view_month') },
+        { value: 'day', label: $_('leave.view_day') }
+    ];
     $: cursorLabel = (() => {
         if (viewMode === 'year') {
             return new Date(cursorYear, 0, 1).toLocaleDateString(localeCode, { year: 'numeric' });
@@ -319,23 +326,7 @@
             </div>
         {/if}
         <div class={`flex items-center gap-2 w-full md:w-auto flex-wrap ${embedded ? 'md:ml-auto' : ''}`}>
-            <div class="flex bg-slate-100 p-1 rounded-lg gap-1">
-                {#each [
-                    { key: 'year', label: $_('leave.view_year') },
-                    { key: 'month', label: $_('leave.view_month') },
-                    { key: 'day', label: $_('leave.view_day') }
-                ] as item}
-                    <button on:click={() => viewMode = item.key}
-                        class="px-2.5 py-1 text-[10px] rounded transition whitespace-nowrap"
-                        class:bg-white={viewMode === item.key}
-                        class:shadow-sm={viewMode === item.key}
-                        class:font-bold={viewMode === item.key}
-                        class:text-rose-600={viewMode === item.key}
-                        class:text-slate-500={viewMode !== item.key}>
-                        {item.label}
-                    </button>
-                {/each}
-            </div>
+            <SegmentedControl bind:value={viewMode} options={viewOptions} />
             {#if !embedded}
             <details bind:open={exportOpen} class="relative">
                 <summary class="list-none h-9 px-3 bg-white border border-rose-200 hover:bg-rose-50 text-rose-700 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer">
@@ -491,16 +482,7 @@
     </div>
 </div>
 
-{#if showForm}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div
-            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            on:click={closeForm}
-            on:keydown={(event) => event.key === 'Escape' && closeForm()}
-            role="button"
-            tabindex="0"
-        ></div>
-        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] overflow-hidden">
+<AnimatedModal bind:show={showForm} onClose={closeForm} zIndex={50} panelClass="max-w-lg">
             <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/40">
                 <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100">
                     {editingId ? $_('leave.edit_record') : $_('leave.add_record')}
@@ -575,6 +557,4 @@
                     {editingId ? $_('leave.save') : $_('leave.add_record')}
                 </button>
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
