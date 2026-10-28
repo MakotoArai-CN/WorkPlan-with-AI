@@ -2,6 +2,7 @@
     import { taskStore, activeTask } from '../stores/tasks.js';
     import { showConfirm } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
+    import { slide } from 'svelte/transition';
     import { get } from 'svelte/store';
     import { formatLocalDateTime } from '../utils/datetime.js';
     import SelectMenu from './SelectMenu.svelte';
@@ -59,6 +60,12 @@
 
     function updatePriority(e) {
         taskStore.updateTask(task.id, { priority: e.target.value });
+    }
+
+    function expansionDuration() {
+        if (typeof document !== 'undefined' && document.documentElement.classList.contains('reduce-animations')) return 0;
+        if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 0;
+        return 220;
     }
 
     function toggleExpanded() {
@@ -144,7 +151,7 @@
 
     <div class="p-3 flex items-center gap-2 md:gap-3 relative z-0 min-h-[4rem]">
         <button on:click|stopPropagation={toggleExpanded}
-            class="shrink-0 text-slate-400 w-5 md:w-6 transition-transform"
+            class="shrink-0 text-slate-400 w-5 md:w-6 transition-transform duration-200"
             class:rotate-90={task.expanded}
             aria-label={task.expanded ? $_('dashboard.collapse') : $_('dashboard.expand')}>
             <i class="ph-bold ph-caret-right text-lg"></i>
@@ -191,8 +198,9 @@
 
     {#if task.expanded}
         <div
-            class="bg-slate-50 border-t border-slate-100 px-4 py-3 ml-0 md:ml-14"
+            class="bg-slate-50 border-t border-slate-100 px-4 py-3 ml-0 md:ml-14 overflow-hidden"
             data-no-card-select="true"
+            transition:slide={{ duration: expansionDuration() }}
         >
             <div class="space-y-2">
                 {#each task.subtasks || [] as sub, idx}

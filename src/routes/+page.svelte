@@ -14,6 +14,7 @@
     } from '$lib/utils/local-file-tools.js';
     import { isAndroidRuntime } from '$lib/utils/runtime.js';
     import LoginModal from '$lib/components/LoginModal.svelte';
+    import LoginTransition from '$lib/components/LoginTransition.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
     import MobileNav from '$lib/components/MobileNav.svelte';
     import Dashboard from '$lib/components/Dashboard.svelte';
@@ -44,6 +45,9 @@
     let previousView = 'dashboard';
     let suppressNavigationRecord = false;
     let androidPermissionPromptShown = false;
+    let showLoginTransition = false;
+    let hadAccessKey = false;
+    let authInitialized = false;
 
     $: needsAgreement = !$settingsStore.agreementAccepted;
     $: if (
@@ -62,6 +66,16 @@
     onMount(() => {
         let cleanupBack = () => {};
         let destroyed = false;
+        const unsubscribeAuth = taskStore.subscribe((state) => {
+            const hasKey = Boolean(state?.accessKey);
+            if (!authInitialized) {
+                authInitialized = true;
+                hadAccessKey = hasKey;
+                return;
+            }
+            if (!hadAccessKey && hasKey) showLoginTransition = true;
+            hadAccessKey = hasKey;
+        });
 
         isMobile = window.innerWidth < 768 ||
             /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -123,6 +137,7 @@
         return () => {
             destroyed = true;
             cleanupBack();
+            unsubscribeAuth();
         };
     });
 
@@ -353,6 +368,10 @@
         <TaskModal bind:show={showModal} {editTask} on:close={closeModal} />
         <AiSettings />
         <AgreementModal isFirstTime={false} />
+    {/if}
+
+    {#if showLoginTransition}
+        <LoginTransition onDone={() => (showLoginTransition = false)} />
     {/if}
 </div>
 
