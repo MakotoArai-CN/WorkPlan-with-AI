@@ -49,6 +49,11 @@ describe('stripDataUrlPrefix', () => {
 });
 
 describe('describeSavedLocation', () => {
+    test('an Android app-private path explains why it is hard to find', () => {
+        expect(describeSavedLocation('/storage/emulated/0/Android/data/com.workplan/files/Download/a.pdf'))
+            .toBe('应用专属下载目录（文件管理器可能不可见，建议使用系统保存对话框）');
+    });
+
     test('a plain filesystem path is shown as-is', () => {
         expect(describeSavedLocation('C:\\Users\\me\\Downloads\\a.pdf')).toBe('C:\\Users\\me\\Downloads\\a.pdf');
         expect(describeSavedLocation('/storage/emulated/0/Download/a.pdf')).toBe('/storage/emulated/0/Download/a.pdf');
