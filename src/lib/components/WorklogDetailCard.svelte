@@ -23,8 +23,8 @@
     ];
 </script>
 
-<div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
-    <div class="px-4 py-3 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap">
+<div class="bg-white rounded-xl shadow-sm min-h-[284px] border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
+    <div class="px-4 py-3 min-h-[54px] border-b border-slate-50 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap">
         <div class="font-bold text-sm text-slate-700 dark:text-slate-200">{title}</div>
         <div class="flex items-center gap-3">
             <div class="text-[10px] text-slate-500">{summary}</div>

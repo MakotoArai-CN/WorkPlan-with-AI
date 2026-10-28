@@ -43,7 +43,7 @@
         none: 'text-slate-400'
     };
 
-    let viewMode = 'month';
+    export let viewMode = 'month';
     let cursor = new Date();
     let showForm = false;
     let editingId = null;
@@ -355,6 +355,7 @@
 </script>
 
 <div class={`flex flex-col ${embedded ? 'h-full' : 'h-screen md:h-full'} overflow-hidden bg-slate-50`}>
+    {#if !embedded}
     <header class="h-auto bg-white/90 backdrop-blur px-4 md:px-6 flex flex-col md:flex-row justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0 py-2 gap-2">
         {#if !embedded}
             <div class="w-full md:w-auto">
@@ -391,8 +392,9 @@
             {/if}
         </div>
     </header>
+    {/if}
 
-    <div class="flex-1 overflow-y-auto overscroll-contain min-h-0" style="-webkit-overflow-scrolling: touch;">
+    <div class="flex-1 overflow-y-auto overscroll-contain min-h-0" style="-webkit-overflow-scrolling: touch; scrollbar-gutter: stable;">
         <div class="p-4 md:p-6 space-y-5 pb-32">
             {#if !hideSummary}
                 <PayrollPanel

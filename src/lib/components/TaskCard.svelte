@@ -10,6 +10,8 @@
     export let task;
     export let openModal;
     export let onSelect;
+    let cardEl;
+    let deleting = false;
 
     $: isOverdue = task.deadline && task.deadline < formatLocalDateTime(new Date());
     $: statusOptions = [
@@ -99,6 +101,12 @@
         taskStore.updateTask(task.id, { subtasks });
     }
 
+    function deleteMotionReduced() {
+        if (typeof document === 'undefined') return true;
+        return document.documentElement.classList.contains('reduce-animations')
+            || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    }
+
     async function deleteTask() {
         const t = get(_);
         const confirmed = await showConfirm({
@@ -108,11 +116,18 @@
             cancelText: t('common.cancel'),
             variant: 'danger'
         });
-        if (confirmed) {
-            taskStore.deleteTask(task.id);
-            if ($activeTask?.id === task.id) {
-                activeTask.set(null);
-            }
+        if (!confirmed) return;
+
+        if (cardEl && !deleteMotionReduced()) {
+            cardEl.style.height = `${cardEl.offsetHeight}px`;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            deleting = true;
+            await new Promise((resolve) => setTimeout(resolve, 280));
+        }
+
+        taskStore.deleteTask(task.id);
+        if ($activeTask?.id === task.id) {
+            activeTask.set(null);
         }
     }
 
@@ -139,12 +154,13 @@
     }
 </script>
 
-<div on:click={handleCardClick}
+<div bind:this={cardEl} on:click={handleCardClick}
     on:keydown={handleCardKeydown}
     role="button"
     tabindex="0"
     class="task-card bg-white rounded-xl shadow-sm border border-slate-200 relative overflow-hidden cursor-pointer group"
-    class:active={$activeTask && $activeTask.id === task.id}>
+    class:active={$activeTask && $activeTask.id === task.id}
+    class:deleting>
     {#if isOverdue}
         <div class="absolute top-0 left-0 right-0 h-1 bg-red-500 z-10"></div>
     {/if}
@@ -241,5 +257,21 @@
         border-color: #bfdbfe;
         transform: scale(1.005);
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .task-card.deleting {
+        height: 0 !important;
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+        margin-top: 0;
+        margin-bottom: 0;
+        border-top-width: 0;
+        border-bottom-width: 0;
+        pointer-events: none;
+        transition:
+            height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+            opacity 0.18s ease,
+            transform 0.22s ease,
+            border-width 0.22s ease,
+            margin 0.28s ease;
     }
 </style>

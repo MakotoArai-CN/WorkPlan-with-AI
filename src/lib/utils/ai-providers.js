@@ -896,9 +896,45 @@ export function canProviderUseNativeTools(providerId, config = {}) {
     return NATIVE_TOOL_BODY_FORMATS.has(provider.bodyFormat || 'openai');
 }
 
+export function normalizeChatEndpoint(raw, providerId = 'custom') {
+    let value = String(raw || '').trim();
+    if (!value) return value;
+    if (/\{[^}]+\}/.test(value)) return value;
+
+    value = value.replace(/\/+$/, '');
+    if (/\/chat\/completions$/i.test(value) || /\/api\/chat$/i.test(value) || /\/messages$/i.test(value)) {
+        return value;
+    }
+
+    let url;
+    try {
+        url = new URL(value);
+    } catch {
+        return value;
+    }
+
+    const path = url.pathname.replace(/\/+$/, '');
+    if (providerId === 'ollama') {
+        url.pathname = path.endsWith('/api') ? path + '/chat' : path + '/api/chat';
+        return url.toString();
+    }
+    if (providerId === 'lmstudio') {
+        url.pathname = path.endsWith('/v1') ? path + '/chat/completions' : path + '/v1/chat/completions';
+        return url.toString();
+    }
+    if (/\/v1$/i.test(path)) {
+        url.pathname = path + '/chat/completions';
+    } else if (!path || path === '/') {
+        url.pathname = '/v1/chat/completions';
+    } else {
+        url.pathname = path + '/chat/completions';
+    }
+    return url.toString();
+}
+
 function getEffectiveEndpoint(provider, providerId, config) {
     if (config.customEndpoint) {
-        return config.customEndpoint;
+        return normalizeChatEndpoint(config.customEndpoint, providerId);
     }
     return provider.endpoint;
 }

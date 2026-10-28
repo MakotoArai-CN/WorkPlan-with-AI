@@ -3,11 +3,41 @@
     import { showAlert } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
+    import { onMount, onDestroy } from 'svelte';
+    import { fly, fade } from 'svelte/transition';
 
     let inputKey = '';
     let validationError = '';
     let isSubmitting = false;
     let loginSuccess = false;
+    let tipIndex = 0;
+    let tipTimer = null;
+    let clockTimer = null;
+    const LOGIN_PALETTES = {
+        night: { accent: '#eab308', onAccent: '#111111', bg: '#060606', card: '#101010', glow: '#ca8a04', border: 'rgba(234,179,8,.24)' },
+        morning: { accent: '#f4b942', onAccent: '#1a1300', bg: '#0d0a04', card: '#171208', glow: '#f59e0b', border: 'rgba(245,158,11,.28)' },
+        day: { accent: '#e2e8f0', onAccent: '#0f172a', bg: '#090b10', card: '#11151c', glow: '#94a3b8', border: 'rgba(226,232,240,.2)' },
+        dusk: { accent: '#ec4899', onAccent: '#ffffff', bg: '#0f060d', card: '#170b14', glow: '#db2777', border: 'rgba(236,72,153,.26)' }
+    };
+    let loginPalette = LOGIN_PALETTES.night;
+    let loginPeriod = 'night';
+
+    function paletteForHour(hour) {
+        if (hour < 5) return ['night', LOGIN_PALETTES.night];
+        if (hour < 10) return ['morning', LOGIN_PALETTES.morning];
+        if (hour < 17) return ['day', LOGIN_PALETTES.day];
+        if (hour < 22) return ['dusk', LOGIN_PALETTES.dusk];
+        return ['night', LOGIN_PALETTES.night];
+    }
+
+    function refreshLoginPalette() {
+        const [period, palette] = paletteForHour(new Date().getHours());
+        loginPeriod = period;
+        loginPalette = palette;
+    }
+
+    $: loginStyle = `--login-accent:${loginPalette.accent};--login-on-accent:${loginPalette.onAccent};--login-bg:${loginPalette.bg};--login-card:${loginPalette.card};--login-glow:${loginPalette.glow};--login-border:${loginPalette.border};`;
+    const LOGIN_TIP_KEY = 'planpro_login_tip_index';
 
     const KEYBOARD_PATTERNS = [
         'qwertyuiop', 'asdfghjkl', 'zxcvbnm',
@@ -145,8 +175,26 @@
             validationError = '';
         }
     }
+    onMount(() => {
+        refreshLoginPalette();
+        clockTimer = setInterval(refreshLoginPalette, 60000);
+        let stored = 0;
+        try {
+            stored = Number(localStorage.getItem(LOGIN_TIP_KEY)) || 0;
+            localStorage.setItem(LOGIN_TIP_KEY, String((stored + 1) % 5));
+        } catch {}
+        tipIndex = stored % 5;
+        tipTimer = setInterval(() => {
+            tipIndex = (tipIndex + 1) % 5;
+        }, 4200);
+    });
+
+    onDestroy(() => {
+        if (tipTimer) clearInterval(tipTimer);
+        if (clockTimer) clearInterval(clockTimer);
+    });
 </script>
-<div class="login-shell fixed inset-0 z-[80] flex items-center justify-center overflow-hidden bg-[#050914] p-4 safe-area-login">
+<div class="login-shell fixed inset-0 z-[80] flex items-center justify-center overflow-hidden p-4 safe-area-login" data-period={loginPeriod} style={loginStyle}>
     <div class="login-aurora login-aurora-a"></div>
     <div class="login-aurora login-aurora-b"></div>
     <div class="login-aurora login-aurora-c"></div>
@@ -154,13 +202,12 @@
     <div class="login-vignette"></div>
 
     <div class="relative z-10 w-full max-w-[420px]">
-        <div class="login-card relative overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/70 p-7 sm:p-8 shadow-[0_30px_120px_-20px_rgba(37,99,235,0.55)] backdrop-blur-2xl">
-            <div class="login-sheen"></div>
+        <div class="login-card relative overflow-hidden rounded-[28px] border p-7 sm:p-8 backdrop-blur-2xl" style="background:var(--login-card);border-color:var(--login-border);box-shadow:0 30px 120px -24px var(--login-glow)">
 
             <div class="text-center mb-7">
                 <div class="login-logo relative w-[72px] h-[72px] mx-auto mb-5">
-                    <div class="absolute inset-0 rounded-[22px] bg-gradient-to-br from-cyan-400 via-blue-500 to-violet-500 blur-xl opacity-70"></div>
-                    <div class="relative w-full h-full rounded-[22px] bg-gradient-to-br from-cyan-400 via-blue-500 to-violet-500 flex items-center justify-center text-white text-3xl shadow-lg shadow-blue-500/30 ring-1 ring-white/20">
+                    <div class="absolute inset-0 rounded-[22px] blur-xl opacity-70" style="background:var(--login-accent)"></div>
+                    <div class="relative w-full h-full rounded-[22px] flex items-center justify-center text-3xl ring-1 ring-white/20" style="background:var(--login-accent);color:var(--login-on-accent)">
                         <i class="ph-bold ph-check-square-offset"></i>
                     </div>
                 </div>
@@ -181,7 +228,7 @@
                             autocomplete="off" spellcheck="false"
                             class={`w-full rounded-xl border-2 bg-white/[0.04] px-4 py-3.5 pr-11 text-center font-mono text-base font-bold text-white placeholder:text-slate-500 focus:outline-none focus:ring-4 transition-all duration-200 ${validationError
                                 ? 'border-rose-400/70 focus:border-rose-400 focus:ring-rose-500/15 text-rose-100'
-                                : 'border-white/10 focus:border-blue-400 focus:ring-blue-500/15'}`}>
+                                : 'border-white/10 login-input'}`}>
                         <div class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">
                             <i class="ph ph-key text-lg"></i>
                         </div>
@@ -198,11 +245,9 @@
                 </div>
 
                 <button on:click={login}
-                    class={`login-field group relative w-full overflow-hidden rounded-xl py-3.5 text-[15px] font-bold text-white shadow-lg transition-all duration-300 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${loginSuccess
-                        ? 'bg-emerald-500 shadow-emerald-500/25'
-                        : 'bg-gradient-to-r from-blue-600 via-indigo-500 to-violet-500 shadow-blue-500/25'}`}
+                    class="login-submit login-field group relative w-full overflow-hidden rounded-xl py-3.5 text-[15px] font-bold shadow-lg transition-all duration-300 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60"
+                    style={loginSuccess ? 'background:#059669;color:#fff' : 'background:var(--login-accent);color:var(--login-on-accent)'}
                     disabled={isSubmitting || (!!validationError && inputKey.trim().length > 0)}>
-                    <span class="login-btn-shine"></span>
                     <span class="relative flex items-center justify-center gap-2">
                         {#if loginSuccess}
                             <i class="ph-bold ph-check-circle text-lg"></i> {$_('login_page.entering')}
@@ -220,6 +265,16 @@
                         <i class="ph-bold ph-magic-wand"></i> {$_('login_page.generate_key')}
                     </button>
                 </div>
+
+                <div class="login-field mt-1 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 min-h-[52px] flex items-center">
+                    {#key tipIndex}
+                        <div in:fly={{ y: 6, duration: 260 }} out:fade={{ duration: 140 }}
+                            class="flex items-start gap-2 text-[11px] leading-relaxed text-slate-400">
+                            <i class="ph-fill ph-lightbulb mt-0.5 shrink-0 text-amber-300"></i>
+                            <span>{$_('login_page.tip_' + (tipIndex + 1))}</span>
+                        </div>
+                    {/key}
+                </div>
             </div>
 
         </div>
@@ -232,6 +287,7 @@
         padding-bottom: max(1rem, env(safe-area-inset-bottom));
     }
 
+    .login-shell { background: var(--login-bg); transition: background-color 1.2s ease; }
     .login-aurora {
         position: absolute;
         width: 58vw;
@@ -239,20 +295,19 @@
         min-width: 420px;
         min-height: 420px;
         border-radius: 9999px;
+        background: var(--login-glow);
         filter: blur(90px);
-        opacity: 0.5;
+        opacity: 0.34;
         pointer-events: none;
         animation: login-aurora-drift 16s ease-in-out infinite alternate;
     }
     .login-aurora-a {
         top: -24%;
         left: -12%;
-        background: radial-gradient(circle, rgba(37, 99, 235, 0.8), transparent 65%);
     }
     .login-aurora-b {
         right: -16%;
         bottom: -28%;
-        background: radial-gradient(circle, rgba(124, 58, 237, 0.75), transparent 65%);
         animation-delay: -5s;
     }
     .login-aurora-c {
@@ -260,7 +315,6 @@
         left: 52%;
         width: 36vw;
         height: 36vw;
-        background: radial-gradient(circle, rgba(6, 182, 212, 0.55), transparent 65%);
         animation-delay: -9s;
     }
 
@@ -278,19 +332,12 @@
     .login-vignette {
         position: absolute;
         inset: 0;
-        background: radial-gradient(circle at 50% 42%, transparent 0%, rgba(5, 9, 20, 0.55) 58%, #050914 100%);
+        background: rgba(0, 0, 0, 0.22);
         pointer-events: none;
     }
 
     .login-card {
         animation: login-card-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
-    }
-    .login-sheen {
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        background: linear-gradient(135deg, rgba(255,255,255,0.11), transparent 36%, transparent 68%, rgba(255,255,255,0.04));
-        pointer-events: none;
     }
     .login-logo {
         animation: login-logo-in 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
@@ -302,19 +349,13 @@
     .login-field:nth-child(2) { animation-delay: 0.3s; }
     .login-field:nth-child(3) { animation-delay: 0.4s; }
 
-    .login-gradient-text {
-        background: linear-gradient(100deg, #67e8f9 0%, #60a5fa 45%, #c4b5fd 100%);
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
+    .login-gradient-text { color: var(--login-accent); }
+    .login-input:focus {
+        border-color: var(--login-accent) !important;
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--login-accent) 18%, transparent) !important;
     }
-    .login-btn-shine {
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(110deg, transparent 28%, rgba(255,255,255,0.34) 46%, transparent 64%);
-        transform: translateX(-130%);
-        animation: login-shine 4.2s ease-in-out infinite;
-    }
+    .login-submit:hover { filter: brightness(1.06); }
+
     .login-spinner {
         width: 16px;
         height: 16px;
@@ -340,10 +381,6 @@
         0% { transform: translate3d(0, 0, 0) scale(1); }
         50% { transform: translate3d(6%, -4%, 0) scale(1.12); }
         100% { transform: translate3d(-5%, 5%, 0) scale(0.96); }
-    }
-    @keyframes login-shine {
-        0%, 55% { transform: translateX(-130%); }
-        75%, 100% { transform: translateX(130%); }
     }
     @keyframes login-spin {
         to { transform: rotate(360deg); }

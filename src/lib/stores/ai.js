@@ -30,6 +30,7 @@ import {
 } from '../utils/intent-heuristics.js';
 import { settingsStore } from './settings.js';
 import { notesStore } from './notes.js';
+import { packLocalJson, unpackLocalJson } from '../utils/local-compress.js';
 import { TASK_STATUSES, TASK_PRIORITIES, resolveStatus, resolvePriority, normalizeStatus, normalizePriority } from '../utils/task-vocabulary.js';
 import { formatLocalDateTime } from '../utils/datetime.js';
 
@@ -800,7 +801,7 @@ export function loadAiConfig() {
 
     if (savedSessions) {
         try {
-            const parsedSessions = JSON.parse(savedSessions);
+            const parsedSessions = unpackLocalJson(savedSessions) || {};
             sessions = normalizeChatSessions(parsedSessions.sessions || [], legacyChatHistory);
             activeSessionId = sessions.some(session => session.id === parsedSessions.activeSessionId)
                 ? parsedSessions.activeSessionId
@@ -966,7 +967,7 @@ function persistAiChatHistory(history, sessions, activeSessionId, { maxMessages 
             : []
     }));
     localStorage.setItem(AI_CHAT_HISTORY_KEY, JSON.stringify(safeHistory));
-    localStorage.setItem(AI_CHAT_SESSIONS_KEY, JSON.stringify({
+    localStorage.setItem(AI_CHAT_SESSIONS_KEY, packLocalJson({
         activeSessionId,
         sessions: safeSessions
     }));

@@ -104,7 +104,7 @@
     const inputClass = 'w-full border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-950/70 text-sm text-slate-700 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:border-amber-400 disabled:opacity-70 disabled:cursor-not-allowed';
 </script>
 
-<div class="mt-1 rounded-xl border border-amber-200/80 bg-amber-50/50 dark:border-amber-700/60 dark:bg-slate-900/60 p-3.5 md:p-4">
+<div class="mt-1 rounded-xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/50 p-3.5 md:p-4">
     <div class="flex items-start gap-3">
         <div class="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
             <i class="ph-fill ph-key text-lg text-amber-700 dark:text-amber-300"></i>
@@ -117,7 +117,7 @@
                 {mode === 'push' ? $_('passwords.vaultwarden_push_desc') : $_('passwords.vaultwarden_desc')}
             </div>
         </div>
-        <div class="inline-flex bg-white/70 dark:bg-slate-900/40 border border-amber-100 dark:border-amber-800/60 rounded-lg p-0.5 shrink-0">
+        <div class="inline-flex bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 shrink-0">
             <button type="button" disabled={loading} on:click={() => switchMode('import')}
                 class="px-2.5 py-1 rounded-md text-[10px] font-bold {mode === 'import' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-500 dark:text-slate-300'} disabled:opacity-50">
                 {$_('passwords.vaultwarden_mode_import')}
@@ -130,7 +130,7 @@
     </div>
 
     {#if disabled}
-        <div class="mt-3 flex items-start gap-2 rounded-lg bg-white/70 dark:bg-slate-950/50 px-3 py-2 text-[10px] text-amber-700 dark:text-amber-300">
+        <div class="mt-3 flex items-start gap-2 rounded-lg bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-slate-700 px-3 py-2 text-[10px] text-slate-500 dark:text-slate-300">
             <i class="ph ph-lock-key mt-0.5"></i>
             <span>{mode === 'push' ? $_('passwords.vaultwarden_push_locked') : $_('passwords.vaultwarden_locked')}</span>
         </div>
@@ -146,11 +146,11 @@
                     disabled={disabled} autocomplete="url" class={inputClass} />
                 <div class="flex flex-wrap gap-1.5 mt-0.5">
                     <button type="button" disabled={disabled} on:click={() => baseUrl = 'https://vault.bitwarden.com'}
-                        class="px-2 py-1 rounded-md bg-white/80 dark:bg-slate-800 border border-amber-100 dark:border-amber-800 text-[10px] font-bold text-slate-500 dark:text-slate-300 hover:text-amber-700 dark:hover:text-amber-300 disabled:opacity-50">
+                        class="px-2 py-1 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-slate-500 dark:text-slate-300 hover:text-amber-700 dark:hover:text-amber-300 disabled:opacity-50">
                         {$_('passwords.vaultwarden_bitwarden_com')}
                     </button>
                     <button type="button" disabled={disabled} on:click={() => baseUrl = 'https://vault.bitwarden.eu'}
-                        class="px-2 py-1 rounded-md bg-white/80 dark:bg-slate-800 border border-amber-100 dark:border-amber-800 text-[10px] font-bold text-slate-500 dark:text-slate-300 hover:text-amber-700 dark:hover:text-amber-300 disabled:opacity-50">
+                        class="px-2 py-1 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-slate-500 dark:text-slate-300 hover:text-amber-700 dark:hover:text-amber-300 disabled:opacity-50">
                         {$_('passwords.vaultwarden_bitwarden_eu')}
                     </button>
                 </div>

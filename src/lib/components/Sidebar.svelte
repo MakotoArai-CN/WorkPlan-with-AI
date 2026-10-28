@@ -109,6 +109,9 @@
     ];
 
     function switchView(view) {
+        if (view === 'passwords') {
+            window.dispatchEvent(new CustomEvent('workplan:passwords-entry'));
+        }
         currentView.set(view);
     }
 
