@@ -5,6 +5,7 @@
     import { showConfirm, showToast } from '../stores/modal.js';
     import { exportToCSV, exportToExcel, exportToJSON } from '../utils/export.js';
     import DatePicker from './DatePicker.svelte';
+    import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
     import { formatLocalDate } from '../utils/datetime.js';
@@ -13,6 +14,7 @@
         LEAVE_TYPES,
         calculateLeaveDays,
         getAnnualLeaveBalance,
+        getFixedSalaryTotal,
         getLeaveMonthSummary,
         getLeaveYearSummary,
         summarizeLeaveRecords,
@@ -113,6 +115,22 @@
         if (summary.hours > 0 && summary.days > 0) return `${summary.days} ${$_('leave.unit_day')} + ${summary.hours} ${$_('leave.unit_hour')}`;
         if (summary.hours > 0) return `${summary.hours} ${$_('leave.unit_hour')}`;
         return `${summary.days} ${$_('leave.unit_day')}`;
+    }
+
+    function money(value) {
+        return new Intl.NumberFormat(localeCode, {
+            style: 'currency',
+            currency: config.currency || 'CNY',
+            maximumFractionDigits: 2
+        }).format(Number(value) || 0);
+    }
+
+    function leaveDeduction(record) {
+        if (record.paid) return 0;
+        const dailyRate = getFixedSalaryTotal(config) / (Number(config.workdaysPerMonth) || 21.75);
+        return record.unit === 'day'
+            ? record.duration * dailyRate
+            : record.duration * dailyRate / (Number(config.hoursPerDay) || 8);
     }
 
     function formatRecord(record) {
@@ -439,43 +457,22 @@
                     {#if visibleRecords.length}
                         <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
                             {#each visibleRecords as record}
-                                <div class="px-4 py-3 flex items-start gap-3">
-                                    <div class="w-20 shrink-0">
-                                        <div class="text-xs font-black text-slate-700 dark:text-slate-200">{record.startDate}</div>
-                                        <div class="text-[9px] text-slate-400">
-                                            {record.startDate === record.endDate ? '' : `→ ${record.endDate}`}
-                                        </div>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="flex items-center gap-2 flex-wrap">
-                                            <span class="px-1.5 py-0.5 text-[10px] rounded border {TYPE_STYLES[record.type] || TYPE_STYLES.other}">
-                                                {$_('leave.type_' + record.type)}
-                                            </span>
-                                            <span class="text-xs font-bold text-slate-700 dark:text-slate-200">{formatRecord(record)}</span>
-                                            <span class="text-[10px] {record.paid ? 'text-green-600' : 'text-slate-400'}">
-                                                {record.paid ? $_('leave.paid') : $_('leave.unpaid')}
-                                            </span>
-                                            {#if record.aiLocked}
-                                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300" title={$_('leave.ai_locked')}>
-                                                    <i class="ph ph-lock-simple"></i>
-                                                </span>
-                                            {/if}
-                                        </div>
-                                        {#if record.note}
-                                            <div class="text-[10px] text-slate-500 mt-1 truncate">{record.note}</div>
-                                        {/if}
-                                    </div>
-                                    <div class="flex items-center gap-1 shrink-0">
-                                        <button on:click={() => openEdit(record)} aria-label={$_('leave.edit_record')}
-                                            class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center">
-                                            <i class="ph ph-pencil-simple"></i>
-                                        </button>
-                                        <button on:click={() => deleteRecord(record)} aria-label={$_('leave.delete')}
-                                            class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center">
-                                            <i class="ph ph-trash"></i>
-                                        </button>
-                                    </div>
-                                </div>
+                                <WorklogRecordRow
+                                    dateMain={record.startDate.slice(8, 10)}
+                                    dateSub={new Date(`${record.startDate}T00:00:00`).toLocaleDateString(localeCode, { weekday: 'short' })}
+                                    badge={$_('leave.type_' + record.type)}
+                                    badgeClass={TYPE_STYLES[record.type] || TYPE_STYLES.other}
+                                    title={formatRecord(record)}
+                                    detail={`${record.startDate}${record.endDate === record.startDate ? '' : ` → ${record.endDate}`} · ${record.paid ? $_('leave.paid') : $_('leave.unpaid')}`}
+                                    note={record.note || ''}
+                                    metric={formatRecord(record)}
+                                    amount={record.paid ? $_('leave.paid') : `-${money(leaveDeduction(record))}`}
+                                    amountClass={record.paid ? 'text-emerald-600' : 'text-rose-500'}
+                                    editLabel={$_('leave.edit_record')}
+                                    deleteLabel={$_('leave.delete')}
+                                    onEdit={() => openEdit(record)}
+                                    onDelete={() => deleteRecord(record)}
+                                />
                             {/each}
                         </div>
                     {:else}
