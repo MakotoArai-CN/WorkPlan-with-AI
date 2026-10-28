@@ -7,10 +7,9 @@
     import WorklogExportModal from './WorklogExportModal.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import CareerAnalysis from './CareerAnalysis.svelte';
+    import WorklogSummaryCards from './WorklogSummaryCards.svelte';
     import { getLeaveYearSummary, getMonthSummary, getYearSummary } from '../utils/overtime.js';
     import { tick } from 'svelte';
-    import { fly } from 'svelte/transition';
-    import { linear } from 'svelte/easing';
 
     let activeTab = 'overtime';
     let showExport = false;
@@ -44,12 +43,6 @@
         await tick();
         const target = activeTab === 'leave' ? leaveRef : overtimeRef;
         target?.openCreate();
-    }
-
-    function slideDuration() {
-        if (typeof document !== 'undefined' && document.documentElement.classList.contains('reduce-animations')) return 0;
-        if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 0;
-        return 280;
     }
 
     $: tabOptions = [
@@ -89,18 +82,14 @@
         </div>
     </header>
 
+    <WorklogSummaryCards {activeTab} {config} {overtimeRecords} {leaveRecords} />
+
     <div class="flex-1 min-h-0 overflow-hidden">
-        {#key activeTab}
-            <div class="h-full"
-                in:fly={{ x: activeTab === 'leave' ? 72 : -72, duration: slideDuration(), easing: linear }}
-                out:fly={{ x: activeTab === 'leave' ? -72 : 72, duration: slideDuration(), easing: linear }}>
-                {#if activeTab === 'overtime'}
-                    <Overtime bind:this={overtimeRef} embedded />
-                {:else}
-                    <Leave bind:this={leaveRef} embedded />
-                {/if}
-            </div>
-        {/key}
+        {#if activeTab === 'overtime'}
+            <Overtime bind:this={overtimeRef} embedded hideSummary />
+        {:else}
+            <Leave bind:this={leaveRef} embedded hideSummary />
+        {/if}
     </div>
 </div>
 
