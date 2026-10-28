@@ -332,7 +332,9 @@
         "show_password": "显示密码",
         "vaultwarden_bitwarden_com": "Bitwarden.com",
         "vaultwarden_bitwarden_eu": "Bitwarden.eu",
-        "vaultwarden_self_hosted": "自部署 Vaultwarden"
+        "vaultwarden_self_hosted": "自部署 Vaultwarden",
+        "vaultwarden_locked": "密码库未解锁，解锁后才能导入",
+        "vaultwarden_required": "请填写服务器地址、邮箱和主密码"
     },
     "settings": {
         "title": "系统设置",
