@@ -334,7 +334,18 @@
         "vaultwarden_bitwarden_eu": "Bitwarden.eu",
         "vaultwarden_self_hosted": "Self-hosted Vaultwarden",
         "vaultwarden_locked": "Unlock the password vault before importing",
-        "vaultwarden_required": "Enter the server URL, email and master password"
+        "vaultwarden_required": "Enter the server URL, email and master password",
+        "vaultwarden_push_title": "Push to Bitwarden / Vaultwarden",
+        "vaultwarden_push_desc": "Encrypt and write WorkPlan passwords to the server; the browser extension picks them up on sync",
+        "vaultwarden_mode_import": "Import",
+        "vaultwarden_mode_push": "Push",
+        "vaultwarden_push_hint": "Creates new items only, never overwrites. Same title and username is treated as a duplicate and skipped. The master password is used once and never stored; sync the browser extension afterward.",
+        "vaultwarden_push_empty": "No WorkPlan passwords to push. Add passwords or unlock the vault first.",
+        "vaultwarden_push_success": "Pushed {pushed}, skipped {skipped}, failed {failed}",
+        "vaultwarden_push_count": "{count} passwords will be pushed",
+        "vaultwarden_push_button": "Push to server",
+        "vaultwarden_pushing": "Pushing...",
+        "vaultwarden_push_locked": "Unlock the password vault before pushing"
     },
     "settings": {
         "title": "Settings",
