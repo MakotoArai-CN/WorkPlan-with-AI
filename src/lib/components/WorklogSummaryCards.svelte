@@ -64,7 +64,7 @@
         <div class="flex w-[200%] items-stretch transition-transform duration-300 ease-linear"
             style={`transform:translate3d(${activeTab === 'leave' ? '-50%' : '0'},0,0)`}>
             <div class="w-1/2 pr-2 min-w-0">
-                <div class="h-full min-h-[188px] rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm flex flex-col">
+                <div class="h-full min-h-[260px] rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm flex flex-col">
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex items-center gap-2.5 min-w-0">
                             <div class="w-9 h-9 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
@@ -123,15 +123,15 @@
             </div>
 
             <div class="w-1/2 pl-2 min-w-0">
-                <div class="h-full min-h-[188px] rounded-xl border border-rose-100 dark:border-rose-900/40 bg-white dark:bg-slate-800 p-4 shadow-sm flex flex-col">
+                <div class="h-full min-h-[260px] rounded-xl border border-rose-100 dark:border-rose-900/40 bg-white dark:bg-slate-800 p-4 shadow-sm flex flex-col">
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex items-center gap-2.5">
                             <div class="w-9 h-9 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
                                 <i class="ph-fill ph-calendar-check text-lg text-rose-600 dark:text-rose-300"></i>
                             </div>
                             <div>
-                                <div class="text-[10px] font-bold text-slate-400 uppercase">{$_('leave.annual_quota')}</div>
-                                <div class="text-sm font-black text-slate-800 dark:text-slate-100">{$_('worklog.kind_leave')}</div>
+                                <div class="text-[10px] font-bold text-slate-400 uppercase">{$_('worklog.kind_leave')}</div>
+                                <div class="text-sm font-black text-slate-800 dark:text-slate-100">{$_('leave.annual_quota')}</div>
                             </div>
                         </div>
                         <div class="text-right">
@@ -153,7 +153,26 @@
                             <div class="text-xs font-black text-slate-700 dark:text-slate-100">{monthLeave.days} {$_('leave.unit_day')}</div>
                         </div>
                     </div>
-                    <div class="mt-auto pt-2 text-[9px] text-slate-400">
+                    <div class="mt-3">
+                        <div class="flex items-center justify-between text-[9px] text-slate-400">
+                            <span>{$_('leave.annual_used')}</span>
+                            <span>{balance.used} / {balance.quota}</span>
+                        </div>
+                        <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+                            <div class="h-full rounded-full bg-gradient-to-r from-rose-400 to-pink-500 transition-[width] duration-500"
+                                style={`width:${Math.min(100, Math.max(0, (balance.used / Math.max(balance.quota, 1)) * 100))}%`}></div>
+                        </div>
+                    </div>
+                    {#if Object.values(monthLeave.byType || {}).some(value => value > 0)}
+                        <div class="mt-2 flex flex-wrap gap-1">
+                            {#each Object.entries(monthLeave.byType).filter(([, value]) => value > 0) as [type, value]}
+                                <span class="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:bg-rose-900/20 dark:text-rose-300">
+                                    {$_('leave.type_' + type)} {value}
+                                </span>
+                            {/each}
+                        </div>
+                    {/if}
+                    <div class="mt-auto pt-2 text-[10px] text-slate-400">
                         {$_('leave.unpaid_days')}: {monthLeave.unpaidDays} · {$_('leave.unit_day')}
                     </div>
                 </div>
