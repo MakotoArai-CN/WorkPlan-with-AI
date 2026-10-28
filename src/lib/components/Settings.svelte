@@ -477,7 +477,7 @@
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.theme_desc')}</div>
                     <div bind:this={themeGridEl} class="relative grid grid-cols-2 md:grid-cols-4 gap-2">
                         <div data-pill="theme" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
-                            style={`left:${themePill.left}px;top:${themePill.top}px;width:${themePill.width}px;height:${themePill.height}px;opacity:${themePill.ready ? 1 : 0}`}></div>
+                            style={`width:${themePill.width}px;height:${themePill.height}px;transform:translate3d(${themePill.left}px, ${themePill.top}px, 0);opacity:${themePill.ready ? 1 : 0}`}></div>
                         {#each themeOptions as theme}
                             <button
                                 data-theme-id={theme.id}
@@ -503,7 +503,7 @@
             <div class="p-4 md:p-6">
                 <div bind:this={languageGridEl} class="relative grid grid-cols-3 gap-2">
                     <div data-pill="language" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
-                        style={`left:${languagePill.left}px;top:${languagePill.top}px;width:${languagePill.width}px;height:${languagePill.height}px;opacity:${languagePill.ready ? 1 : 0}`}></div>
+                        style={`width:${languagePill.width}px;height:${languagePill.height}px;transform:translate3d(${languagePill.left}px, ${languagePill.top}px, 0);opacity:${languagePill.ready ? 1 : 0}`}></div>
                     {#each supportedLocales as lang}
                         <button
                             data-language={lang.code}
