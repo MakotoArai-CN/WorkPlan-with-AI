@@ -1,5 +1,6 @@
 <script>
     import { taskStore, activeTask } from '../stores/tasks.js';
+    import AnimatedModal from './AnimatedModal.svelte';
     import { settingsStore } from '../stores/settings.js';
     import { aiConfig, configureAiPanel, generateReport, showAiPanel, providerRequiresApiKey } from '../stores/ai.js';
     import { showAlert, showToast } from '../stores/modal.js';

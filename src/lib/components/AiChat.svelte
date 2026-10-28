@@ -271,22 +271,50 @@
 
     async function handleSaveGeneratedMedia(msg) {
         try {
-            const { invoke } = await import("@tauri-apps/api/core");
             const ext = msg.type === "generated_image" ? "png" : "mp3";
             const mimeType = msg.mimeType || (msg.type === "generated_image" ? "image/png" : "audio/mpeg");
             const filename = `generated_${Date.now()}.${ext}`;
+            const dataUrl = `data:${mimeType};base64,${msg.base64Data}`;
 
-            // The backend writes `content` verbatim unless base64 is declared,
-            // so without this flag the file contains the base64 text itself.
-            const path = await invoke("save_file_to_downloads", {
-                filename,
-                content: msg.base64Data,
-                base64: true,
-            });
+            if (!isTauriRuntime) {
+                const link = document.createElement("a");
+                link.href = dataUrl;
+                link.download = filename;
+                link.click();
+                showToast({ message: `已下载到浏览器默认下载位置：${filename}`, type: "success", duration: 5000 });
+                return;
+            }
+
+            const { invoke } = await import("@tauri-apps/api/core");
+            let path = "";
+            try {
+                path = await invoke("save_file_via_dialog", {
+                    filename,
+                    content: msg.base64Data,
+                    base64: true,
+                    filters: [{
+                        name: msg.type === "generated_image" ? "PNG 图片" : "MP3 音频",
+                        extensions: [ext]
+                    }]
+                });
+            } catch (dialogError) {
+                const message = String(dialogError?.message || dialogError || "");
+                if (message.includes("CANCELLED:")) {
+                    showToast({ message: "已取消保存", type: "info" });
+                    return;
+                }
+                path = await invoke("save_file_to_downloads", {
+                    filename,
+                    content: msg.base64Data,
+                    base64: true
+                });
+            }
+
+            const location = describeSavedLocation(path);
             showToast({
-                message: `已保存到: ${path}`,
+                message: location ? `已保存到：${location}` : "已保存，请在系统保存位置查看。",
                 type: "success",
-                duration: 3000,
+                duration: 5000,
             });
         } catch (error) {
             console.error("Save failed:", error);

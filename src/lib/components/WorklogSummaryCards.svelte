@@ -60,7 +60,7 @@
         {/if}
     </div>
 
-    <div class="hidden md:block overflow-hidden">
+    <div class="hidden md:block overflow-hidden px-1 -mx-1">
         <div class="flex w-[200%] items-stretch transition-transform duration-300 ease-linear"
             style={`transform:translate3d(${activeTab === 'leave' ? '-50%' : '0'},0,0)`}>
             <div class="w-1/2 pr-2 min-w-0">

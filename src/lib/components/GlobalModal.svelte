@@ -23,7 +23,15 @@
     }
 
     $: variantStyle = getVariantStyles($modalStore.variant);
+
+    function handleKeydown(event) {
+        if (event.key !== 'Enter' || !$modalStore.show) return;
+        event.preventDefault();
+        $modalStore.onConfirm?.();
+    }
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <AnimatedModal show={$modalStore.show} onClose={$modalStore.onCancel || (() => {})} zIndex={100} panelClass="max-w-md">
     <div class="p-6 text-center">
