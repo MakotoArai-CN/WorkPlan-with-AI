@@ -97,6 +97,7 @@ export function normalizeOvertimeConfig(config = {}) {
             paydayDate: isValidDate(item.paydayDate) ? item.paydayDate : '',
             amount: number(item.amount, 0, 0, 100_000_000),
             note: typeof item.note === 'string' ? item.note : '',
+            source: item.source === 'bank' ? 'bank' : 'manual',
             updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : ''
         }));
     return {

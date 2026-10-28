@@ -1,6 +1,7 @@
 <script>
     import { _ } from 'svelte-i18n';
     import { getPayrollEstimate, formatCycle, setActualSalary } from '../utils/payroll.js';
+    import SalaryHistory from './SalaryHistory.svelte';
 
     export let records = [];
     export let leaveRecords = [];
@@ -11,6 +12,7 @@
     let actualInput = '';
     let actualNote = '';
     let initializedFor = '';
+    let showHistory = false;
 
     $: payroll = getPayrollEstimate(records, leaveRecords, new Date(), config);
     $: cycle = payroll.cycle;
@@ -51,10 +53,16 @@
                         <span class="text-xs font-bold text-slate-400 ml-1">→ {cycle.paydayDate}</span>
                     </div>
                 </div>
-                <button on:click={onOpenSettings}
-                    class="ml-auto h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-600 text-[11px] font-bold text-slate-500 dark:text-slate-300 hover:border-orange-200 hover:text-orange-600 flex items-center gap-1">
-                    <i class="ph ph-gear"></i> {$_('payroll.settings')}
-                </button>
+                <div class="ml-auto flex items-center gap-1.5">
+                    <button on:click={() => (showHistory = true)}
+                        class="h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-600 text-[11px] font-bold text-slate-500 dark:text-slate-300 hover:border-orange-200 hover:text-orange-600 flex items-center gap-1">
+                        <i class="ph ph-chart-line-up"></i> {$_('salary_history.entry')}
+                    </button>
+                    <button on:click={onOpenSettings}
+                        class="h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-600 text-[11px] font-bold text-slate-500 dark:text-slate-300 hover:border-orange-200 hover:text-orange-600 flex items-center gap-1">
+                        <i class="ph ph-gear"></i> {$_('payroll.settings')}
+                    </button>
+                </div>
             </div>
 
             <div class="mt-3 flex flex-wrap gap-1.5">
@@ -90,6 +98,20 @@
                     <div class="text-sm font-black">{money(payroll.current.estimated)}</div>
                 </div>
             </div>
+            <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span class="px-2 py-1 rounded-md bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300 font-bold">
+                    {$_('payroll.smart_estimate')}: {money(payroll.smart.estimated)}
+                </span>
+                <span class="px-2 py-1 rounded-md bg-slate-50 dark:bg-slate-900/40 text-slate-500">
+                    {$_('payroll.smart_hint', { values: { overtime: money(payroll.smart.overtimePay), leave: money(payroll.smart.leaveDeduction) } })}
+                </span>
+                {#if payroll.salaryGrowth.first && payroll.salaryGrowth.latest && payroll.salaryGrowth.first.periodEnd !== payroll.salaryGrowth.latest.periodEnd}
+                    <span class="px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300 font-bold">
+                        {$_('payroll.salary_growth')}: {payroll.salaryGrowth.difference >= 0 ? '+' : ''}{money(payroll.salaryGrowth.difference)} ({payroll.salaryGrowth.percent >= 0 ? '+' : ''}{payroll.salaryGrowth.percent}%)
+                    </span>
+                {/if}
+            </div>
+
             <div class="text-[10px] text-slate-400 mt-2">
                 {$_('payroll.hourly_base')}: {money(payroll.overtimeBase)} / {config.workdaysPerMonth || 21.75} / {config.hoursPerDay || 8}
                 · {$_('payroll.hourly_rate')}: <b>{money(payroll.hourlyRate)}</b>
@@ -122,3 +144,11 @@
         </div>
     </div>
 </div>
+
+
+<SalaryHistory
+    bind:show={showHistory}
+    {config}
+    onUpdateConfig={(updates) => onUpdateConfig(updates)}
+    onClose={() => (showHistory = false)}
+/>
