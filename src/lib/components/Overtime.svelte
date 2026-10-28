@@ -1,5 +1,6 @@
 <script>
     export let embedded = false;
+    export let hideSummary = false;
     import { taskStore } from '../stores/tasks.js';
     import { settingsStore } from '../stores/settings.js';
     import { showConfirm, showToast } from '../stores/modal.js';
@@ -365,13 +366,15 @@
 
     <div class="flex-1 overflow-y-auto overscroll-contain min-h-0" style="-webkit-overflow-scrolling: touch;">
         <div class="p-4 md:p-6 space-y-5 pb-32">
-            <PayrollPanel
-                records={records}
-                leaveRecords={$taskStore.leaveRecords || []}
-                {config}
-                onUpdateConfig={(updates) => settingsStore.updateOvertimeConfig(updates)}
-                onOpenSettings={() => (showSalarySettings = true)}
-            />
+            {#if !hideSummary}
+                <PayrollPanel
+                    records={records}
+                    leaveRecords={$taskStore.leaveRecords || []}
+                    {config}
+                    onUpdateConfig={(updates) => settingsStore.updateOvertimeConfig(updates)}
+                    onOpenSettings={() => (showSalarySettings = true)}
+                />
+            {/if}
 
             <!-- Period navigation -->
             <div class="flex items-center justify-between gap-2">
