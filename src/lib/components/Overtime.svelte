@@ -11,6 +11,7 @@
     import AnimatedModal from './AnimatedModal.svelte';
     import TimeSelect from './TimeSelect.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
+    import SelectMenu from './SelectMenu.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
@@ -93,6 +94,16 @@
         month: index + 1,
         summary: getMonthSummary(records, cursorYear, index + 1, config)
     }));
+    $: overtimeTypeOptions = [
+        { value: 'weekday', label: $_('overtime.type_weekday') },
+        { value: 'weekend', label: $_('overtime.type_weekend') },
+        { value: 'holiday', label: $_('overtime.type_holiday') }
+    ];
+    $: compensationOptions = [
+        { value: 'pay', label: $_('overtime.comp_pay') },
+        { value: 'time_off', label: $_('overtime.comp_time_off') },
+        { value: 'none', label: $_('overtime.comp_none') }
+    ];
     $: viewOptions = [
         { value: 'year', label: $_('overtime.view_year') },
         { value: 'month', label: $_('overtime.view_month') },
@@ -571,21 +582,11 @@
                     </div>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.type')}</span>
-                        <select bind:value={form.type}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
-                            <option value="weekday">{$_('overtime.type_weekday')}</option>
-                            <option value="weekend">{$_('overtime.type_weekend')}</option>
-                            <option value="holiday">{$_('overtime.type_holiday')}</option>
-                        </select>
+                        <SelectMenu bind:value={form.type} options={overtimeTypeOptions} />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.compensation')}</span>
-                        <select bind:value={form.compensation}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
-                            <option value="pay">{$_('overtime.comp_pay')}</option>
-                            <option value="time_off">{$_('overtime.comp_time_off')}</option>
-                            <option value="none">{$_('overtime.comp_none')}</option>
-                        </select>
+                        <SelectMenu bind:value={form.compensation} options={compensationOptions} />
                     </label>
                     <label class="col-span-2 flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.note')}</span>
