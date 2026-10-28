@@ -21,6 +21,7 @@
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { onMount } from "svelte";
     import { _ } from 'svelte-i18n';
+    import AnimatedModal from './AnimatedModal.svelte';
     import { get } from 'svelte/store';
     import { isG4FProvider } from "../utils/g4f-client.js";
     import {
@@ -408,18 +409,7 @@
     ];
 </script>
 
-{#if $showAiSettings}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div
-            on:click={handleClose}
-            on:keydown={handleClose}
-            role="button"
-            tabindex="0"
-            class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-        ></div>
-        <div
-            class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative flex flex-col max-h-[90vh] overflow-hidden"
-        >
+<AnimatedModal show={$showAiSettings} onClose={handleClose} zIndex={50} panelClass="max-w-2xl">
             <div
                 class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-100 flex justify-between items-center bg-rose-50"
             >
@@ -927,6 +917,4 @@
                     >{$_('ai_settings_page.save')}</button
                 >
             </div>
-        </div>
-    </div>
-{/if}
+</AnimatedModal>
