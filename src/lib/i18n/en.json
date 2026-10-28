@@ -332,7 +332,9 @@
         "show_password": "Show password",
         "vaultwarden_bitwarden_com": "Bitwarden.com",
         "vaultwarden_bitwarden_eu": "Bitwarden.eu",
-        "vaultwarden_self_hosted": "Self-hosted Vaultwarden"
+        "vaultwarden_self_hosted": "Self-hosted Vaultwarden",
+        "vaultwarden_locked": "Unlock the password vault before importing",
+        "vaultwarden_required": "Enter the server URL, email and master password"
     },
     "settings": {
         "title": "Settings",

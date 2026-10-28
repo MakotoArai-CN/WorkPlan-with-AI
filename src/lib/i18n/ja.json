@@ -332,7 +332,9 @@
         "show_password": "パスワードを表示",
         "vaultwarden_bitwarden_com": "Bitwarden.com",
         "vaultwarden_bitwarden_eu": "Bitwarden.eu",
-        "vaultwarden_self_hosted": "セルフホスト Vaultwarden"
+        "vaultwarden_self_hosted": "セルフホスト Vaultwarden",
+        "vaultwarden_locked": "インポートする前にパスワード庫を解除してください",
+        "vaultwarden_required": "サーバー URL、メールアドレス、マスターパスワードを入力してください"
     },
     "settings": {
         "title": "設定",
