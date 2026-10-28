@@ -334,7 +334,18 @@
         "vaultwarden_bitwarden_eu": "Bitwarden.eu",
         "vaultwarden_self_hosted": "自部署 Vaultwarden",
         "vaultwarden_locked": "密码库未解锁，解锁后才能导入",
-        "vaultwarden_required": "请填写服务器地址、邮箱和主密码"
+        "vaultwarden_required": "请填写服务器地址、邮箱和主密码",
+        "vaultwarden_push_title": "推送到 Bitwarden / Vaultwarden",
+        "vaultwarden_push_desc": "把 WorkPlan 密码库加密写入服务器，浏览器扩展同步后即可看到",
+        "vaultwarden_mode_import": "导入",
+        "vaultwarden_mode_push": "推送",
+        "vaultwarden_push_hint": "只新增，不覆盖已有条目；同名且同用户名视为重复并跳过。主密码只用于本次推送，不会保存；推送后请在浏览器扩展中同步。",
+        "vaultwarden_push_empty": "WorkPlan 密码库没有可推送的条目，请先添加密码或解锁密码库",
+        "vaultwarden_push_success": "已推送 {pushed} 条，跳过 {skipped} 条，失败 {failed} 条",
+        "vaultwarden_push_count": "将推送 {count} 条密码",
+        "vaultwarden_push_button": "推送到服务器",
+        "vaultwarden_pushing": "正在推送...",
+        "vaultwarden_push_locked": "密码库未解锁，解锁后才能推送"
     },
     "settings": {
         "title": "系统设置",
