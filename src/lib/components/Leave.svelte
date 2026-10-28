@@ -9,6 +9,7 @@
     import AnimatedModal from './AnimatedModal.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import SelectMenu from './SelectMenu.svelte';
+    import WorklogDetailCard from './WorklogDetailCard.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
@@ -149,6 +150,22 @@
         return record.unit === 'day'
             ? record.duration * dailyRate
             : record.duration * dailyRate / (Number(config.hoursPerDay) || 8);
+    }
+
+    function makeLeaveRow(record) {
+        return {
+            record,
+            dateMain: record.startDate.slice(8, 10),
+            dateSub: new Date(`${record.startDate}T00:00:00`).toLocaleDateString(localeCode, { weekday: 'short' }),
+            badge: $_('leave.type_' + record.type),
+            badgeClass: TYPE_STYLES[record.type] || TYPE_STYLES.other,
+            title: formatRecord(record),
+            detail: `${record.startDate}${record.endDate === record.startDate ? '' : ` → ${record.endDate}`} · ${record.paid ? $_('leave.paid') : $_('leave.unpaid')}`,
+            note: record.note || '',
+            metric: formatRecord(record),
+            amount: record.paid ? $_('leave.paid') : `-${money(leaveDeduction(record))}`,
+            amountClass: record.paid ? 'text-emerald-600' : 'text-rose-500'
+        };
     }
 
     function formatRecord(record) {
@@ -450,47 +467,19 @@
                 </div>
             {:else}
                 {@const visibleRecords = viewMode === 'day' ? dayRecords : monthRecords}
-                <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between">
-                        <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
-                            {viewMode === 'day' ? $_('leave.day_detail') : $_('leave.month_detail')}
-                        </div>
-                        <div class="text-[10px] text-slate-500">
-                            {formatLeave(viewMode === 'day' ? daySummary : monthSummary)}
-                        </div>
-                    </div>
-                    {#if visibleRecords.length}
-                        <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
-                            {#each visibleRecords as record}
-                                <WorklogRecordRow
-                                    dateMain={record.startDate.slice(8, 10)}
-                                    dateSub={new Date(`${record.startDate}T00:00:00`).toLocaleDateString(localeCode, { weekday: 'short' })}
-                                    badge={$_('leave.type_' + record.type)}
-                                    badgeClass={TYPE_STYLES[record.type] || TYPE_STYLES.other}
-                                    title={formatRecord(record)}
-                                    detail={`${record.startDate}${record.endDate === record.startDate ? '' : ` → ${record.endDate}`} · ${record.paid ? $_('leave.paid') : $_('leave.unpaid')}`}
-                                    note={record.note || ''}
-                                    metric={formatRecord(record)}
-                                    amount={record.paid ? $_('leave.paid') : `-${money(leaveDeduction(record))}`}
-                                    amountClass={record.paid ? 'text-emerald-600' : 'text-rose-500'}
-                                    editLabel={$_('leave.edit_record')}
-                                    deleteLabel={$_('leave.delete')}
-                                    onEdit={() => openEdit(record)}
-                                    onDelete={() => deleteRecord(record)}
-                                />
-                            {/each}
-                        </div>
-                    {:else}
-                        <div class="py-12 text-center text-slate-400">
-                            <i class="ph ph-calendar-check text-4xl mb-2 opacity-40"></i>
-                            <div class="text-sm font-bold">{$_('leave.empty')}</div>
-                            <div class="text-xs mt-1">{$_('leave.empty_desc')}</div>
-                            <button on:click={openCreate} class="mt-3 text-xs font-bold text-rose-600 hover:text-rose-700">
-                                + {$_('leave.add_record')}
-                            </button>
-                        </div>
-                    {/if}
-                </div>
+                <WorklogDetailCard
+                    title={viewMode === 'day' ? $_('leave.day_detail') : $_('leave.month_detail')}
+                    summary={formatLeave(viewMode === 'day' ? daySummary : monthSummary)}
+                    rows={visibleRecords.map(makeLeaveRow)}
+                    emptyTitle={$_('leave.empty')}
+                    emptyDesc={$_('leave.empty_desc')}
+                    addLabel={$_('leave.add_record')}
+                    onAdd={openCreate}
+                    onEdit={openEdit}
+                    onDelete={deleteRecord}
+                    editLabel={$_('leave.edit_record')}
+                    deleteLabel={$_('leave.delete')}
+                />
             {/if}
         </div>
     </div>
