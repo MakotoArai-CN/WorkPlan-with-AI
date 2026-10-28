@@ -2,6 +2,7 @@
     import { _ } from 'svelte-i18n';
     import { showToast } from '../stores/modal.js';
     import AnimatedModal from './AnimatedModal.svelte';
+    import SelectMenu from './SelectMenu.svelte';
     import {
         BOSS_FIELDS,
         BOSS_LEAVE_FIELDS,
@@ -36,6 +37,7 @@
     $: monthLabels = Array.from({ length: 12 }, (_, index) =>
         new Intl.DateTimeFormat(undefined, { month: 'long' }).format(new Date(2026, index, 1))
     );
+    $: monthOptions = monthLabels.map((label, index) => ({ value: index + 1, label }));
     $: fieldLabels = {
         date: $_('worklog.field_date'),
         start: $_('worklog.field_start'),
@@ -184,12 +186,7 @@
                     {#if scope === 'month'}
                         <div class="mt-2 flex items-center gap-2">
                             <span class="text-[10px] text-slate-500">{$_('worklog.month')}</span>
-                            <select bind:value={month}
-                                class="border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-900 text-xs text-slate-600 dark:text-slate-300">
-                                {#each monthLabels as label, index}
-                                    <option value={index + 1}>{label}</option>
-                                {/each}
-                            </select>
+                            <SelectMenu bind:value={month} options={monthOptions} className="w-36" />
                         </div>
                     {/if}
                 </div>

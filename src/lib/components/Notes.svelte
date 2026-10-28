@@ -1,5 +1,6 @@
 <script>
     import SelectMenu from './SelectMenu.svelte';
+    import SegmentedControl from './SegmentedControl.svelte';
     import { notesStore, activeNote, notesList, noteCategories } from "../stores/notes.js";
     import { showConfirm, showToast } from "../stores/modal.js";
     import { renderMarkdown } from "../utils/markdown.js";
@@ -851,17 +852,10 @@
                     />
                     <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
                 </div>
-                <div class="flex gap-1 overflow-x-auto pb-1">
-                    {#each $noteCategories as cat}
-                        <button
-                            on:click={() => selectCategory(cat)}
-                            class="shrink-0 px-2.5 py-1 rounded-full text-xs font-bold transition"
-                            class:bg-emerald-600={selectedCategory === cat}
-                            class:text-white={selectedCategory === cat}
-                            class:bg-slate-100={selectedCategory !== cat}
-                            class:text-slate-600={selectedCategory !== cat}
-                        >{cat}</button>
-                    {/each}
+                <div class="flex gap-1 overflow-x-auto pb-1 items-center">
+                    <SegmentedControl value={selectedCategory}
+                        options={$noteCategories.map(cat => ({ value: cat, label: cat }))}
+                        onchange={selectCategory} className="min-w-max" />
                     <button
                         on:click={() => showCategoryPanel = !showCategoryPanel}
                         class="shrink-0 px-2 py-1 rounded-full text-xs text-slate-400 hover:text-emerald-600"
