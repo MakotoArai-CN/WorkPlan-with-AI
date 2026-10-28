@@ -1,5 +1,6 @@
 <script>
     import SelectMenu from './SelectMenu.svelte';
+    import DateTimePicker from './DateTimePicker.svelte';
     import { taskStore, currentView, viewDate, today } from '../stores/tasks.js';
     import { _ } from 'svelte-i18n';
     import AnimatedModal from './AnimatedModal.svelte';
@@ -121,6 +122,20 @@
         $_('weekdays.mon'), $_('weekdays.tue'), $_('weekdays.wed'),
         $_('weekdays.thu'), $_('weekdays.fri'), $_('weekdays.sat'), $_('weekdays.sun')
     ];
+    $: templateOptions = [
+        { value: '', label: $_('task_modal.load_template') },
+        ...$taskStore.templates.map(t => ({ value: t.id, label: t.title }))
+    ];
+    $: statusOptions = [
+        { value: 'todo', label: $_('task_status.todo') },
+        { value: 'doing', label: $_('task_status.doing') },
+        { value: 'done', label: $_('task_status.done') }
+    ];
+    $: priorityOptions = [
+        { value: 'normal', label: $_('task_priority.normal') },
+        { value: 'urgent', label: $_('task_priority.urgent') },
+        { value: 'critical', label: $_('task_priority.critical') }
+    ];
 </script>
 
 <AnimatedModal bind:show onClose={close} zIndex={50} panelClass="max-w-lg">
@@ -145,19 +160,33 @@
                         placeholder={$_('task_modal.name_ph')}>
                 </div>
 
+                {#if $currentView !== 'templates'}
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <div class="text-xs font-bold text-slate-500 uppercase mb-1.5">{$_('task.status')}</div>
+                            <SelectMenu bind:value={data.status} options={statusOptions} className="w-full" />
+                        </div>
+                        <div>
+                            <div class="text-xs font-bold text-slate-500 uppercase mb-1.5">{$_('task.priority')}</div>
+                            <SelectMenu bind:value={data.priority} options={priorityOptions} className="w-full" />
+                        </div>
+                    </div>
+                {/if}
+
                 {#if $currentView === 'scheduled'}
                     <div class="bg-teal-50 p-4 rounded-xl">
                         <div class="text-xs font-bold text-teal-700 uppercase mb-2 block">{$_('task_modal.repeat')}</div>
                         <div class="flex justify-between gap-1">
                             {#each dayLabels as dayStr, idx}
                                 {@const dayValue = idx === 6 ? 0 : idx + 1}
-                                <label class="cursor-pointer">
-                                    <input type="checkbox" checked={data.repeatDays.includes(dayValue)}
-                                        on:change={() => toggleRepeatDay(dayValue)} class="hidden peer">
-                                    <span class="block w-8 h-8 rounded-full border border-teal-200 bg-white text-center leading-8 text-sm text-slate-500 peer-checked:bg-teal-500 peer-checked:text-white transition-all">
-                                        {dayStr}
-                                    </span>
-                                </label>
+                                {@const selected = data.repeatDays.includes(dayValue)}
+                                <button type="button" on:click={() => toggleRepeatDay(dayValue)}
+                                    aria-pressed={selected}
+                                    class={`block w-8 h-8 rounded-full border text-center text-sm transition-all duration-200 active:scale-90 ${selected
+                                        ? 'border-teal-500 bg-teal-500 text-white shadow-sm shadow-teal-200 scale-105'
+                                        : 'border-teal-200 bg-white text-slate-500 hover:border-teal-300 hover:text-teal-600'}`}>
+                                    {dayStr}
+                                </button>
                             {/each}
                         </div>
                     </div>
@@ -195,16 +224,14 @@
                 </div>
 
                 {#if $currentView !== 'templates' && $currentView !== 'scheduled'}
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 gap-3">
                         <div>
-                            <label for="task-modal-date" class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.plan')}</label>
-                            <input id="task-modal-date" type="datetime-local" bind:value={data.date}
-                                class="w-full border border-slate-200 rounded px-2 py-2 text-sm">
+                            <div class="text-xs font-bold text-slate-500 uppercase mb-1.5">{$_('task_modal.plan')}</div>
+                            <DateTimePicker value={data.date} onchange={(value) => (data.date = value)} />
                         </div>
                         <div>
-                            <label for="task-modal-deadline" class="text-xs font-bold text-slate-500 uppercase">{$_('task_modal.due')}</label>
-                            <input id="task-modal-deadline" type="datetime-local" bind:value={data.deadline}
-                                class="w-full border border-slate-200 rounded px-2 py-2 text-sm">
+                            <div class="text-xs font-bold text-slate-500 uppercase mb-1.5">{$_('task_modal.due')}</div>
+                            <DateTimePicker value={data.deadline} onchange={(value) => (data.deadline = value)} />
                         </div>
                     </div>
                 {/if}

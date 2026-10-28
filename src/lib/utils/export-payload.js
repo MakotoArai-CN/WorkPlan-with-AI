@@ -27,7 +27,12 @@ export function stripDataUrlPrefix(content) {
 export function describeSavedLocation(path) {
     if (!path) return '';
     const raw = String(path);
-    if (!raw.startsWith('content://')) return raw;
+    if (!raw.startsWith('content://')) {
+        if (/\/Android\/data\//i.test(raw)) {
+            return '应用专属下载目录（文件管理器可能不可见，建议使用系统保存对话框）';
+        }
+        return raw;
+    }
 
     let decoded = raw;
     try {
@@ -40,6 +45,9 @@ export function describeSavedLocation(path) {
     if (match && match[2].includes('/')) {
         const [, volume, relative] = match;
         return volume === 'primary' ? `内部存储/${relative}` : `${volume}/${relative}`;
+    }
+    if (/\/Android\/data\//i.test(decoded)) {
+        return '应用专属下载目录（文件管理器可能不可见，建议使用系统保存对话框）';
     }
     return '你在系统保存对话框中选择的位置';
 }

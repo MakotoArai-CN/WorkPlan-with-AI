@@ -38,7 +38,9 @@ function isUserCancel(error) {
 
 function withLocation(message, result) {
     const location = describeSavedLocation(result?.path);
-    return location ? `${message}（${location}）` : message;
+    if (location) return `${message}（${location}）`;
+    if (result?.success) return `${message}（浏览器默认下载位置）`;
+    return message;
 }
 
 /**
