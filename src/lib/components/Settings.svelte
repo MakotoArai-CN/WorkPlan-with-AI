@@ -22,7 +22,6 @@
     let isAndroid = false;
 
     let checkingUpdate = false;
-    let showVaultwardenImport = false;
     let themeGridEl;
     let languageGridEl;
     let themePill = { left: 0, top: 0, width: 0, height: 0, ready: false };
@@ -159,7 +158,6 @@
 
     function handleVaultwardenImported(items) {
         const count = passwordsStore.addPasswordsBatch(items);
-        showVaultwardenImport = false;
         showToast({
             message: get(_)('passwords.vaultwarden_imported', { values: { count } }),
             type: count > 0 ? 'success' : 'warning'
@@ -698,12 +696,10 @@
                             </button>
                         </div>
                         <div class="pl-3 border-l-2 border-indigo-100 dark:border-indigo-800">
-                            <button on:click={() => showVaultwardenImport = true}
+                            <VaultwardenImport
                                 disabled={!$passwordsStore.isUnlocked}
-                                class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-[11px] font-bold disabled:opacity-50">
-                                <i class="ph ph-key"></i>
-                                {$_('passwords.vaultwarden_import')}
-                            </button>
+                                onImported={handleVaultwardenImported}
+                            />
                         </div>
                     {/if}
                 </div>
@@ -1292,12 +1288,6 @@
                 </button>
             </div>
         </div>
-
-        <VaultwardenImport
-            bind:show={showVaultwardenImport}
-            onClose={() => showVaultwardenImport = false}
-            onImported={handleVaultwardenImported}
-        />
 
         <div class="text-center text-[10px] md:text-xs text-slate-400 dark:text-slate-500 py-4">
             Powered by ❤️ MakotoArai-CN
