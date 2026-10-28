@@ -2,6 +2,7 @@
     import { _ } from 'svelte-i18n';
     import { SALARY_COMPONENT_TEMPLATE, normalizeOvertimeConfig } from '../utils/overtime.js';
     import AnimatedModal from './AnimatedModal.svelte';
+    import SelectMenu from './SelectMenu.svelte';
 
     export let show = false;
     export let config = {};
@@ -28,6 +29,18 @@
         hoursPerDay = normalized.hoursPerDay;
         initialized = true;
     }
+    $: cycleModeOptions = [
+        { value: 'payday', label: $_('payroll.cycle_payday') },
+        { value: 'calendar', label: $_('payroll.cycle_calendar') }
+    ];
+    $: overtimeBaseOptions = [
+        { value: 'base', label: $_('payroll.base_mode_base') },
+        { value: 'total', label: $_('payroll.base_mode_total') }
+    ];
+    $: leaveDeductionOptions = [
+        { value: 'fixed', label: $_('payroll.leave_fixed') },
+        { value: 'base', label: $_('payroll.leave_base') }
+    ];
     $: if (!show) initialized = false;
 
     function applyTemplate() {
@@ -104,10 +117,7 @@
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-[11px] font-bold text-slate-500">{$_('payroll.cycle_mode')}</span>
-                        <select bind:value={salaryCycleMode} class={inputClass()}>
-                            <option value="payday">{$_('payroll.cycle_payday')}</option>
-                            <option value="calendar">{$_('payroll.cycle_calendar')}</option>
-                        </select>
+                        <SelectMenu bind:value={salaryCycleMode} options={cycleModeOptions} className="w-full" />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-[11px] font-bold text-slate-500">{$_('payroll.workdays')}</span>
@@ -119,17 +129,11 @@
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-[11px] font-bold text-slate-500">{$_('payroll.overtime_base_mode')}</span>
-                        <select bind:value={overtimeBaseMode} class={inputClass()}>
-                            <option value="base">{$_('payroll.base_mode_base')}</option>
-                            <option value="total">{$_('payroll.base_mode_total')}</option>
-                        </select>
+                        <SelectMenu bind:value={overtimeBaseMode} options={overtimeBaseOptions} className="w-full" />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-[11px] font-bold text-slate-500">{$_('payroll.leave_deduction_mode')}</span>
-                        <select bind:value={leaveDeductionMode} class={inputClass()}>
-                            <option value="fixed">{$_('payroll.leave_fixed')}</option>
-                            <option value="base">{$_('payroll.leave_base')}</option>
-                        </select>
+                        <SelectMenu bind:value={leaveDeductionMode} options={leaveDeductionOptions} className="w-full" />
                     </label>
                 </div>
 
