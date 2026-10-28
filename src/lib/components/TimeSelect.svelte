@@ -11,7 +11,7 @@
     let trigger;
     let menu;
     let open = false;
-    let menuStyle = '';
+    let menuStyle = 'left:0;top:0;visibility:hidden;';
     let hourList;
     let minuteList;
 
@@ -28,6 +28,8 @@
             open = false;
             return;
         }
+        const rect = trigger?.getBoundingClientRect();
+        menuStyle = `left:${rect?.left ?? 0}px;top:${(rect?.bottom ?? 0) + 6}px;visibility:hidden;`;
         open = true;
         await tick();
         position();
@@ -48,7 +50,7 @@
         if (top + menuRect.height > window.innerHeight - 8) top = Math.max(8, rect.top - menuRect.height - 6);
         let left = rect.left;
         if (left + menuRect.width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - menuRect.width - 8);
-        menuStyle = `left:${left}px;top:${top}px;width:${Math.max(rect.width, 196)}px;`;
+        menuStyle = `left:${left}px;top:${top}px;width:${Math.max(rect.width, 196)}px;visibility:visible;`;
     }
 
     function scrollSelected() {

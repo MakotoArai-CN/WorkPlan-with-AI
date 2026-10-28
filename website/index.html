@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WorkPlan Cloud — 把每天的工作，变成看得见的进展</title>
+    <meta name="description" content="WorkPlan Cloud 是一个本地优先的个人工作台：任务看板、模板、定时任务、数据统计、工时记录、工作笔记、AI 助手与密码管理。" />
+    <meta name="theme-color" content="#f6f8fc" />
+    <link rel="stylesheet" href="./styles.css" />
+    <noscript><style>[data-reveal]{opacity:1!important;transform:none!important}</style></noscript>
+</head>
+<body>
+    <svg class="icon-sprite" aria-hidden="true">
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+        <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+        <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></symbol>
+        <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5M8 12h8M8 16h6"/></symbol>
+        <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></symbol>
+        <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+        <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 5.7 12 3 3 0 0 0 7 18z"/></symbol>
+        <symbol id="i-windows" viewBox="0 0 24 24"><path d="M3 4.5 10.5 3v8H3zM12 2.8 21 1v10h-9zM3 13h7.5v8L3 19.5zM12 13h9v10l-9-1.8z"/></symbol>
+        <symbol id="i-android" viewBox="0 0 24 24"><path d="M5 10h14v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M7 10 5 5M17 10l2-5M8 15h.01M16 15h.01"/></symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18-3-3-3-15 0-18z"/></symbol>
+        <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4 1.5-4-2.5-6-3m12 6v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12 12 0 0 0-6.2 0C6.5 3.8 5.4 4.1 5.4 4.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 10.5c0 4.6 2.7 5.7 5.5 6-.4.4-.6 1-.5 2V22"/></symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    </svg>
+
+    <div class="page-glow page-glow-a"></div>
+    <div class="page-glow page-glow-b"></div>
+
+    <header class="site-header">
+        <a class="brand" href="#" aria-label="WorkPlan Cloud 首页">
+            <span class="brand-mark"><svg><use href="#i-check"/></svg></span>
+            <span class="brand-name">WorkPlan <em>Cloud</em></span>
+        </a>
+        <button class="nav-toggle" aria-label="打开导航" aria-expanded="false">
+            <svg><use href="#i-menu"/></svg>
+        </button>
+        <nav class="site-nav">
+            <a href="#features">功能</a>
+            <a href="#ai">AI 助手</a>
+            <a href="#security">安全</a>
+            <a href="#download">下载</a>
+            <a class="nav-github" href="https://github.com/MakotoArai-CN/WorkPlan-with-AI" target="_blank" rel="noreferrer">
+                <svg><use href="#i-github"/></svg> GitHub
+            </a>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="hero-copy" data-reveal>
+                <div class="eyebrow"><span class="eyebrow-dot"></span> 本地优先 · 端到端加密 · AI 辅助</div>
+                <h1>把每天的工作，<br/><span class="gradient-text">变成看得见的进展。</span></h1>
+                <p class="hero-lead">任务、模板、定时提醒、数据统计、工时、笔记、密码与 AI 助手，收进一个安静、清晰、属于你自己的个人工作台。</p>
+                <div class="hero-actions">
+                    <a class="btn btn-primary" href="#download">开始使用 <svg><use href="#i-arrow"/></svg></a>
+                    <a class="btn btn-ghost" href="https://github.com/MakotoArai-CN/WorkPlan-with-AI" target="_blank" rel="noreferrer"><svg><use href="#i-github"/></svg> 查看源码</a>
+                </div>
+                <div class="hero-points">
+                    <span><svg><use href="#i-check"/></svg> Windows / Android / Web</span>
+                    <span><svg><use href="#i-check"/></svg> 数据默认留在本地</span>
+                    <span><svg><use href="#i-check"/></svg> 开源可自托管</span>
+                </div>
+            </div>
+
+            <div class="hero-visual" data-reveal>
+                <div class="app-shell">
+                    <aside class="app-sidebar">
+                        <div class="app-brand"><span class="mini-mark"><svg><use href="#i-check"/></svg></span><span>WorkPlan</span></div>
+                        <div class="app-nav-item active"><svg><use href="#i-grid"/></svg> 任务看板</div>
+                        <div class="app-nav-item"><svg><use href="#i-copy"/></svg> 任务模板</div>
+                        <div class="app-nav-item"><svg><use href="#i-clock"/></svg> 定时任务</div>
+                        <div class="app-nav-item"><svg><use href="#i-chart"/></svg> 数据统计</div>
+                        <div class="app-nav-item"><svg><use href="#i-calendar"/></svg> 工时记录</div>
+                        <div class="app-nav-item"><svg><use href="#i-note"/></svg> 工作笔记</div>
+                        <div class="app-nav-item"><svg><use href="#i-key"/></svg> 密码管理</div>
+                        <div class="app-user"><span class="avatar">M</span><div><strong>Makoto</strong><small>本地优先</small></div></div>
+                    </aside>
+                    <div class="app-main">
+                        <div class="app-topbar">
+                            <div><span class="app-kicker">今日看板</span><strong>10 月 29 日 · 星期四</strong></div>
+                            <div class="app-actions"><span class="app-pill">已同步</span><span class="app-add">+ 新建</span></div>
+                        </div>
+                        <div class="stat-row">
+                            <div class="stat-card"><span>今日任务</span><strong>6</strong><small class="up">+2 较昨日</small></div>
+                            <div class="stat-card"><span>已完成</span><strong>4</strong><small>67% 完成率</small></div>
+                            <div class="stat-card"><span>本周工时</span><strong>32.5h</strong><small>预计 ¥3,240</small></div>
+                        </div>
+                        <div class="task-list">
+                            <div class="task active"><span class="task-check done"><svg><use href="#i-check"/></svg></span><div><strong>整理本周产品需求</strong><small>09:00 · 工作</small></div><span class="tag blue">进行中</span><span class="task-time">2h</span></div>
+                            <div class="task"><span class="task-check done"><svg><use href="#i-check"/></svg></span><div><strong>同步设计评审结论</strong><small>11:30 · 团队</small></div><span class="tag green">已完成</span><span class="task-time">45m</span></div>
+                            <div class="task"><span class="task-check"></span><div><strong>准备周报与下周计划</strong><small>15:00 · 复盘</small></div><span class="tag amber">待开始</span><span class="task-time">1h</span></div>
+                            <div class="task"><span class="task-check"></span><div><strong>阅读 AI Agent 设计资料</strong><small>20:00 · 学习</small></div><span class="tag purple">想法</span><span class="task-time">30m</span></div>
+                        </div>
+                        <div class="app-ai"><span class="ai-orb"><svg><use href="#i-spark"/></svg></span><div><strong>AI 助手</strong><small>帮你梳理今天的优先级，或把一段工作记录整理成任务。</small></div><span class="ai-arrow">→</span></div>
+                    </div>
+                </div>
+                <div class="floating-card float-a"><svg><use href="#i-shield"/></svg><div><strong>端到端加密</strong><small>密钥只在你手里</small></div></div>
+                <div class="floating-card float-b"><svg><use href="#i-spark"/></svg><div><strong>AI 自动整理</strong><small>确认后才执行</small></div></div>
+            </div>
+        </section>
+
+        <section class="logos" aria-label="产品能力">
+            <span>LOCAL FIRST</span><i></i><span>END-TO-END ENCRYPTED</span><i></i><span>OPEN SOURCE</span><i></i><span>CROSS PLATFORM</span>
+        </section>
+
+        <section id="features" class="section">
+            <div class="section-head" data-reveal>
+                <div class="eyebrow">ALL IN ONE WORKSPACE</div>
+                <h2>少一点切换，<span class="gradient-text">多一点完成。</span></h2>
+                <p>把一天里散落的任务、记录和资料，放回同一个清晰的节奏里。</p>
+            </div>
+            <div class="feature-grid">
+                <article class="feature-card feature-wide" data-reveal>
+                    <div class="feature-icon blue"><svg><use href="#i-grid"/></svg></div>
+                    <h3>今日看板</h3>
+                    <p>按今天、本周、优先级和状态组织任务。子任务、截止时间、重复计划都放在触手可及的位置。</p>
+                    <div class="feature-preview board-preview">
+                        <span class="board-col">待开始 <b>3</b></span>
+                        <span class="board-col">进行中 <b>2</b></span>
+                        <span class="board-col">已完成 <b>4</b></span>
+                    </div>
+                </article>
+                <article class="feature-card" data-reveal>
+                    <div class="feature-icon purple"><svg><use href="#i-copy"/></svg></div>
+                    <h3>模板与定时任务</h3>
+                    <p>把重复出现的流程保存成模板，让周期任务自动出现在正确的时间。</p>
+                </article>
+                <article class="feature-card" data-reveal>
+                    <div class="feature-icon emerald"><svg><use href="#i-chart"/></svg></div>
+                    <h3>数据统计</h3>
+                    <p>完成率、任务分布、趋势图与 AI 日报，帮你看清时间去了哪里。</p>
+                </article>
+                <article class="feature-card" data-reveal>
+                    <div class="feature-icon amber"><svg><use href="#i-calendar"/></svg></div>
+                    <h3>工时与假期</h3>
+                    <p>加班、请假、工资周期和年假额度统一记录，自动估算本期收入。</p>
+                </article>
+                <article class="feature-card" data-reveal>
+                    <div class="feature-icon rose"><svg><use href="#i-note"/></svg></div>
+                    <h3>工作笔记</h3>
+                    <p>Markdown 编辑、分类、导出与 AI 总结，把过程和结论一起留下。</p>
+                </article>
+                <article class="feature-card feature-wide" data-reveal>
+                    <div class="feature-icon cyan"><svg><use href="#i-key"/></svg></div>
+                    <h3>密码管理</h3>
+                    <p>独立主密码加密的密码库，支持 Bitwarden / Vaultwarden 导入与推送。</p>
+                    <div class="feature-preview password-preview">
+                        <div><span class="dot blue"></span> GitHub <span>••••••••</span></div>
+                        <div><span class="dot green"></span> 公司邮箱 <span>••••••••</span></div>
+                        <div><span class="dot amber"></span> 服务器 <span>••••••••</span></div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section id="ai" class="section ai-section">
+            <div class="ai-copy" data-reveal>
+                <div class="eyebrow">AI, WITH BOUNDARIES</div>
+                <h2>让 AI 动手，<br/><span class="gradient-text">但由你按下确认。</span></h2>
+                <p>接入你信任的模型。AI 可以整理任务、读写未锁定笔记、在授权目录内处理文件；每一次修改和删除都会先得到你的确认。</p>
+                <ul class="check-list">
+                    <li><svg><use href="#i-check"/></svg> 任务、模板、定时任务的查询与创建</li>
+                    <li><svg><use href="#i-check"/></svg> 非锁定笔记的增删改查</li>
+                    <li><svg><use href="#i-check"/></svg> 授权文件夹内的文件搜索、读取、写入与删除</li>
+                    <li><svg><use href="#i-check"/></svg> 锁定笔记与密码库永远不进入 AI 上下文</li>
+                </ul>
+                <a class="text-link" href="https://github.com/MakotoArai-CN/WorkPlan-with-AI" target="_blank" rel="noreferrer">了解实现方式 <svg><use href="#i-arrow"/></svg></a>
+            </div>
+            <div class="ai-demo" data-reveal>
+                <div class="chat-bubble user">把今天完成的工作整理成任务，并生成一份周报。</div>
+                <div class="chat-bubble ai"><span class="ai-avatar"><svg><use href="#i-spark"/></svg></span><div><strong>我会先读取今天的任务和未锁定笔记。</strong><p>已找到 4 条可整理记录，准备创建 3 个任务并生成周报。执行前需要你确认。</p><span class="confirm-chip">等待确认 · 3 项操作</span></div></div>
+                <div class="chat-bubble user small">确认执行。</div>
+                <div class="chat-typing"><span></span><span></span><span></span> AI 正在整理…</div>
+            </div>
+        </section>
+
+        <section id="security" class="section security-section">
+            <div class="section-head" data-reveal>
+                <div class="eyebrow">PRIVACY BY DEFAULT</div>
+                <h2>你的数据，<span class="gradient-text">先属于你。</span></h2>
+                <p>本地优先不是一句口号，而是默认路径。需要跨设备时，再开启你掌控密钥的加密同步。</p>
+            </div>
+            <div class="security-grid">
+                <div class="security-card" data-reveal><span class="security-icon"><svg><use href="#i-cloud"/></svg></span><h3>本地优先</h3><p>任务、笔记、工时与设置默认保存在设备本地，离线也能完整使用。</p></div>
+                <div class="security-card" data-reveal><span class="security-icon"><svg><use href="#i-shield"/></svg></span><h3>端到端加密</h3><p>同步内容在本地加密后上传。Access Key 不是解密密钥，服务端无法读取明文。</p></div>
+                <div class="security-card" data-reveal><span class="security-icon"><svg><use href="#i-lock"/></svg></span><h3>独立密码库</h3><p>密码库使用单独的主密码加密，与任务数据隔离；恢复码由你保管。</p></div>
+                <div class="security-card" data-reveal><span class="security-icon"><svg><use href="#i-spark"/></svg></span><h3>AI 边界</h3><p>锁定笔记与密码库不进入 AI 上下文，写操作先确认，拒绝后不执行。</p></div>
+            </div>
+        </section>
+
+        <section id="download" class="section download-section">
+            <div class="download-card" data-reveal>
+                <div class="download-copy">
+                    <div class="eyebrow">GET WORKPLAN</div>
+                    <h2>把今天，<span class="gradient-text">收好。</span></h2>
+                    <p>选择你的设备开始。数据可以在本地使用，也可以开启加密同步在设备之间流转。</p>
+                    <div class="download-actions">
+                        <a class="btn btn-dark" href="https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/latest" target="_blank" rel="noreferrer"><svg><use href="#i-windows"/></svg> Windows 安装包</a>
+                        <a class="btn btn-ghost" href="https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/latest" target="_blank" rel="noreferrer"><svg><use href="#i-android"/></svg> Android</a>
+                        <a class="btn btn-ghost" href="https://github.com/MakotoArai-CN/WorkPlan-with-AI" target="_blank" rel="noreferrer"><svg><use href="#i-globe"/></svg> Web / 源码</a>
+                    </div>
+                    <small class="download-note">Windows 安装包与 Android 构建均发布在 GitHub Releases；Web 版可从源码构建，保留任务、笔记、统计、密码库与 AI 对话能力，本地文件授权与系统级能力仅在客户端可用。</small>
+                </div>
+                <div class="download-mark"><span><svg><use href="#i-check"/></svg></span><strong>WorkPlan<br/>Cloud</strong><small>v0.4.1</small></div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-brand"><span class="brand-mark small"><svg><use href="#i-check"/></svg></span><strong>WorkPlan Cloud</strong></div>
+        <div class="footer-links">
+            <a href="#features">功能</a><a href="#security">安全</a><a href="https://github.com/MakotoArai-CN/WorkPlan-with-AI" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases" target="_blank" rel="noreferrer">Releases</a>
+        </div>
+        <div class="footer-copy">© 2026 WorkPlan Cloud · 本地优先的个人工作台</div>
+    </footer>
+
+    <script src="./main.js"></script>
+</body>
+</html>

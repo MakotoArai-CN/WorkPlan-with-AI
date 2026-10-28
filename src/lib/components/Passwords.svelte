@@ -18,6 +18,7 @@
     } from "../utils/device-auth.js";
     import { exportToCSV, exportToEncryptedJSON } from "../utils/export.js";
     import { onMount, onDestroy, tick } from "svelte";
+    import { fly } from "svelte/transition";
     import CryptoJS from "crypto-js";
     import { _ } from 'svelte-i18n';
     import { get as getI18n } from 'svelte/store';
@@ -122,12 +123,30 @@ let confirmNewMasterPassword = "";
         includeSymbols: true,
     };
 
+    function reopenPasswordUnlock() {
+        if ($isPasswordsUnlocked || showUnlockModal) return;
+        if (!passwordsStore.hasMasterPassword()) {
+            showSetupModal = true;
+            return;
+        }
+        unlockMode = pinEnabled ? "pin" : "password";
+        showUnlockModal = true;
+        tick().then(() => unlockPasswordInput?.focus());
+    }
+
+    function handlePasswordSurfaceClick(event) {
+        if (event.target?.closest?.('[role="dialog"]')) return;
+        reopenPasswordUnlock();
+    }
+
     onMount(() => {
         isMobile = window.innerWidth < 768;
         const resizeHandler = () => {
             isMobile = window.innerWidth < 768;
         };
+        const reopenHandler = () => reopenPasswordUnlock();
         window.addEventListener("resize", resizeHandler);
+        window.addEventListener('workplan:passwords-entry', reopenHandler);
 
         passwordsStore.load();
 
@@ -161,6 +180,7 @@ let confirmNewMasterPassword = "";
 
         return () => {
             window.removeEventListener("resize", resizeHandler);
+            window.removeEventListener('workplan:passwords-entry', reopenHandler);
         };
     });
 
@@ -794,6 +814,12 @@ async function handleChangeMasterPassword() {
     }
 }
 
+    function menuMotionDuration() {
+        if (typeof document !== 'undefined' && document.documentElement.classList.contains('reduce-animations')) return 0;
+        if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 0;
+        return 150;
+    }
+
     function toggleExportMenu(event) {
         event?.stopPropagation();
         showExportMenu = !showExportMenu;
@@ -1230,7 +1256,7 @@ async function handleChangeMasterPassword() {
     class="hidden"
 />
 
-<div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50">
+<div class="flex flex-col h-screen md:h-full overflow-hidden bg-slate-50" on:click={handlePasswordSurfaceClick} role="presentation">
     <header
         class="h-14 md:h-16 bg-white/90 backdrop-blur px-4 md:px-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0"
     >
@@ -1294,7 +1320,8 @@ async function handleChangeMasterPassword() {
                     </button>
                     {#if showExportMenu}
                         <div
-                            class="export-menu-dropdown absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[150px]"
+                            class="export-menu-dropdown absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[150px] origin-top-right"
+                            transition:fly={{ y: -5, duration: menuMotionDuration(), opacity: 0.4 }}
                         >
                             <button
                                 on:click={toggleSelectMode}
@@ -1713,7 +1740,7 @@ async function handleChangeMasterPassword() {
     {/if}
 </div>
 
-<AnimatedModal show={showImportPasswordModal} onClose={() => (showImportPasswordModal = false)} zIndex={50} panelClass="max-w-md password-panel">
+<AnimatedModal show={showImportPasswordModal} onClose={() => (showImportPasswordModal = false)} zIndex={50} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
@@ -1750,7 +1777,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showExportModal} onClose={() => (showExportModal = false)} zIndex={50} panelClass="max-w-md password-panel">
+<AnimatedModal show={showExportModal} onClose={() => (showExportModal = false)} zIndex={50} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
@@ -1795,7 +1822,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showSetupModal} onClose={() => (showSetupModal = false)} zIndex={50} panelClass="max-w-md password-panel">
+<AnimatedModal show={showSetupModal} onClose={() => (showSetupModal = false)} zIndex={50} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
@@ -1846,13 +1873,25 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showUnlockModal} onClose={() => (showUnlockModal = false)} zIndex={50} panelClass="max-w-md password-panel">
+<AnimatedModal show={showUnlockModal} onClose={() => (showUnlockModal = false)} zIndex={50} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
-            <h3
-                class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
-            >
-                <i class="ph-fill ph-lock text-amber-600"></i> {$_('passwords.unlock_title')}
-            </h3>
+            <div class="mb-5 flex items-start gap-3">
+                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-lg shadow-amber-500/20">
+                    <i class="ph-fill ph-lock-key text-xl"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                    <h3 class="text-lg font-black tracking-tight text-slate-800 dark:text-slate-100">
+                        {$_('passwords.unlock_title')}
+                    </h3>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {$_('passwords.subtitle')}
+                    </p>
+                </div>
+                <button on:click={() => (showUnlockModal = false)} aria-label={$_('common.close')}
+                    class="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
             {#if unlockMode === "pin" && pinEnabled}
                 <div class="space-y-3">
                     <div>
@@ -1953,7 +1992,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showRecoveryCodeModal} onClose={() => (showRecoveryCodeModal = false)} zIndex={60} panelClass="max-w-md password-panel">
+<AnimatedModal show={showRecoveryCodeModal} onClose={() => (showRecoveryCodeModal = false)} zIndex={60} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-key text-emerald-600"></i>
@@ -1988,7 +2027,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showPinSetupModal} onClose={() => (showPinSetupModal = false)} zIndex={60} panelClass="max-w-md password-panel">
+<AnimatedModal show={showPinSetupModal} onClose={() => (showPinSetupModal = false)} zIndex={60} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-number-square-four text-amber-600"></i>
@@ -2033,7 +2072,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showBiometricSetupModal} onClose={() => (showBiometricSetupModal = false)} zIndex={60} panelClass="max-w-md password-panel">
+<AnimatedModal show={showBiometricSetupModal} onClose={() => (showBiometricSetupModal = false)} zIndex={60} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-fingerprint text-teal-600"></i>
@@ -2075,7 +2114,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showRecoverModal} onClose={() => (showRecoverModal = false)} zIndex={60} panelClass="max-w-md password-panel">
+<AnimatedModal show={showRecoverModal} onClose={() => (showRecoverModal = false)} zIndex={60} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3 class="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
                 <i class="ph-fill ph-lifebuoy text-emerald-600"></i>
@@ -2114,7 +2153,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showAddModal} onClose={() => (showAddModal = false)} zIndex={50} panelClass="max-w-lg password-panel">
+<AnimatedModal show={showAddModal} onClose={() => (showAddModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.new_title')}</h3>
             <div class="space-y-3">
@@ -2229,7 +2268,7 @@ async function handleChangeMasterPassword() {
             </div>
 </AnimatedModal>
 
-<AnimatedModal show={showEditModal && editingPassword} onClose={() => (showEditModal = false)} zIndex={50} panelClass="max-w-lg password-panel">
+<AnimatedModal show={showEditModal && editingPassword} onClose={() => (showEditModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.edit_title')}</h3>
             <div class="space-y-3">
@@ -2341,7 +2380,7 @@ async function handleChangeMasterPassword() {
             </div>
 </AnimatedModal>
 
-<AnimatedModal show={showChangeMasterPasswordModal} onClose={() => (showChangeMasterPasswordModal = false)} zIndex={60} panelClass="max-w-md password-panel">
+<AnimatedModal show={showChangeMasterPasswordModal} onClose={() => (showChangeMasterPasswordModal = false)} zIndex={60} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
@@ -2487,5 +2526,32 @@ async function handleChangeMasterPassword() {
 
     :global(.dark .password-panel .text-slate-600) {
         color: #cbd5e1;
+    }
+
+    .password-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.75rem;
+        align-items: stretch;
+    }
+
+    .password-card {
+        min-width: 0;
+        animation: password-card-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    @media (min-width: 768px) {
+        .password-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (min-width: 1280px) {
+        .password-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (min-width: 1680px) {
+        .password-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+
+    @keyframes password-card-in {
+        from { opacity: 0; transform: translateY(8px) scale(0.985); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
     }
 </style>
