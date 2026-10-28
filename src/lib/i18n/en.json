@@ -984,7 +984,9 @@
         "export_excel_year": "Export Excel (this year)",
         "export_excel_all": "Export Excel (all)",
         "ai_locked": "Hidden from AI",
-        "ai_locked_hint": "The AI cannot read or modify this record"
+        "ai_locked_hint": "The AI cannot read or modify this record",
+        "layout_list": "List",
+        "layout_calendar": "Calendar"
     },
     "leave": {
         "title": "Leave records",
@@ -1121,5 +1123,46 @@
         "copy_failed": "Copy failed",
         "empty": "The AI returned no content",
         "ai_unavailable": "This AI provider needs an API key; configure it in AI settings first"
+    },
+    "payroll": {
+        "settings_title": "Salary & payday settings",
+        "settings_desc": "Calculate from salary components and your payday, not one fixed monthly number",
+        "settings": "Salary settings",
+        "current_cycle": "Current pay cycle",
+        "payday": "Payday",
+        "cycle_mode": "Cycle mode",
+        "cycle_payday": "Payday-based (recommended)",
+        "cycle_calendar": "Calendar month",
+        "workdays": "Paid days per month",
+        "hours_per_day": "Hours per day",
+        "overtime_base_mode": "Overtime base",
+        "base_mode_base": "Only checked components (base)",
+        "base_mode_total": "All fixed pay",
+        "leave_deduction_mode": "Leave deduction base",
+        "leave_fixed": "Total fixed pay",
+        "leave_base": "Overtime base",
+        "components": "Salary components",
+        "components_desc": "Enter base, performance, allowances separately; checked items count toward overtime base",
+        "load_template": "Load common template",
+        "add_component": "Add item",
+        "component_name": "Item name",
+        "in_overtime_base": "Overtime base",
+        "no_components": "No salary components yet",
+        "total_hint": "Total fixed pay",
+        "fixed_salary": "Fixed pay",
+        "overtime_pay": "Overtime pay",
+        "leave_deduction": "Leave deduction",
+        "estimated": "Estimated pay",
+        "hourly_base": "Overtime base",
+        "unpaid_days": "Unpaid leave",
+        "last_cycle_actual": "Last cycle actual",
+        "actual_placeholder": "Enter actual paid",
+        "previous_estimated": "Previous estimate",
+        "difference": "Difference",
+        "hourly_rate": "Hourly rate"
+    },
+    "date_picker": {
+        "placeholder": "Select date",
+        "today": "Today"
     }
 }

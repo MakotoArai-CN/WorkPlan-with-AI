@@ -7,10 +7,14 @@
     import WorklogExportModal from './WorklogExportModal.svelte';
     import CareerAnalysis from './CareerAnalysis.svelte';
     import { getLeaveYearSummary, getMonthSummary, getYearSummary } from '../utils/overtime.js';
+    import { tick } from 'svelte';
 
     let activeTab = 'overtime';
     let showExport = false;
     let showCareer = false;
+    let showAddMenu = false;
+    let overtimeRef;
+    let leaveRef;
 
     $: config = { ...($settingsStore.overtimeConfig || {}) };
     $: year = new Date().getFullYear();
@@ -33,6 +37,14 @@
         taskDone: tasks.filter(task => task.status === 'done' || task.completedDate).length,
         scheduledCount: ($taskStore.scheduledTasks || []).length
     };
+
+    async function addRecord(type) {
+        activeTab = type;
+        showAddMenu = false;
+        await tick();
+        const target = type === 'leave' ? leaveRef : overtimeRef;
+        target?.openCreate();
+    }
 
     function switchTab(tab) {
         activeTab = tab;
@@ -76,6 +88,10 @@
                     <i class="ph ph-sparkle"></i>
                     <span class="hidden sm:inline">{$_('career.entry')}</span>
                 </button>
+                <button on:click={() => (showAddMenu = true)}
+                    class="h-9 px-4 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2">
+                    <i class="ph-bold ph-plus"></i> {$_('common.new')}
+                </button>
                 <button on:click={() => showExport = true}
                     class="h-9 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
                     <i class="ph ph-download-simple"></i>
@@ -87,12 +103,37 @@
 
     <div class="flex-1 min-h-0 overflow-hidden">
         {#if activeTab === 'overtime'}
-            <Overtime embedded />
+            <Overtime bind:this={overtimeRef} embedded />
         {:else}
-            <Leave embedded />
+            <Leave bind:this={leaveRef} embedded />
         {/if}
     </div>
 </div>
+
+{#if showAddMenu}
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" on:click={() => (showAddMenu = false)}
+            on:keydown={(event) => event.key === 'Escape' && (showAddMenu = false)} role="button" tabindex="0"></div>
+        <div class="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm p-5">
+            <div class="flex items-center justify-between mb-4">
+                <div class="font-bold text-slate-800 dark:text-slate-100">{$_('common.new')}</div>
+                <button on:click={() => (showAddMenu = false)} aria-label={$_('common.cancel')}><i class="ph ph-x"></i></button>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <button on:click={() => addRecord('overtime')}
+                    class="rounded-xl border border-orange-200 bg-orange-50 p-4 text-left hover:bg-orange-100">
+                    <i class="ph ph-clock-afternoon text-2xl text-orange-500"></i>
+                    <div class="mt-2 text-sm font-bold text-orange-700">{$_('worklog.kind_overtime')}</div>
+                </button>
+                <button on:click={() => addRecord('leave')}
+                    class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-left hover:bg-rose-100">
+                    <i class="ph ph-calendar-check text-2xl text-rose-500"></i>
+                    <div class="mt-2 text-sm font-bold text-rose-700">{$_('worklog.kind_leave')}</div>
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
 
 <CareerAnalysis
     bind:show={showCareer}

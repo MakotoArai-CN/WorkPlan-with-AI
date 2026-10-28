@@ -984,7 +984,9 @@
         "export_excel_year": "Excel（今年）",
         "export_excel_all": "Excel（すべて）",
         "ai_locked": "AI アクセス不可",
-        "ai_locked_hint": "AI はこの記録を読取・変更できません"
+        "ai_locked_hint": "AI はこの記録を読取・変更できません",
+        "layout_list": "リスト",
+        "layout_calendar": "カレンダー"
     },
     "leave": {
         "title": "休暇記録",
@@ -1121,5 +1123,46 @@
         "copy_failed": "コピー失敗",
         "empty": "AI の応答が空です",
         "ai_unavailable": "この AI サービスには API キーが必要です。AI 設定で構成してください"
+    },
+    "payroll": {
+        "settings_title": "給与・支払日設定",
+        "settings_desc": "固定月給ではなく、給与構成と支払日から計算します",
+        "settings": "給与設定",
+        "current_cycle": "現在の給与期間",
+        "payday": "支払日",
+        "cycle_mode": "期間モード",
+        "cycle_payday": "支払日基準（推奨）",
+        "cycle_calendar": "暦月",
+        "workdays": "月間所定日数",
+        "hours_per_day": "1日の労働時間",
+        "overtime_base_mode": "残業基礎",
+        "base_mode_base": "チェックした項目のみ（基本給）",
+        "base_mode_total": "固定給全体",
+        "leave_deduction_mode": "休暇控除の基礎",
+        "leave_fixed": "固定給合計",
+        "leave_base": "残業基礎",
+        "components": "給与構成",
+        "components_desc": "基本給・業績・手当などを個別に入力。チェックした項目が残業基礎になります",
+        "load_template": "一般テンプレートを読込",
+        "add_component": "項目追加",
+        "component_name": "項目名",
+        "in_overtime_base": "残業基礎に含める",
+        "no_components": "給与項目がありません",
+        "total_hint": "固定給合計",
+        "fixed_salary": "固定給",
+        "overtime_pay": "残業代",
+        "leave_deduction": "休暇控除",
+        "estimated": "見込み額",
+        "hourly_base": "残業基礎",
+        "unpaid_days": "無給休暇",
+        "last_cycle_actual": "前回の実払額",
+        "actual_placeholder": "実払額を入力",
+        "previous_estimated": "前回見込み",
+        "difference": "差額",
+        "hourly_rate": "時給"
+    },
+    "date_picker": {
+        "placeholder": "日付を選択",
+        "today": "今日"
     }
 }
