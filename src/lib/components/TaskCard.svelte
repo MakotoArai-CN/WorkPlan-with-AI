@@ -11,6 +11,11 @@
     export let onSelect;
 
     $: isOverdue = task.deadline && task.deadline < formatLocalDateTime(new Date());
+    $: statusOptions = [
+        { value: 'todo', label: $_('task_status.todo') },
+        { value: 'doing', label: $_('task_status.doing') },
+        { value: 'done', label: $_('task_status.done') }
+    ];
     $: priorityOptions = [
         { value: 'normal', label: $_('task_priority.normal'), icon: 'ph-fill ph-flag' },
         { value: 'urgent', label: $_('task_priority.urgent'), icon: 'ph-fill ph-flag' },
@@ -151,22 +156,10 @@
                 buttonClass={`w-full px-1 md:px-2 py-1.5 rounded-lg text-xs font-bold border bg-white dark:bg-slate-900 flex items-center justify-between gap-1 ${getPriorityStyle(task.priority)}`} />
         </div>
 
-        <div class="relative w-16 md:w-28 shrink-0">
-            <select value={task.status} on:change={updateStatus} on:click|stopPropagation
-                class="w-full appearance-none px-1 md:pl-7 md:pr-2 py-1.5 rounded-lg text-xs font-bold border bg-white focus:outline-none text-center md:text-left {getStatusStyle(task.status)}">
-                <option value="todo">{$_('task_status.todo')}</option>
-                <option value="doing">{$_('task_status.doing')}</option>
-                <option value="done">{$_('task_status.done')}</option>
-            </select>
-            <div class="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none hidden md:block">
-                {#if task.status === 'todo'}
-                    <i class="ph ph-circle text-slate-400"></i>
-                {:else if task.status === 'doing'}
-                    <i class="ph ph-spinner animate-spin text-blue-600"></i>
-                {:else}
-                    <i class="ph ph-check-circle text-green-600"></i>
-                {/if}
-            </div>
+        <div class="w-16 md:w-28 shrink-0" on:click|stopPropagation role="presentation">
+            <SelectMenu value={task.status} options={statusOptions}
+                onchange={(value) => taskStore.updateTask(task.id, { status: value })}
+                buttonClass={`w-full px-1 md:px-2 py-1.5 rounded-lg text-xs font-bold border bg-white dark:bg-slate-900 flex items-center justify-between gap-1 ${getStatusStyle(task.status)}`} />
         </div>
 
         <div class="flex-1 w-0 min-w-0 font-bold text-slate-800 text-sm flex items-center gap-2">

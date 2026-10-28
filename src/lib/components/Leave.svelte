@@ -8,6 +8,7 @@
     import DatePicker from './DatePicker.svelte';
     import AnimatedModal from './AnimatedModal.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
+    import SelectMenu from './SelectMenu.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
@@ -66,6 +67,15 @@
         month: index + 1,
         summary: getLeaveMonthSummary(leaveRecords, cursorYear, index + 1, config)
     }));
+    $: unitOptions = [
+        { value: 'day', label: $_('leave.unit_day') },
+        { value: 'hour', label: $_('leave.unit_hour') }
+    ];
+    $: leaveTypeOptions = LEAVE_TYPES.map(type => ({ value: type, label: $_('leave.type_' + type) }));
+    $: paidOptions = [
+        { value: true, label: $_('leave.paid') },
+        { value: false, label: $_('leave.unpaid') }
+    ];
     $: viewOptions = [
         { value: 'year', label: $_('leave.view_year') },
         { value: 'month', label: $_('leave.view_month') },
@@ -505,11 +515,7 @@
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.unit')}</span>
-                        <select bind:value={form.unit} on:change={changeUnit}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
-                            <option value="day">{$_('leave.unit_day')}</option>
-                            <option value="hour">{$_('leave.unit_hour')}</option>
-                        </select>
+                        <SelectMenu bind:value={form.unit} options={unitOptions} onchange={changeUnit} />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.duration')}</span>
@@ -518,20 +524,11 @@
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.type')}</span>
-                        <select bind:value={form.type}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
-                            {#each LEAVE_TYPES as type}
-                                <option value={type}>{$_('leave.type_' + type)}</option>
-                            {/each}
-                        </select>
+                        <SelectMenu bind:value={form.type} options={leaveTypeOptions} />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.paid')}</span>
-                        <select bind:value={form.paid}
-                            class="border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200">
-                            <option value={true}>{$_('leave.paid')}</option>
-                            <option value={false}>{$_('leave.unpaid')}</option>
-                        </select>
+                        <SelectMenu bind:value={form.paid} options={paidOptions} />
                     </label>
                     <label class="col-span-2 flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('leave.note')}</span>
