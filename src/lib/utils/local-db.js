@@ -12,8 +12,11 @@ let mirroring = false;
 let hydrating = false;
 let timer = null;
 let installed = false;
+let memoryMode = false;
+let memoryKeys = new Map();
 
 function collectKeys() {
+    if (memoryMode) return Object.fromEntries(memoryKeys.entries());
     const keys = {};
     if (typeof localStorage === 'undefined') return keys;
     for (let index = 0; index < localStorage.length; index += 1) {
@@ -75,26 +78,65 @@ function scheduleMirror() {
     }, 700);
 }
 
+function activateMemoryStorage() {
+    if (memoryMode || typeof localStorage === 'undefined') return;
+    memoryKeys = new Map();
+    for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (!key || !key.startsWith(PREFIX) || EXCLUDED.has(key)) continue;
+        const value = localStorage.getItem(key);
+        if (typeof value === 'string') memoryKeys.set(key, value);
+    }
+    memoryMode = true;
+    // The in-memory map is now the source of truth. Remove business data from
+    // WebView storage so it is not duplicated on disk.
+    const keys = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key && key.startsWith(PREFIX) && !EXCLUDED.has(key)) keys.push(key);
+    }
+    for (const key of keys) localStorage.removeItem(key);
+}
+
 export function installLocalDatabaseMirror() {
     if (!isTauriRuntime || installed || typeof localStorage === 'undefined') return;
+    activateMemoryStorage();
     installed = true;
-    mirroring = true;
     const originalSet = Storage.prototype.setItem;
+    const originalGet = Storage.prototype.getItem;
     const originalRemove = Storage.prototype.removeItem;
     const originalClear = Storage.prototype.clear;
+    const isLocal = (self) => self === window.localStorage;
+    Storage.prototype.getItem = function (key) {
+        if (isLocal(this) && String(key).startsWith(PREFIX) && !EXCLUDED.has(key)) {
+            return memoryKeys.has(String(key)) ? memoryKeys.get(String(key)) : null;
+        }
+        return originalGet.call(this, key);
+    };
     Storage.prototype.setItem = function (key, value) {
-        originalSet.call(this, key, value);
-        if (String(key).startsWith(PREFIX) && key !== MARKER_KEY) scheduleMirror();
+        if (isLocal(this) && String(key).startsWith(PREFIX) && key !== MARKER_KEY) {
+            memoryKeys.set(String(key), String(value));
+            scheduleMirror();
+            return;
+        }
+        return originalSet.call(this, key, value);
     };
     Storage.prototype.removeItem = function (key) {
-        originalRemove.call(this, key);
-        if (String(key).startsWith(PREFIX) && key !== MARKER_KEY) scheduleMirror();
+        if (isLocal(this) && String(key).startsWith(PREFIX) && key !== MARKER_KEY) {
+            memoryKeys.delete(String(key));
+            scheduleMirror();
+            return;
+        }
+        return originalRemove.call(this, key);
     };
     Storage.prototype.clear = function () {
-        originalClear.call(this);
-        scheduleMirror();
+        if (isLocal(this)) {
+            memoryKeys.clear();
+            scheduleMirror();
+            return;
+        }
+        return originalClear.call(this);
     };
-    mirroring = false;
 }
 
 /**
@@ -128,11 +170,11 @@ export async function initLocalDatabase() {
             const applied = applyKeys(snapshot.keys);
             localStorage.setItem(MARKER_KEY, String(dbSaved));
             if (applied > 0) {
-                const alreadyReloaded = sessionStorage.getItem(HYDRATED_FLAG) === '1';
-                if (!alreadyReloaded) {
-                    sessionStorage.setItem(HYDRATED_FLAG, '1');
-                    return { supported: true, migrated: false, reloaded: true, applied };
-                }
+                // Stores have not read the database yet; one reload lets them
+                // initialize from it. The next pass activates memory storage and
+                // removes the duplicated WebView copy.
+                sessionStorage.setItem(HYDRATED_FLAG, '1');
+                return { supported: true, migrated: false, reloaded: true, applied };
             }
         }
         return { supported: true, migrated: false, reloaded: false, applied: 0 };
