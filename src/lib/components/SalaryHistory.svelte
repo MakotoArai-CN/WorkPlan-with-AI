@@ -71,6 +71,17 @@
     $: selectedCount = previewRows.filter(item => selected[item.key]).length;
     $: allSelected = previewRows.length > 0 && selectedCount === previewRows.length;
 
+    $: trendRows = yearActuals.slice().reverse();
+    $: trendValues = trendRows.map(item => Number(item.amount) || 0);
+    $: trendMin = trendValues.length ? Math.min(...trendValues) : 0;
+    $: trendMax = trendValues.length ? Math.max(...trendValues) : 0;
+    $: trendRange = Math.max(1, trendMax - trendMin);
+    $: trendPoints = trendRows.map((item, index) => {
+        const x = trendRows.length <= 1 ? 300 : 20 + index * (560 / (trendRows.length - 1));
+        const y = 92 - ((Number(item.amount) || 0) - trendMin) / trendRange * 70;
+        return `${x},${y}`;
+    }).join(' ');
+
     function money(value) {
         return new Intl.NumberFormat('zh-CN', {
             style: 'currency',
@@ -278,7 +289,7 @@
                                 <div class="text-xs font-bold text-slate-400">{annual.year}</div>
                             {/if}
                         </div>
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
                             <div class="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-3">
                                 <div class="text-[10px] text-emerald-700 dark:text-emerald-300">{$_('payroll.annual_net')}</div>
                                 <div class="text-base font-black text-emerald-700 dark:text-emerald-300 mt-1">{money(annual.totalNet)}</div>
@@ -293,10 +304,58 @@
                                 <div class="text-base font-black text-slate-800 dark:text-slate-100 mt-1">{money(annual.averageNet)}</div>
                             </div>
                             <div class="rounded-xl bg-sky-50 dark:bg-sky-900/20 p-3">
-                                <div class="text-[10px] text-sky-700 dark:text-sky-300">{$_('payroll.social_insurance')}</div>
+                                <div class="text-[10px] text-sky-700 dark:text-sky-300">
+                                    {annual.socialPaidBySelf ? $_('payroll.self_social') : $_('payroll.social_insurance')}
+                                </div>
                                 <div class="text-base font-black text-sky-700 dark:text-sky-300 mt-1">{money(annual.totalSocial)}</div>
                             </div>
+                            {#if annual.socialPaidBySelf}
+                                <div class="rounded-xl bg-indigo-50 dark:bg-indigo-900/20 p-3">
+                                    <div class="text-[10px] text-indigo-700 dark:text-indigo-300">{$_('payroll.disposable_income')}</div>
+                                    <div class="text-base font-black text-indigo-700 dark:text-indigo-300 mt-1">{money(annual.totalDisposable)}</div>
+                                    <div class="text-[9px] text-indigo-600/70 mt-0.5">{$_('payroll.self_social')}: {money(annual.totalSelfSocial)}</div>
+                                </div>
+                            {/if}
                         </div>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 p-3.5">
+                        <div class="flex items-center justify-between gap-2">
+                            <div>
+                                <div class="text-sm font-bold text-slate-700 dark:text-slate-200">{$_('salary_history.trend_title')}</div>
+                                <div class="text-[9px] text-slate-400 mt-0.5">{$_('salary_history.trend_desc')} · {selectedYear}</div>
+                            </div>
+                            {#if trendRows.length > 1}
+                                <div class="text-right">
+                                    <div class="text-[9px] text-slate-400">{$_('salary_history.highest')}</div>
+                                    <div class="text-xs font-black text-emerald-600">{money(trendMax)}</div>
+                                </div>
+                            {/if}
+                        </div>
+                        {#if trendRows.length > 1}
+                            <svg viewBox="0 0 600 112" class="mt-2 w-full h-28" role="img" aria-label={$_('salary_history.trend_title')}>
+                                <defs>
+                                    <linearGradient id="salaryTrendFill" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#f97316" stop-opacity="0.18" />
+                                        <stop offset="100%" stop-color="#f97316" stop-opacity="0" />
+                                    </linearGradient>
+                                </defs>
+                                <polyline points={`${trendPoints} 580,104 20,104`} fill="url(#salaryTrendFill)" stroke="none" />
+                                <polyline points={trendPoints} fill="none" stroke="#f97316" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+                                {#each trendRows as item, index}
+                                    {@const point = trendPoints.split(' ')[index].split(',')}
+                                    <circle cx={point[0]} cy={point[1]} r="3.2" fill="#fff" stroke="#f97316" stroke-width="2">
+                                        <title>{item.periodEnd} · {money(item.amount)}</title>
+                                    </circle>
+                                {/each}
+                            </svg>
+                            <div class="flex justify-between text-[9px] text-slate-400">
+                                <span>{trendRows[0]?.periodEnd || ''}</span>
+                                <span>{trendRows.at(-1)?.periodEnd || ''}</span>
+                            </div>
+                        {:else}
+                            <div class="py-6 text-center text-[10px] text-slate-400">{$_('salary_history.trend_empty')}</div>
+                        {/if}
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">

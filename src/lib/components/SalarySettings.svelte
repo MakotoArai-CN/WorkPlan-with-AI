@@ -16,6 +16,7 @@
     let leaveDeductionMode = 'fixed';
     let workdaysPerMonth = 21.75;
     let hoursPerDay = 8;
+    let socialPaidBySelf = false;
     let initialized = false;
 
     $: if (show && !initialized) {
@@ -27,6 +28,7 @@
         leaveDeductionMode = normalized.leaveDeductionMode;
         workdaysPerMonth = normalized.workdaysPerMonth;
         hoursPerDay = normalized.hoursPerDay;
+        socialPaidBySelf = normalized.socialPaidBySelf === true;
         initialized = true;
     }
     $: cycleModeOptions = [
@@ -92,6 +94,7 @@
             leaveDeductionMode,
             workdaysPerMonth,
             hoursPerDay,
+            socialPaidBySelf,
             salaryComponents: cleaned,
             salaryActuals: config.salaryActuals || []
         });
@@ -142,6 +145,15 @@
                         <SelectMenu bind:value={leaveDeductionMode} options={leaveDeductionOptions} className="w-full" />
                     </label>
                 </div>
+
+                <label class="flex items-start gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 px-3 py-2 cursor-pointer">
+                    <input type="checkbox" bind:checked={socialPaidBySelf}
+                        class="mt-0.5 rounded border-slate-300 text-sky-500 focus:ring-sky-400" />
+                    <span>
+                        <span class="block text-[11px] font-bold text-slate-700 dark:text-slate-200">{$_('payroll.social_self_pay')}</span>
+                        <span class="block text-[9px] text-slate-500 mt-0.5">{$_('payroll.social_self_pay_hint')}</span>
+                    </span>
+                </label>
 
                 <div class="rounded-xl border border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-900/10 px-3 py-2 text-[10px] leading-relaxed text-amber-800 dark:text-amber-200">
                     <i class="ph-fill ph-info mr-1"></i>
