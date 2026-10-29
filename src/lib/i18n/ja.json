@@ -1056,7 +1056,9 @@
     "month_actual_cleared": "計算式の概算に戻しました",
     "month_actual_banner": "今月の残業代は実際の {amount} で確定しています。下の各明細は計算式の概算です。",
     "formula_learned": "学習した時給 {rate}（実際 {samples} か月分）",
-    "formula_multiplier": "標準時給の約 {value} 倍"
+    "formula_multiplier": "標準時給の約 {value} 倍",
+    "formula_learned_short": "学習値 · {samples} か月",
+    "formula_standard_short": "標準計算時給"
   },
   "leave": {
     "title": "休暇記録",

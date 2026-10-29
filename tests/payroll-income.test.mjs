@@ -179,6 +179,15 @@ describe('salary actuals and annual income', () => {
         expect(income.averageNet).toBe(4313);
     });
 
+    test('does not double-count an override when the salary slip cycle overlaps the month', () => {
+        const income = getAnnualIncome({
+            ...config,
+            overtimeMonthlyActuals: [{ month: '2026-09', amount: 213 }]
+        }, [], 2026);
+        expect(income.totalOvertime).toBe(213);
+        expect(income.overtimeOverrides).toBe(0);
+    });
+
     test('annual overtime includes a monthly override when the salary slip has none', () => {
         const noSlipOvertime = {
             ...config,

@@ -1056,7 +1056,9 @@
     "month_actual_cleared": "Restored the formula estimate",
     "month_actual_banner": "This month uses actual overtime {amount}; per-record amounts below are formula estimates for reference.",
     "formula_learned": "Learned rate {rate} (based on {samples} actual months)",
-    "formula_multiplier": "about {value}× the standard rate"
+    "formula_multiplier": "about {value}× the standard rate",
+    "formula_learned_short": "Learned · {samples} mo",
+    "formula_standard_short": "Standard formula rate"
   },
   "leave": {
     "title": "Leave records",
