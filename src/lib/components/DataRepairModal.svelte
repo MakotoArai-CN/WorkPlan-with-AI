@@ -34,11 +34,11 @@
         busy = true;
         error = '';
         try {
-            const defaultName = `WorkPlan-LocalDB-${new Date().toISOString().slice(0, 10)}.json`;
+            const defaultName = `WorkPlan-LocalDB-${new Date().toISOString().slice(0, 10)}.wpb`;
             const destination = await save({
                 title: '导出本地数据库备份',
                 defaultPath: defaultName,
-                filters: [{ name: 'WorkPlan Database', extensions: ['json'] }]
+                filters: [{ name: 'WorkPlan Database', extensions: ['wpb'] }]
             });
             if (!destination) return;
             const path = await exportLocalDatabase(destination);
@@ -58,7 +58,7 @@
             const selected = await open({
                 title: '选择本地数据库备份',
                 multiple: false,
-                filters: [{ name: 'WorkPlan Database', extensions: ['json'] }]
+                filters: [{ name: 'WorkPlan Database', extensions: ['wpb', 'json'] }]
             });
             if (!selected) return;
             const confirmed = await showConfirm({
@@ -95,8 +95,8 @@
             <div>
                 <h3 class="text-lg font-black text-slate-800 dark:text-slate-100">数据修复工具</h3>
                 <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                    本地数据库位于用户目录的隐藏文件夹 <code class="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-700">.workplan</code>，
-                    每次保存前会自动保留备份。
+                    本地加密数据库位于用户目录的隐藏文件夹 <code class="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-700">.workplan</code>，
+                    使用 sled + zstd 压缩 + AES-GCM 加密，每次保存前自动保留备份。
                 </p>
             </div>
             <button on:click={onClose} aria-label="关闭" class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
