@@ -29,7 +29,10 @@ export default {
         csp: {
             mode: 'hash',
             directives: {
-                'script-src': ['self']
+                'script-src': ['self'],
+                // PDF.js runs in a Blob worker built from the bundled worker
+                // source; worker-src overrides the script-src fallback.
+                'worker-src': ['self', 'blob:']
             }
         }
     },

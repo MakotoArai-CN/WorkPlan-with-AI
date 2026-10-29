@@ -1270,8 +1270,8 @@
     "source_bank": "银行账单",
     "source_manual": "手动补录",
     "bank_title": "导入银行工资账单",
-    "bank_desc": "支持工商、农业、招商、建设、中国银行等 CSV 账单；选择文件和列映射后只导入勾选的工资流水",
-    "bank_file": "账单文件（CSV / TXT / XLSX）",
+    "bank_desc": "支持工商银行等账单；PDF 请先在右侧输入文件密码。",
+    "bank_file": "账单文件（CSV / Excel / PDF）",
     "encoding": "编码",
     "columns": "列",
     "bank_preset": "银行预设",
@@ -1297,6 +1297,13 @@
     "gross": "应发",
     "net": "实发",
     "monthly_records": "月度工资记录",
-    "slip_entry": "录入工资条"
+    "slip_entry": "录入工资条",
+    "pdf_password": "PDF 密码（仅 PDF）",
+    "pdf_password_hint": "银行文件密码",
+    "pdf_password_required": "请先输入 PDF 密码",
+    "pdf_password_wrong": "PDF 密码错误，无法打开文件",
+    "pdf_parse_failed": "PDF 解析失败，请确认是工商银行历史明细 PDF",
+    "pdf_empty": "PDF 中没有识别到交易记录",
+    "pdf_parsing": "正在解析 PDF，95 页可能需要几秒…"
   }
 }
