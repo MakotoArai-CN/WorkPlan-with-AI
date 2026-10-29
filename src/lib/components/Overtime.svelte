@@ -14,6 +14,7 @@
     import SelectMenu from './SelectMenu.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import WorklogDetailCard from './WorklogDetailCard.svelte';
+    import WorklogCalendar from './WorklogCalendar.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
     import { formatLocalDate } from '../utils/datetime.js';
@@ -132,6 +133,20 @@
             total: Math.round(items.reduce((sum, item) => sum + item.amount, 0) * 100) / 100
         };
     })();
+
+    $: calendarDays = calendarCells.map(day => {
+        if (!day) return null;
+        const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayRecords = monthRecordsByDay.get(dayKey) || [];
+        const dayHours = dayRecords.reduce((sum, record) => sum + record.hours, 0);
+        const dayPay = dayRecords.reduce((sum, record) => sum + getRecordPay(record, config), 0);
+        return {
+            day,
+            primary: dayRecords.length ? `${hours(dayHours)}` : '',
+            secondary: dayRecords.length ? money(dayPay) : '',
+            dots: dayRecords.map(record => record.type === 'holiday' ? 'bg-rose-500' : record.type === 'weekend' ? 'bg-orange-400' : 'bg-indigo-400')
+        };
+    });
 
     $: monthSummary = getMonthSummary(records, cursorYear, cursorMonth, config);
     $: yearSummary = getYearSummary(records, cursorYear, config);
@@ -627,43 +642,9 @@
                     editLabel={$_('overtime.edit_record')}
                     deleteLabel={$_('overtime.delete')}
                 >
-                    <div slot="calendar" class="p-3">
-                            <div class="grid grid-cols-7 gap-1 mb-1">
-                                {#each ['一', '二', '三', '四', '五', '六', '日'] as label}
-                                    <div class="h-7 flex items-center justify-center text-[10px] font-bold text-slate-400">{label}</div>
-                                {/each}
-                            </div>
-                            <div class="grid grid-cols-7 gap-1">
-                                {#each calendarCells as day}
-                                    {#if day}
-                                        {@const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
-                                        {@const dayRecords = monthRecordsByDay.get(dayKey) || []}
-                                        {@const dayHours = dayRecords.reduce((sum, record) => sum + record.hours, 0)}
-                                        {@const dayPay = dayRecords.reduce((sum, record) => sum + getRecordPay(record, config), 0)}
-                                        <button on:click={() => selectDay(day)}
-                                            class={`min-h-20 md:min-h-24 rounded-lg border p-1.5 text-left transition
-                                                ${dayRecords.length
-                                                    ? 'border-orange-200 bg-orange-50/70 dark:border-orange-800 dark:bg-orange-900/20'
-                                                    : 'border-slate-100 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-900/20 hover:border-orange-200'}`}>
-                                            <div class="text-[11px] font-black ${dayRecords.length ? 'text-orange-600' : 'text-slate-400'}">{day}</div>
-                                            {#if dayRecords.length}
-                                                <div class="mt-1 text-[9px] font-bold text-slate-600 dark:text-slate-300">{hours(dayHours)}</div>
-                                                <div class="text-[9px] text-orange-600 truncate">{money(dayPay)}</div>
-                                                <div class="mt-1 flex flex-wrap gap-0.5">
-                                                    {#each dayRecords.slice(0, 3) as record}
-                                                        <span class="w-1.5 h-1.5 rounded-full ${record.type === 'holiday' ? 'bg-rose-500' : record.type === 'weekend' ? 'bg-orange-400' : 'bg-indigo-400'}"></span>
-                                                    {/each}
-                                                </div>
-                                            {:else}
-                                                <div class="mt-2 text-[9px] text-slate-300 dark:text-slate-600">{$_('overtime.no_records')}</div>
-                                            {/if}
-                                        </button>
-                                    {:else}
-                                        <div></div>
-                                    {/if}
-                                {/each}
-                            </div>
-                        </div>
+                    <div slot="calendar">
+                        <WorklogCalendar days={calendarDays} onSelectDay={selectDay} />
+                    </div>
                 </WorklogDetailCard>
             {:else}
                 <WorklogDetailCard

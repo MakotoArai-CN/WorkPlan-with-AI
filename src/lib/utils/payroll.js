@@ -287,14 +287,25 @@ export function getAnnualIncome(config, overtimeRecords = [], year) {
     // A monthly actual overtime override is used when the salary slip for
     // that month has no overtime component (e.g. PDF bank imports only carry
     // the net credit). Avoid double-counting when the slip already has it.
-    const overtimeMonths = new Set(
-        actuals
-            .filter(item => Number(item.overtimePay) > 0
-                || (item.components || []).some(component => /加班/.test(component.name) && Number(component.amount) > 0))
-            .map(item => String(item.paydayDate || item.periodEnd || '').slice(0, 7))
-    );
+    const overtimeActuals = actuals.filter(item => Number(item.overtimePay) > 0
+        || (item.components || []).some(component => /加班/.test(component.name) && Number(component.amount) > 0));
+    const monthBounds = monthKey => {
+        const [y, m] = monthKey.split('-').map(Number);
+        const last = new Date(y, m, 0).getDate();
+        return { start: `${monthKey}-01`, end: `${monthKey}-${String(last).padStart(2, '0')}` };
+    };
     const overtimeOverrides = (normalized.overtimeMonthlyActuals || [])
-        .filter(item => item.month.startsWith(String(year)) && !overtimeMonths.has(item.month));
+        .filter(item => item.month.startsWith(String(year)))
+        .filter(item => {
+            const bounds = monthBounds(item.month);
+            // A salary slip whose pay cycle overlaps this month already carries
+            // the actual overtime; do not add the monthly override twice.
+            return !overtimeActuals.some(actual => {
+                const start = actual.periodStart || actual.paydayDate;
+                const end = actual.periodEnd || actual.paydayDate;
+                return start && end && start <= bounds.end && end >= bounds.start;
+            });
+        });
     for (const item of overtimeOverrides) {
         totalOvertime += Number(item.amount) || 0;
         if (!months.has(item.month)) {
