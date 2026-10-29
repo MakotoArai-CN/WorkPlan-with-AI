@@ -86,7 +86,7 @@
             badge: $_('overtime.type_' + record.type),
             badgeClass: TYPE_STYLES[record.type] || TYPE_STYLES.weekday,
             title: `${record.start} - ${record.end}`,
-            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
+            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))} · ${record.actualPay !== null && record.actualPay !== undefined ? $_('overtime.actual_label') : $_('overtime.estimated_label')}`,
             note: record.note || '',
             metric: hours(record.hours),
             amount: money(getRecordPay(record, config)),
@@ -149,7 +149,7 @@
             badge: $_('overtime.type_' + record.type),
             badgeClass: TYPE_STYLES[record.type] || TYPE_STYLES.weekday,
             title: `${record.start} - ${record.end}`,
-            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
+            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))} · ${record.actualPay !== null && record.actualPay !== undefined ? $_('overtime.actual_label') : $_('overtime.estimated_label')}`,
             note: record.note || '',
             metric: hours(record.hours),
             amount: money(getRecordPay(record, config)),
@@ -484,7 +484,7 @@
                                         {@const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
                                         {@const dayRecords = monthRecordsByDay.get(dayKey) || []}
                                         {@const dayHours = dayRecords.reduce((sum, record) => sum + record.hours, 0)}
-                                        {@const dayPay = dayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0)}
+                                        {@const dayPay = dayRecords.reduce((sum, record) => sum + getRecordPay(record, config), 0)}
                                         <button on:click={() => selectDay(day)}
                                             class={`min-h-20 md:min-h-24 rounded-lg border p-1.5 text-left transition
                                                 ${dayRecords.length

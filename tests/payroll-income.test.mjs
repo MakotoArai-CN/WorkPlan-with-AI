@@ -1,6 +1,8 @@
 import { describe, test, expect } from 'bun:test';
 import {
     DEFAULT_OVERTIME_CONFIG,
+    getFixedSalaryTotal,
+    getOvertimeBaseSalary,
     getRecordPay,
     normalizeOvertimeConfig,
     summarizeOvertimeRecords
@@ -61,6 +63,37 @@ describe('actual overtime pay', () => {
         };
         expect(getRecordPay(record, config)).toBeGreaterThan(0);
         expect(getRecordPay(record, config)).toBe(Math.round(getRecordPay(record, config) * 100) / 100);
+    });
+});
+
+describe('fixed salary vs variable salary components', () => {
+    const example = {
+        ...DEFAULT_OVERTIME_CONFIG,
+        salaryComponents: [
+            { name: '底薪', amount: 3400, inOvertimeBase: true },
+            { name: '绩效', amount: 400, inOvertimeBase: true },
+            { name: '餐补', amount: 300, inOvertimeBase: false },
+            { name: '加班费', amount: 213, inOvertimeBase: true },
+            { name: '过节费', amount: 200, inOvertimeBase: false },
+            { name: '社保补贴', amount: 454.51, inOvertimeBase: false }
+        ]
+    };
+
+    test('overtime/holiday/social are not part of the fixed salary estimate', () => {
+        const normalized = normalizeOvertimeConfig(example);
+        expect(getFixedSalaryTotal(normalized)).toBe(4100);
+        expect(getOvertimeBaseSalary(normalized)).toBe(3800);
+        expect(normalized.monthlySalary).toBe(4100);
+    });
+
+    test('explicit fixed flag wins over the name heuristic', () => {
+        const withFixedHoliday = {
+            ...example,
+            salaryComponents: example.salaryComponents.map(item => (
+                item.name === '过节费' ? { ...item, fixed: true } : item
+            ))
+        };
+        expect(getFixedSalaryTotal(withFixedHoliday)).toBe(4300);
     });
 });
 

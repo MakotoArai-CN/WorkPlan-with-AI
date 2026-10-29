@@ -12,11 +12,12 @@
     export let openDetailPanel = null;
 
     let isAllExpanded = false;
+    let dateDirection = 1;
 
     function dateMotionDuration() {
         if (typeof document !== 'undefined' && document.documentElement.classList.contains('reduce-animations')) return 0;
         if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 0;
-        return 220;
+        return 180;
     }
 
     $: dateInfo = (() => {
@@ -31,11 +32,13 @@
     function changeDate(offset) {
         const next = addLocalDays(parseLocalDate($viewDate), offset);
         if (Number.isNaN(next.getTime())) return;
+        dateDirection = offset >= 0 ? 1 : -1;
         viewDate.set(formatLocalDate(next));
         activeTask.set(null);
     }
 
     function resetToToday() {
+        dateDirection = $today >= $viewDate ? 1 : -1;
         viewDate.set($today);
         taskStore.checkScheduled();
     }
@@ -71,8 +74,14 @@
         openDetailPanel?.('detail');
     }
 
+    function setViewDate(value) {
+        if (!value) return;
+        dateDirection = value >= $viewDate ? 1 : -1;
+        viewDate.set(value);
+    }
+
     function handleDateInput(e) {
-        viewDate.set(e.target.value);
+        setViewDate(e.target.value);
     }
 
     function handleTaskCardKeydown(event, task) {
@@ -83,30 +92,32 @@
     }
 </script>
 
-<header class="h-16 bg-white/90 backdrop-blur px-2 md:px-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0 gap-2">
-    <div class="shrink-0">
-        <h2 class="text-lg font-bold text-blue-800">{$_('dashboard.title')}</h2>
+<header class="min-h-14 md:h-16 bg-white/90 backdrop-blur px-2 md:px-6 py-1.5 md:py-0 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200 shrink-0 gap-1.5 md:gap-2">
+    <div class="shrink-0 hidden sm:block">
+        <h2 class="text-base md:text-lg font-bold text-blue-800">{$_('dashboard.title')}</h2>
         <div class="text-[10px] text-slate-400 hidden md:block">{$_('dashboard.subtitle')}</div>
     </div>
 
-    <div class="flex items-center justify-center gap-1 md:gap-3 flex-1 min-w-0 overflow-hidden">
+    <div class="flex items-center justify-center gap-0.5 md:gap-3 flex-1 min-w-0">
         <button on:click={() => changeDate(-1)}
-            class="w-8 h-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600"
+            class="w-7 h-8 md:w-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600"
             aria-label="上一天">
             <i class="ph-bold ph-caret-left"></i>
         </button>
-        {#key $viewDate}
-            <div class="flex flex-col items-center"
-                in:fly={{ y: 7, duration: dateMotionDuration(), opacity: 0.4 }}
-                out:fade={{ duration: Math.round(dateMotionDuration() * 0.6) }}>
-                <DatePicker value={$viewDate} label={dateInfo.date} showIcon={false}
-                    onchange={(value) => viewDate.set(value)}
-                    buttonClass="text-xs md:text-lg font-bold text-slate-800 flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap bg-transparent border-0 p-0 w-auto" />
-                <div class="text-[10px] md:text-xs text-slate-500 font-medium whitespace-nowrap">{dateInfo.week}</div>
-            </div>
-        {/key}
+        <div class="relative h-10 md:h-12 flex-1 min-w-0 overflow-hidden">
+            {#key $viewDate}
+                <div class="absolute inset-0 flex flex-col items-center justify-center"
+                    in:fly={{ x: dateDirection * 16, y: 0, duration: dateMotionDuration(), opacity: 0.35 }}
+                    out:fade={{ duration: Math.round(dateMotionDuration() * 0.5) }}>
+                    <DatePicker value={$viewDate} label={dateInfo.date} showIcon={false}
+                        onchange={setViewDate}
+                        buttonClass="text-sm md:text-lg font-bold text-slate-800 flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap bg-transparent border-0 p-0 w-auto" />
+                    <div class="text-[9px] md:text-xs text-slate-500 font-medium whitespace-nowrap">{dateInfo.week}</div>
+                </div>
+            {/key}
+        </div>
         <button on:click={() => changeDate(1)}
-            class="w-8 h-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600"
+            class="w-7 h-8 md:w-8 flex shrink-0 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-600"
             aria-label="下一天">
             <i class="ph-bold ph-caret-right"></i>
         </button>

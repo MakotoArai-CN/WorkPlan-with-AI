@@ -7,6 +7,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { showAlert, showConfirm, showToast } from "../stores/modal.js";
     import { onMount, onDestroy, tick } from "svelte";
+    import { flushLocalDatabase } from "../utils/local-db.js";
     import { _, locale } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { setLocale, supportedLocales } from '../i18n/index.js';
@@ -385,8 +386,11 @@
             variant: 'warning'
         });
         if (confirmed) {
+            passwordsStore.suspendForAccountSwitch();
             taskStore.logout();
+            await flushLocalDatabase();
             showToast({ message: t('settings.logout_success'), type: 'info' });
+            location.reload();
         }
     }
 

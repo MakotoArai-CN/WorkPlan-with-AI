@@ -44,10 +44,11 @@
     $: if (!show) initialized = false;
 
     function applyTemplate() {
-        const existingTotal = components.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        const existingTotal = components.filter(item => item.fixed !== false).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
         components = SALARY_COMPONENT_TEMPLATE.map((item, index) => ({
             ...item,
-            amount: index === 0 ? existingTotal : 0
+            amount: index === 0 ? existingTotal : 0,
+            fixed: true
         }));
     }
 
@@ -75,9 +76,13 @@
             .map((item, index) => ({
                 ...item,
                 name: item.name.trim() || `项目 ${index + 1}`,
-                amount: Math.max(0, Number(item.amount) || 0)
+                amount: Math.max(0, Number(item.amount) || 0),
+                fixed: item.fixed !== false,
+                inOvertimeBase: item.fixed !== false && item.inOvertimeBase === true
             }));
-        const total = cleaned.reduce((sum, item) => sum + item.amount, 0);
+        const total = cleaned
+            .filter(item => item.fixed !== false)
+            .reduce((sum, item) => sum + item.amount, 0);
         onSave({
             ...config,
             monthlySalary: total,
@@ -87,7 +92,8 @@
             leaveDeductionMode,
             workdaysPerMonth,
             hoursPerDay,
-            salaryComponents: cleaned
+            salaryComponents: cleaned,
+            salaryActuals: config.salaryActuals || []
         });
         close();
     }
@@ -109,8 +115,8 @@
                 <button on:click={close} aria-label={$_('common.cancel')}><i class="ph ph-x text-xl"></i></button>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-6 space-y-5">
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 space-y-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label class="flex flex-col gap-1">
                         <span class="text-[11px] font-bold text-slate-500">{$_('payroll.payday')}</span>
                         <input type="number" min="1" max="31" bind:value={payday} class={inputClass()} />
@@ -137,6 +143,11 @@
                     </label>
                 </div>
 
+                <div class="rounded-xl border border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-900/10 px-3 py-2 text-[10px] leading-relaxed text-amber-800 dark:text-amber-200">
+                    <i class="ph-fill ph-info mr-1"></i>
+                    {$_('payroll.components_scope_note')}
+                </div>
+
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-sm font-bold text-slate-700 dark:text-slate-200">{$_('payroll.components')}</div>
@@ -156,12 +167,19 @@
 
                 <div class="space-y-2">
                     {#each components as component, index}
-                        <div class="grid grid-cols-[1fr_130px_auto_auto] gap-2 items-center">
+                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_110px_auto_auto_auto] gap-2 items-center">
                             <input bind:value={component.name} placeholder={$_('payroll.component_name')} class={inputClass()} />
                             <input type="number" min="0" step="100" bind:value={component.amount} placeholder="0" class={inputClass()} />
                             <label class="flex items-center gap-1 text-[10px] text-slate-500 whitespace-nowrap">
+                                <input type="checkbox" bind:checked={component.fixed}
+                                    on:change={() => { if (!component.fixed) component.inOvertimeBase = false; }}
+                                    class="rounded border-slate-300 text-emerald-500 focus:ring-emerald-400" />
+                                {$_('payroll.fixed_item')}
+                            </label>
+                            <label class="flex items-center gap-1 text-[10px] text-slate-500 whitespace-nowrap">
                                 <input type="checkbox" bind:checked={component.inOvertimeBase}
-                                    class="rounded border-slate-300 text-orange-500 focus:ring-orange-400" />
+                                    disabled={component.fixed === false}
+                                    class="rounded border-slate-300 text-orange-500 focus:ring-orange-400 disabled:opacity-40" />
                                 {$_('payroll.in_overtime_base')}
                             </label>
                             <button type="button" on:click={() => removeComponent(index)}
@@ -177,7 +195,7 @@
                 </div>
 
                 <div class="text-[10px] text-slate-400">
-                    {$_('payroll.total_hint')}: {new Intl.NumberFormat('zh-CN', { style: 'currency', currency: config.currency || 'CNY' }).format(components.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))}
+                    {$_('payroll.fixed_total_hint')}: {new Intl.NumberFormat('zh-CN', { style: 'currency', currency: config.currency || 'CNY' }).format(components.filter(item => item.fixed !== false).reduce((sum, item) => sum + (Number(item.amount) || 0), 0))}
                 </div>
             </div>
 
@@ -190,3 +208,4 @@
                 </button>
             </div>
 </AnimatedModal>
+
