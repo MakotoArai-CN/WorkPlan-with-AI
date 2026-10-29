@@ -78,7 +78,7 @@ function scheduleMirror() {
     }, 700);
 }
 
-function activateMemoryStorage() {
+async function activateMemoryStorage() {
     if (memoryMode || typeof localStorage === 'undefined') return;
     memoryKeys = new Map();
     for (let index = 0; index < localStorage.length; index += 1) {
@@ -88,6 +88,21 @@ function activateMemoryStorage() {
         if (typeof value === 'string') memoryKeys.set(key, value);
     }
     memoryMode = true;
+    // Flush the in-memory snapshot before dropping the WebView copy. This also
+    // covers the case where localStorage was newer than the on-disk database.
+    let flushed = false;
+    try {
+        await saveSnapshot();
+        flushed = true;
+    } catch (error) {
+        console.warn('[LocalDB] initial memory flush failed:', error);
+    }
+    if (!flushed) {
+        // Keep the WebView copy if the database cannot be written; losing data
+        // is worse than temporarily duplicating it.
+        memoryMode = false;
+        return false;
+    }
     // The in-memory map is now the source of truth. Remove business data from
     // WebView storage so it is not duplicated on disk.
     const keys = [];
@@ -96,11 +111,13 @@ function activateMemoryStorage() {
         if (key && key.startsWith(PREFIX) && !EXCLUDED.has(key)) keys.push(key);
     }
     for (const key of keys) localStorage.removeItem(key);
+    return true;
 }
 
-export function installLocalDatabaseMirror() {
+export async function installLocalDatabaseMirror() {
     if (!isTauriRuntime || installed || typeof localStorage === 'undefined') return;
-    activateMemoryStorage();
+    const activated = await activateMemoryStorage();
+    if (!activated) return;
     installed = true;
     const originalSet = Storage.prototype.setItem;
     const originalGet = Storage.prototype.getItem;
