@@ -4,14 +4,12 @@
     import { showConfirm, showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
-    import BackupModal from './BackupModal.svelte';
     import { tick } from 'svelte';
+    import { openBackupModal } from '../stores/backup-modal.js';
     import { isWebDemo } from '../utils/runtime.js';
 
     const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
 
-    let showBackup = false;
-    let backupMode = 'export';
     let navEl;
     let pillTop = 0;
     let pillHeight = 0;
@@ -299,7 +297,7 @@
 
         <div class={`grid gap-2 ${collapsed ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <button
-                on:click={() => { backupMode = 'export'; showBackup = true; }}
+                on:click={() => openBackupModal('export')}
                 class={`flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-xs'}`}
                 title={$_('settings.backup')}
             >
@@ -308,7 +306,7 @@
             </button>
 
             <button
-                on:click={() => { backupMode = 'import'; showBackup = true; }}
+                on:click={() => openBackupModal('import')}
                 class={`flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-xs'}`}
                 title={$_('settings.restore')}
             >
@@ -337,6 +335,5 @@
         </div>
     </div>
 
-<BackupModal bind:show={showBackup} mode={backupMode} onClose={() => (showBackup = false)} />
 
 </aside>
