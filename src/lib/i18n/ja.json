@@ -1058,7 +1058,8 @@
     "formula_learned": "学習した時給 {rate}（実際 {samples} か月分）",
     "formula_multiplier": "標準時給の約 {value} 倍",
     "formula_learned_short": "学習値 · {samples} か月",
-    "formula_standard_short": "標準計算時給"
+    "formula_standard_short": "標準計算時給",
+    "day_detail": "日別詳細"
   },
   "leave": {
     "title": "休暇記録",

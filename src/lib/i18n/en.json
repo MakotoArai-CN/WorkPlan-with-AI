@@ -1058,7 +1058,8 @@
     "formula_learned": "Learned rate {rate} (based on {samples} actual months)",
     "formula_multiplier": "about {value}× the standard rate",
     "formula_learned_short": "Learned · {samples} mo",
-    "formula_standard_short": "Standard formula rate"
+    "formula_standard_short": "Standard formula rate",
+    "day_detail": "Day detail"
   },
   "leave": {
     "title": "Leave records",
