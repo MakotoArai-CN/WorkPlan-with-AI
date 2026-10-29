@@ -16,8 +16,7 @@
     import { taskStore } from "../stores/tasks.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { openExternalUrl } from "../utils/open-external.js";
-    import { resizeTextarea } from "../utils/textarea-autosize.js";
-    import { _ } from 'svelte-i18n';
+        import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
     function t(key, opts) { return get(_)(key, opts); }
@@ -197,7 +196,18 @@
 
     async function syncComposerHeight() {
         await tick();
-        resizeTextarea(composerTextarea, 0.5);
+        if (!composerTextarea) return;
+
+        const shell = composerTextarea.closest('[data-ai-shell]');
+        const shellHeight = shell?.clientHeight || window.innerHeight || 0;
+        const minHeight = Math.max(120, Math.floor(shellHeight / 4));
+        const maxHeight = Math.max(minHeight, Math.floor(shellHeight * (7 / 13)));
+        const currentHeight = parseFloat(composerTextarea.style.height) || 0;
+        const contentHeight = composerTextarea.scrollHeight;
+        const nextHeight = Math.min(maxHeight, Math.max(minHeight, currentHeight, contentHeight));
+
+        composerTextarea.style.height = `${nextHeight}px`;
+        composerTextarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
     }
 
     function scrollToBottom() {
