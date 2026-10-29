@@ -1231,7 +1231,7 @@ export function getEffectiveConfig() {
         provider: config.provider,
         apiKey: config.apiKey,
         secretKey: config.secretKey,
-        model: isCustom ? (config.customModel || 'auto') : (config.model || 'auto'),
+        model: isCustom ? (config.customModel || config.model || 'auto') : (config.model || 'auto'),
         customModel: config.customModel,
         customEndpoint: config.customEndpoint,
         accountId: config.accountId,
@@ -3417,6 +3417,10 @@ function buildNativeToolMessages(userText, assistantContext = {}, intentHint = n
 3. 用户要求本地文件搜索/读取/写入/删除时，调用 workplan_local_file。
 4. 普通闲聊、解释、写作、翻译、不需要项目工具的问题，不要调用工具，直接回答文本。
 5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。query 必须在 task_ids 中返回所有匹配项的完整 ID，不能用 summary 代替任务列表；只有确认当前数据里没有任何匹配项时才允许返回空 task_ids，并说明筛选依据；绝对不能为了凑数编造 ID。
+正确查询示例：
+{"source":"tasks","operation":"query","task_ids":["1234567890_abcd"],"summary":"找到 1 个今天的任务"}
+没有任何匹配时：
+{"source":"tasks","operation":"query","task_ids":[],"summary":"今天没有任务"}
 6. 普通任务时间使用 YYYY-MM-DDTHH:mm；定时任务 repeatDays 中周日=0，周一至周六=1-6。
 7. 普通任务的可操作数据已按时间范围过滤；用户未明确提到过去/历史时，不要操作未列出的历史任务。
 8. 用户描述要做/已做的工作内容（即使含"修改/删除/完成"等动词），若对象不在上面列出的任务中，应使用 operation=create 新建任务记录该工作，而非 update/delete 已有任务。
@@ -4069,6 +4073,13 @@ async function executeNativeToolCall(toolCall, userText, config, assistantContex
     };
 }
 
+function shouldForceProjectTool(userText = '') {
+    const text = String(userText || '');
+    if (!text.trim()) return false;
+    if (/搜索|联网|网页|链接|最新新闻|实时/.test(text)) return false;
+    return /查询|查看|列出|有哪些|有什么|哪些|任务|待办|安排/.test(text);
+}
+
 async function tryResolveWithNativeTools(userText, assistantContext, config, intentHint, progress, allowLocalFiles = true, options = {}) {
     if (!await shouldAttemptNativeToolCalling(config)) {
         return null;
@@ -4099,7 +4110,7 @@ async function tryResolveWithNativeTools(userText, assistantContext, config, int
                 config,
                 messages,
                 tools,
-                { maxTokens: Number(config.maxTokens) || 4096, toolChoice: 'auto' }
+                { maxTokens: Number(config.maxTokens) || 4096, toolChoice: shouldForceProjectTool(userText) ? 'required' : 'auto' }
             );
             toolCalls = response.toolCalls || [];
             const contextItems = Array.isArray(assistantContext.items) ? assistantContext.items : [];
