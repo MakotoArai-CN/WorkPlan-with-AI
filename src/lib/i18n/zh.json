@@ -1044,7 +1044,17 @@
     "use_estimate": "使用预估",
     "export_actual_pay": "实际加班费",
     "actual_label": "实际",
-    "estimated_label": "预估"
+    "estimated_label": "预估",
+    "formula_title": "加班费计算明细",
+    "formula_base": "计薪基数",
+    "formula_total": "公式合计",
+    "formula_overridden": "本月已按实际加班费 {amount} 覆盖公式估算",
+    "month_actual_title": "本月实际加班费",
+    "month_actual_hint": "不填则按公式估算",
+    "month_actual_clear": "恢复预估",
+    "month_actual_saved": "已保存本月实际加班费",
+    "month_actual_cleared": "已恢复公式估算",
+    "month_actual_banner": "本月总加班费已按实际 {amount} 结算；下方单条金额仍为公式预估，仅作计算参考。"
   },
   "leave": {
     "title": "请假记录",

@@ -1044,7 +1044,17 @@
     "use_estimate": "見積りを使用",
     "export_actual_pay": "実際の残業代",
     "actual_label": "実績",
-    "estimated_label": "概算"
+    "estimated_label": "概算",
+    "formula_title": "残業代の計算内訳",
+    "formula_base": "残業代の基礎",
+    "formula_total": "計算合計",
+    "formula_overridden": "今月は実際の残業代 {amount} を適用しています",
+    "month_actual_title": "今月の実際の残業代",
+    "month_actual_hint": "空欄の場合は計算式で概算",
+    "month_actual_clear": "概算に戻す",
+    "month_actual_saved": "今月の実際の残業代を保存しました",
+    "month_actual_cleared": "計算式の概算に戻しました",
+    "month_actual_banner": "今月の残業代は実際の {amount} で確定しています。下の各明細は計算式の概算です。"
   },
   "leave": {
     "title": "休暇記録",
