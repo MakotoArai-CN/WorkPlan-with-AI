@@ -2,8 +2,7 @@
     import { taskStore } from '../stores/tasks.js';
     import { settingsStore } from '../stores/settings.js';
     import { _ } from 'svelte-i18n';
-    import Overtime from './Overtime.svelte';
-    import Leave from './Leave.svelte';
+    import WorklogBoard from './WorklogBoard.svelte';
     import WorklogExportModal from './WorklogExportModal.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import CareerAnalysis from './CareerAnalysis.svelte';
@@ -15,8 +14,7 @@
     let viewMode = 'month';
     let showExport = false;
     let showCareer = false;
-    let overtimeRef;
-    let leaveRef;
+    let boardRef;
 
     $: config = { ...($settingsStore.overtimeConfig || {}) };
     $: year = new Date().getFullYear();
@@ -42,8 +40,7 @@
 
     async function addFromActiveTab() {
         await tick();
-        const target = activeTab === 'leave' ? leaveRef : overtimeRef;
-        target?.openCreate();
+        boardRef?.openCreate();
     }
 
     $: viewOptions = [
@@ -95,11 +92,7 @@
                 className="compact [&_button]:px-3 [&_button]:py-1 [&_button]:text-[11px]" />
         </div>
         <div class="flex-1 min-h-0 overflow-hidden">
-            {#if activeTab === 'overtime'}
-                <Overtime bind:this={overtimeRef} embedded hideSummary bind:viewMode />
-            {:else}
-                <Leave bind:this={leaveRef} embedded hideSummary bind:viewMode />
-            {/if}
+            <WorklogBoard bind:this={boardRef} {activeTab} {config} bind:viewMode />
         </div>
     </div>
 </div>
