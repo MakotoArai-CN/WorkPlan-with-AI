@@ -21,6 +21,7 @@
         DEFAULT_OVERTIME_CONFIG,
         calculateOvertimeHours,
         calculateRecordPay,
+        getRecordPay,
         estimateOvertime,
         filterRecordsByPeriod,
         getMonthSummary,
@@ -88,7 +89,7 @@
             detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
             note: record.note || '',
             metric: hours(record.hours),
-            amount: money(calculateRecordPay(record, config)),
+            amount: money(getRecordPay(record, config)),
             amountClass: 'text-orange-600'
         }));
     $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
@@ -135,6 +136,10 @@
     $: formPay = config.monthlySalary > 0
         ? calculateRecordPay({ ...form, hours: formHours, type: form.type }, config)
         : 0;
+    $: formActualPay = form.actualPay !== null && form.actualPay !== undefined && form.actualPay !== ''
+        && Number.isFinite(Number(form.actualPay)) && Number(form.actualPay) >= 0
+        ? Math.round(Number(form.actualPay) * 100) / 100
+        : null;
 
     function makeOvertimeRow(record) {
         return {
@@ -147,7 +152,7 @@
             detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
             note: record.note || '',
             metric: hours(record.hours),
-            amount: money(calculateRecordPay(record, config)),
+            amount: money(getRecordPay(record, config)),
             amountClass: 'text-orange-600'
         };
     }
@@ -159,6 +164,7 @@
             end: '20:00',
             type: inferOvertimeType(date),
             compensation: 'pay',
+            actualPay: null,
             note: '',
             aiLocked: false
         };
@@ -235,6 +241,7 @@
             end: record.end,
             type: record.type,
             compensation: record.compensation || 'pay',
+            actualPay: record.actualPay ?? null,
             note: record.note || '',
             aiLocked: record.aiLocked === true
         };
@@ -272,6 +279,7 @@
             ...form,
             id: editingId || `ot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             hours: formHours,
+            actualPay: form.compensation === 'pay' ? formActualPay : null,
             createdAt: existing?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
         });
@@ -325,7 +333,8 @@
             [$_('overtime.export_hours')]: record.hours,
             [$_('overtime.export_type')]: $_('overtime.type_' + record.type),
             [$_('overtime.export_compensation')]: $_('overtime.comp_' + (record.compensation || 'pay')),
-            [$_('overtime.export_pay')]: calculateRecordPay(record, config),
+            [$_('overtime.export_pay')]: getRecordPay(record, config),
+            [$_('overtime.export_actual_pay')]: record.actualPay ?? '',
             [$_('overtime.export_note')]: record.note
         }));
     }
@@ -504,7 +513,7 @@
             {:else}
                 <WorklogDetailCard
                     title={new Date(cursorYear, cursorMonth - 1, cursorDay).toLocaleDateString(localeCode, { month: 'long', day: 'numeric', weekday: 'short' })}
-                    summary={`${hours(selectedDayRecords.reduce((sum, record) => sum + record.hours, 0))} · ${money(selectedDayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0))}`}
+                    summary={`${hours(selectedDayRecords.reduce((sum, record) => sum + record.hours, 0))} · ${money(selectedDayRecords.reduce((sum, record) => sum + getRecordPay(record, config), 0))}`}
                     rows={selectedDayRecords.map(makeOvertimeRow)}
                     emptyTitle={$_('overtime.empty')}
                     emptyDesc={$_('overtime.empty_desc')}
@@ -557,6 +566,22 @@
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.compensation')}</span>
                         <SelectMenu bind:value={form.compensation} options={compensationOptions} />
                     </label>
+                    {#if form.compensation === 'pay'}
+                        <label class="col-span-2 flex flex-col gap-1">
+                            <span class="text-xs font-bold text-slate-500">{$_('overtime.actual_pay')}
+                                <span class="font-normal text-slate-400">（{$_('overtime.actual_pay_hint')} {money(formPay)}）</span>
+                            </span>
+                            <div class="flex items-center gap-2">
+                                <input type="number" min="0" step="0.01" bind:value={form.actualPay}
+                                    placeholder={String(formPay)}
+                                    class="flex-1 border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200" />
+                                <button type="button" on:click={() => (form.actualPay = null)}
+                                    class="h-9 px-3 rounded-lg border border-slate-200 text-[10px] font-bold text-slate-500">
+                                    {$_('overtime.use_estimate')}
+                                </button>
+                            </div>
+                        </label>
+                    {/if}
                     <label class="col-span-2 flex flex-col gap-1">
                         <span class="text-xs font-bold text-slate-500">{$_('overtime.note')}</span>
                         <textarea bind:value={form.note} rows="2" placeholder={$_('overtime.note_placeholder')}
