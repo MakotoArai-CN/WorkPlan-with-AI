@@ -53,7 +53,7 @@
                     location.reload();
                     return;
                 }
-                installLocalDatabaseMirror();
+                await installLocalDatabaseMirror();
             } catch (error) {
                 console.warn('Local database init failed:', error);
             }
