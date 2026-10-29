@@ -6,6 +6,7 @@
     import { get } from 'svelte/store';
     import BackupModal from './BackupModal.svelte';
     import { tick } from 'svelte';
+    import { isWebDemo } from '../utils/runtime.js';
 
     const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
 
@@ -107,7 +108,7 @@
             activeText: 'text-slate-700',
             hoverBg: 'hover:bg-slate-50'
         }
-    ];
+    ].filter(item => !(isWebDemo && item.id === 'passwords'));
 
     function switchView(view) {
         if (view === 'passwords') {
