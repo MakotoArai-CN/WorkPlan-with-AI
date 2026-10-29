@@ -1,6 +1,6 @@
 <script>
     import { _ } from 'svelte-i18n';
-    import { getPayrollEstimate, formatCycle, setActualSalary } from '../utils/payroll.js';
+    import { getAnnualIncome, getPayrollEstimate, formatCycle, setActualSalary } from '../utils/payroll.js';
     import SalaryHistory from './SalaryHistory.svelte';
 
     export let records = [];
@@ -17,6 +17,7 @@
     $: payroll = getPayrollEstimate(records, leaveRecords, new Date(), config);
     $: cycle = payroll.cycle;
     $: previous = payroll.previousCycle;
+    $: annual = getAnnualIncome(config, records, new Date().getFullYear());
     $: if (previous && initializedFor !== previous.end) {
         actualInput = payroll.actual ? String(payroll.actual.amount) : '';
         actualNote = payroll.actual?.note || '';
@@ -117,6 +118,19 @@
                 · {$_('payroll.hourly_rate')}: <b>{money(payroll.hourlyRate)}</b>
                 · {$_('payroll.unpaid_days')}: {payroll.current.leave.unpaidDays}
             </div>
+
+            <div class="mt-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 p-3">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <div class="text-[10px] font-bold text-slate-400 uppercase">{$_('payroll.annual_income')} · {annual.year}</div>
+                    <button on:click={() => (showHistory = true)} class="text-[10px] font-bold text-orange-600">{$_('salary_history.entry')} →</button>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div><div class="text-[9px] text-slate-400">{$_('payroll.annual_net')}</div><div class="text-sm font-black text-emerald-600">{money(annual.totalNet)}</div></div>
+                    <div><div class="text-[9px] text-slate-400">{$_('payroll.annual_overtime')}</div><div class="text-sm font-black text-orange-600">{money(annual.totalOvertime)}</div></div>
+                    <div><div class="text-[9px] text-slate-400">{$_('payroll.monthly_average')}</div><div class="text-sm font-black text-slate-700 dark:text-slate-100">{money(annual.averageNet)}</div></div>
+                    <div><div class="text-[9px] text-slate-400">{$_('payroll.months_recorded')}</div><div class="text-sm font-black text-slate-700 dark:text-slate-100">{annual.monthsRecorded}</div></div>
+                </div>
+            </div>
         </div>
 
         <div class="xl:w-72 shrink-0 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 p-3">
@@ -149,6 +163,7 @@
 <SalaryHistory
     bind:show={showHistory}
     {config}
+    overtimeRecords={records}
     onUpdateConfig={(updates) => onUpdateConfig(updates)}
     onClose={() => (showHistory = false)}
 />

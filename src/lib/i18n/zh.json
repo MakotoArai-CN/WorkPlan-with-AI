@@ -1038,7 +1038,11 @@
         "layout_list": "列表",
         "layout_calendar": "日历",
         "field_minutes": "分钟",
-        "field_hours": "小时"
+        "field_hours": "小时",
+        "actual_pay": "实际加班费",
+        "actual_pay_hint": "留空按预估",
+        "use_estimate": "使用预估",
+        "export_actual_pay": "实际加班费"
     },
     "leave": {
         "title": "请假记录",
@@ -1216,7 +1220,24 @@
         "difference": "差额",
         "smart_estimate": "智能预估",
         "smart_hint": "本期与近3期综合：加班 {overtime} · 请假 {leave}",
-        "salary_growth": "历史涨薪"
+        "salary_growth": "历史涨薪",
+        "slip_title": "工资条录入",
+        "slip_desc": "填写工资组成、社保补贴、扣款和实际到账",
+        "gross_pay": "应发合计",
+        "social_insurance": "社保补贴",
+        "net_pay": "实发工资",
+        "deductions": "扣款合计",
+        "net_auto_hint": "不填则采用自动计算：",
+        "note": "备注",
+        "slip_note_placeholder": "例如：9月工资",
+        "slip_hint": "工资条用于记录实际发放。加班费可单独填写，也可由加班记录估算；实发金额允许和应发合计存在差异，方便记录社保代扣、迟到等实际情况。",
+        "annual_income": "年度收入",
+        "annual_net": "年度实发",
+        "annual_overtime": "年度加班费",
+        "monthly_average": "月均实发",
+        "months_recorded": "已记录月份",
+        "salary_slip": "工资条",
+        "add_slip": "录入工资条"
     },
     "date_picker": {
         "placeholder": "选择日期",
@@ -1263,6 +1284,12 @@
         "no_selected": "请选择要导入的流水",
         "invalid_date": "请选择有效日期",
         "invalid_amount": "请输入大于 0 的实发金额",
-        "backfill_saved": "工资补录已保存"
+        "backfill_saved": "工资补录已保存",
+        "annual_summary": "年度收入汇总",
+        "components": "工资组成",
+        "gross": "应发",
+        "net": "实发",
+        "monthly_records": "月度工资记录",
+        "slip_entry": "录入工资条"
     }
 }
