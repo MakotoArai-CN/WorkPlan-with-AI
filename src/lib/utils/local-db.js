@@ -137,6 +137,7 @@ export async function installLocalDatabaseMirror() {
     const activated = await activateMemoryStorage();
     if (!activated) return;
     installed = true;
+    if (typeof Storage === 'undefined') return;
     const originalSet = Storage.prototype.setItem;
     const originalGet = Storage.prototype.getItem;
     const originalRemove = Storage.prototype.removeItem;
@@ -218,6 +219,39 @@ export async function initLocalDatabase() {
     } finally {
         hydrating = false;
     }
+}
+
+export function getLocalDatabaseKeys() {
+    return collectKeys();
+}
+
+/**
+ * Replace all WorkPlan keys with a restored backup. In memory mode this must
+ * flush the new snapshot to the encrypted DB before the caller reloads.
+ */
+export async function replaceLocalDatabaseKeys(keys = {}) {
+    const allowed = Object.entries(keys).filter(
+        ([key, value]) => key.startsWith(PREFIX) && !EXCLUDED.has(key) && typeof value === 'string'
+    );
+    if (memoryMode) {
+        const previous = new Map(memoryKeys);
+        memoryKeys = new Map(allowed);
+        try {
+            await saveSnapshot();
+        } catch (error) {
+            memoryKeys = previous;
+            throw error;
+        }
+        return allowed.length;
+    }
+    const existing = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key && key.startsWith(PREFIX)) existing.push(key);
+    }
+    for (const key of existing) localStorage.removeItem(key);
+    for (const [key, value] of allowed) localStorage.setItem(key, value);
+    return allowed.length;
 }
 
 export async function localDatabaseInfo() {
