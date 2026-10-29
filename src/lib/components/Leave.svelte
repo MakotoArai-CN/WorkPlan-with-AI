@@ -119,9 +119,8 @@
         { value: false, label: $_('leave.unpaid') }
     ];
     $: viewOptions = [
-        { value: 'year', label: $_('leave.view_year') },
         { value: 'month', label: $_('leave.view_month') },
-        { value: 'day', label: $_('leave.view_day') }
+        { value: 'year', label: $_('leave.view_year') }
     ];
     $: cursorLabel = (() => {
         if (viewMode === 'year') {
