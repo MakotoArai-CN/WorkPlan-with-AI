@@ -3,6 +3,9 @@ import {
     DEFAULT_OVERTIME_CONFIG,
     getFixedSalaryTotal,
     getOvertimeBaseSalary,
+    calibrateOvertimeRate,
+    getHourlyRate,
+    getOvertimeCalibration,
     getMonthSummary,
     getRecordPay,
     getYearSummary,
@@ -123,6 +126,45 @@ describe('monthly actual overtime override', () => {
         expect(month.actualOverride).toBe(false);
         expect(month.pay).toBe(month.estimatedPay);
         expect(month.pay).toBeGreaterThan(400);
+    });
+});
+
+describe('smart overtime rate calibration', () => {
+    const records = [
+        { id: 'w', date: '2026-09-05', start: '10:00', end: '18:00', hours: 8, type: 'weekend', compensation: 'pay' },
+        { id: 'd', date: '2026-09-07', start: '18:00', end: '21:30', hours: 3.5, type: 'weekday', compensation: 'pay' }
+    ];
+    const withActual = {
+        ...config,
+        overtimeMonthlyActuals: [{ month: '2026-09', amount: 213 }]
+    };
+
+    test('derives an implied hourly rate from actual pay and weighted hours', () => {
+        const learned = calibrateOvertimeRate(records, withActual);
+        expect(learned.samples).toBe(1);
+        expect(learned.weightedHours).toBe(21.25);
+        expect(learned.rate).toBe(10.02);
+        const applied = { ...withActual, overtimeLearnedRate: learned.rate, overtimeCalibrationSamples: 1 };
+        expect(getHourlyRate(applied)).toBe(10.02);
+        const calibration = getOvertimeCalibration(records, applied);
+        expect(calibration.impliedMultiplier).toBe(0.51);
+    });
+
+    test('learns from more months instead of only the first one', () => {
+        const more = {
+            ...withActual,
+            overtimeMonthlyActuals: [
+                { month: '2026-08', amount: 180 },
+                { month: '2026-09', amount: 213 }
+            ]
+        };
+        const learned = calibrateOvertimeRate([
+            ...records,
+            { id: 'w2', date: '2026-08-01', start: '10:00', end: '18:00', hours: 8, type: 'weekend', compensation: 'pay' }
+        ], more);
+        expect(learned.samples).toBe(2);
+        expect(learned.weightedHours).toBe(37.25);
+        expect(learned.rate).toBeGreaterThan(10);
     });
 });
 

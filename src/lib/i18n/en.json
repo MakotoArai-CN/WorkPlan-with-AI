@@ -1054,7 +1054,9 @@
     "month_actual_clear": "Use estimate",
     "month_actual_saved": "Monthly actual overtime saved",
     "month_actual_cleared": "Restored the formula estimate",
-    "month_actual_banner": "This month uses actual overtime {amount}; per-record amounts below are formula estimates for reference."
+    "month_actual_banner": "This month uses actual overtime {amount}; per-record amounts below are formula estimates for reference.",
+    "formula_learned": "Learned rate {rate} (based on {samples} actual months)",
+    "formula_multiplier": "about {value}× the standard rate"
   },
   "leave": {
     "title": "Leave records",
@@ -1254,7 +1256,11 @@
     "components_scope_note": "These values are only the estimate baseline for overtime/leave deductions, not an actual salary slip. Record overtime, holiday pay, social insurance and take-home pay in Salary records.",
     "fixed_total_hint": "Fixed items total (not take-home pay)",
     "fixed_item": "Fixed",
-    "not_recorded": "Not recorded"
+    "not_recorded": "Not recorded",
+    "social_self_pay": "I pay social insurance myself",
+    "social_self_pay_hint": "When enabled, annual income also shows disposable income after self-paid social insurance.",
+    "disposable_income": "Disposable income",
+    "self_social": "Self-paid social"
   },
   "date_picker": {
     "placeholder": "Select date",
@@ -1314,6 +1320,10 @@
     "pdf_password_wrong": "Wrong PDF password",
     "pdf_parse_failed": "Could not parse this PDF. Use an ICBC transaction statement.",
     "pdf_empty": "No transactions found in this PDF",
-    "pdf_parsing": "Parsing PDF, large statements may take a few seconds…"
+    "pdf_parsing": "Parsing PDF, large statements may take a few seconds…",
+    "trend_title": "Salary trend",
+    "trend_desc": "Monthly take-home",
+    "trend_empty": "At least two salary records are needed for the chart",
+    "highest": "Year high"
   }
 }

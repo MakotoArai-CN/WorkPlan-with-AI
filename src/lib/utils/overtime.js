@@ -156,6 +156,10 @@ export function normalizeOvertimeConfig(config = {}) {
         weekdayMultiplier: number(merged.weekdayMultiplier, 1.5, 1, 5),
         weekendMultiplier: number(merged.weekendMultiplier, 2, 1, 5),
         holidayMultiplier: number(merged.holidayMultiplier, 3, 1, 5),
+        overtimeLearnedRate: number(merged.overtimeLearnedRate, 0, 0, 1_000_000),
+        overtimeCalibrationSamples: number(merged.overtimeCalibrationSamples, 0, 0, 120),
+        overtimeAutoCalibrate: merged.overtimeAutoCalibrate !== false,
+        socialPaidBySelf: merged.socialPaidBySelf === true,
         annualLeaveQuota: number(merged.annualLeaveQuota, 0, 0, 365),
         payday,
         salaryCycleMode: merged.salaryCycleMode === 'calendar' ? 'calendar' : 'payday',
@@ -208,11 +212,69 @@ export function getOvertimeMultiplier(type, config = DEFAULT_OVERTIME_CONFIG) {
     return normalized.weekdayMultiplier;
 }
 
-export function getHourlyRate(config = DEFAULT_OVERTIME_CONFIG) {
+export function getStandardHourlyRate(config = DEFAULT_OVERTIME_CONFIG) {
     const normalized = normalizeOvertimeConfig(config);
     const monthlyHours = normalized.workdaysPerMonth * normalized.hoursPerDay;
     if (!(monthlyHours > 0)) return 0;
     return getOvertimeBaseSalary(normalized) / monthlyHours;
+}
+
+export function getHourlyRate(config = DEFAULT_OVERTIME_CONFIG) {
+    const normalized = normalizeOvertimeConfig(config);
+    if (normalized.overtimeAutoCalibrate && normalized.overtimeLearnedRate > 0) {
+        return normalized.overtimeLearnedRate;
+    }
+    return getStandardHourlyRate(normalized);
+}
+
+/**
+ * Learn an effective overtime hourly rate from months that have an actual
+ * amount. This is intentionally based on weighted payable hours, so a month
+ * with 8h weekend + 3.5h weekday contributes 21.25h, not 11.5h.
+ */
+export function calibrateOvertimeRate(records = [], config = DEFAULT_OVERTIME_CONFIG) {
+    const normalized = normalizeOvertimeConfig(config);
+    let totalAmount = 0;
+    let totalWeightedHours = 0;
+    let samples = 0;
+    for (const item of normalized.overtimeMonthlyActuals || []) {
+        const [year, month] = item.month.split('-').map(Number);
+        if (!year || !month) continue;
+        const summary = summarizeOvertimeRecords(filterRecordsByPeriod(records, { year, month }), {
+            ...normalized,
+            overtimeAutoCalibrate: false
+        });
+        const mix = summary.payableByType;
+        const weightedHours = mix.weekend * normalized.weekendMultiplier
+            + mix.weekday * normalized.weekdayMultiplier
+            + mix.holiday * normalized.holidayMultiplier;
+        if (weightedHours <= 0 || !(item.amount > 0)) continue;
+        totalAmount += item.amount;
+        totalWeightedHours += weightedHours;
+        samples += 1;
+    }
+    const rate = totalWeightedHours > 0 ? totalAmount / totalWeightedHours : 0;
+    return {
+        rate: Math.round(rate * 100) / 100,
+        samples,
+        totalAmount: Math.round(totalAmount * 100) / 100,
+        weightedHours: Math.round(totalWeightedHours * 100) / 100,
+        defaultRate: Math.round(getStandardHourlyRate(normalized) * 100) / 100
+    };
+}
+
+export function getOvertimeCalibration(records = [], config = DEFAULT_OVERTIME_CONFIG) {
+    const normalized = normalizeOvertimeConfig(config);
+    const standard = getStandardHourlyRate(normalized);
+    const learned = normalized.overtimeAutoCalibrate ? normalized.overtimeLearnedRate : 0;
+    return {
+        standardRate: Math.round(standard * 100) / 100,
+        effectiveRate: Math.round((learned > 0 ? learned : standard) * 100) / 100,
+        learnedRate: Math.round(learned * 100) / 100,
+        impliedMultiplier: standard > 0 && learned > 0 ? Math.round((learned / standard) * 100) / 100 : 1,
+        samples: normalized.overtimeCalibrationSamples || 0,
+        auto: normalized.overtimeAutoCalibrate
+    };
 }
 
 /** Suggested type from a local date: weekends default to the weekend rate. */

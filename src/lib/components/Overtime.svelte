@@ -23,11 +23,15 @@
         calculateRecordPay,
         getRecordPay,
         getHourlyRate,
+        getStandardHourlyRate,
+        getOvertimeCalibration,
         getOvertimeBaseSalary,
+        calibrateOvertimeRate,
         estimateOvertime,
         filterRecordsByPeriod,
         getMonthSummary,
         getMonthlyOvertimeActual,
+        getLeaveMonthSummary,
         getYearSummary,
         groupRecordsByDay,
         inferOvertimeType,
@@ -88,18 +92,31 @@
                 updatedAt: new Date().toISOString()
             });
         }
-        settingsStore.updateOvertimeConfig({ overtimeMonthlyActuals: next });
+        const nextConfig = { ...config, overtimeMonthlyActuals: next };
+        const learned = calibrateOvertimeRate(records, nextConfig);
+        settingsStore.updateOvertimeConfig({
+            overtimeMonthlyActuals: next,
+            overtimeLearnedRate: learned.rate,
+            overtimeCalibrationSamples: learned.samples
+        });
         showToast({ message: raw !== '' ? $_('overtime.month_actual_saved') : $_('overtime.month_actual_cleared'), type: 'success' });
     }
 
     function clearMonthActual() {
         monthActualInput = '';
         const next = (config.overtimeMonthlyActuals || []).filter(item => item.month !== monthKey);
-        settingsStore.updateOvertimeConfig({ overtimeMonthlyActuals: next });
+        const learned = calibrateOvertimeRate(records, { ...config, overtimeMonthlyActuals: next });
+        settingsStore.updateOvertimeConfig({
+            overtimeMonthlyActuals: next,
+            overtimeLearnedRate: learned.rate,
+            overtimeCalibrationSamples: learned.samples
+        });
     }
 
     $: overtimeBase = getOvertimeBaseSalary(config);
+    $: standardHourlyRate = getStandardHourlyRate(config);
     $: hourlyRate = getHourlyRate(config);
+    $: calibration = getOvertimeCalibration(records, config);
     $: formulaBreakdown = (() => {
         const byType = monthSummary.payableByType || { weekday: 0, weekend: 0, holiday: 0 };
         const items = [
@@ -127,6 +144,7 @@
     $: monthDays = Array.from({ length: new Date(cursorYear, cursorMonth, 0).getDate() }, (_, index) => index + 1);
     $: firstWeekday = (new Date(cursorYear, cursorMonth - 1, 1).getDay() + 6) % 7;
     $: calendarCells = [...Array.from({ length: firstWeekday }, () => null), ...monthDays];
+    $: leaveRecords = $taskStore.leaveRecords || [];
     $: monthRows = records
         .filter(record => record.date?.startsWith(`${cursorYear}-${String(cursorMonth).padStart(2, '0')}`))
         .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
@@ -143,10 +161,19 @@
             amount: money(getRecordPay(record, config)),
             amountClass: 'text-orange-600'
         }));
-    $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
-        month: index + 1,
-        summary: getMonthSummary(records, cursorYear, index + 1, config)
-    }));
+    $: yearMonths = Array.from({ length: 12 }, (_, index) => {
+        const month = index + 1;
+        const monthKey = `${cursorYear}-${String(month).padStart(2, '0')}`;
+        const salary = (config.salaryActuals || [])
+            .filter(item => String(item.paydayDate || item.periodEnd || '').startsWith(monthKey))
+            .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        return {
+            month,
+            summary: getMonthSummary(records, cursorYear, month, config),
+            leave: getLeaveMonthSummary(leaveRecords, cursorYear, month, config),
+            salary
+        };
+    });
     $: overtimeTypeOptions = [
         { value: 'weekday', label: $_('overtime.type_weekday') },
         { value: 'weekend', label: $_('overtime.type_weekend') },
@@ -525,7 +552,13 @@
                 <details class="rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-[10px]">
                     <summary class="cursor-pointer font-bold text-slate-500 dark:text-slate-400">{$_('overtime.formula_title')}</summary>
                     <div class="mt-2 space-y-1 text-slate-500 dark:text-slate-400">
-                        <div>{$_('overtime.formula_base')}: {money(overtimeBase)} ÷ {config.workdaysPerMonth || 21.75} ÷ {config.hoursPerDay || 8} = <b>{money(hourlyRate)}</b> / h</div>
+                        <div>{$_('overtime.formula_base')}: {money(overtimeBase)} ÷ {config.workdaysPerMonth || 21.75} ÷ {config.hoursPerDay || 8} = <b>{money(standardHourlyRate)}</b> / h</div>
+                        {#if calibration.learnedRate > 0}
+                            <div class="font-bold text-indigo-600 dark:text-indigo-400">
+                                {$_('overtime.formula_learned', { values: { rate: money(calibration.effectiveRate), samples: calibration.samples } })}
+                                · {$_('overtime.formula_multiplier', { values: { value: calibration.impliedMultiplier } })}
+                            </div>
+                        {/if}
                         {#each formulaBreakdown.items as item}
                             <div>
                                 {item.key === 'weekend' ? $_('overtime.type_weekend') : item.key === 'holiday' ? $_('overtime.type_holiday') : $_('overtime.type_weekday')}
@@ -559,8 +592,22 @@
                                 </div>
                                 <i class="ph ph-caret-right text-slate-300"></i>
                             </div>
-                            <div class="text-2xl font-black text-orange-600 mt-3">{hours(item.summary.hours)}</div>
-                            <div class="text-[10px] text-slate-500 mt-1">{money(item.summary.pay)}</div>
+                            <div class="mt-3 space-y-1">
+                                <div class="flex items-center justify-between text-[10px]">
+                                    <span class="text-slate-400">{$_('worklog.kind_overtime')}</span>
+                                    <span class="font-bold text-slate-700 dark:text-slate-200">{hours(item.summary.hours)} · {money(item.summary.pay)}</span>
+                                </div>
+                                <div class="flex items-center justify-between text-[10px]">
+                                    <span class="text-slate-400">{$_('worklog.kind_leave')}</span>
+                                    <span class="font-bold text-rose-500">{item.leave.days} {$_('leave.unit_day')}</span>
+                                </div>
+                                <div class="flex items-center justify-between text-[10px]">
+                                    <span class="text-slate-400">{$_('payroll.net_pay')}</span>
+                                    <span class={`font-bold ${item.salary > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                        {item.salary > 0 ? money(item.salary) : $_('payroll.not_recorded')}
+                                    </span>
+                                </div>
+                            </div>
                         </button>
                     {/each}
                 </div>

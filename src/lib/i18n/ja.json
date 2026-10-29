@@ -1054,7 +1054,9 @@
     "month_actual_clear": "概算に戻す",
     "month_actual_saved": "今月の実際の残業代を保存しました",
     "month_actual_cleared": "計算式の概算に戻しました",
-    "month_actual_banner": "今月の残業代は実際の {amount} で確定しています。下の各明細は計算式の概算です。"
+    "month_actual_banner": "今月の残業代は実際の {amount} で確定しています。下の各明細は計算式の概算です。",
+    "formula_learned": "学習した時給 {rate}（実際 {samples} か月分）",
+    "formula_multiplier": "標準時給の約 {value} 倍"
   },
   "leave": {
     "title": "休暇記録",
@@ -1254,7 +1256,11 @@
     "components_scope_note": "ここは残業代・休暇控除の概算基準であり、実際の給与明細ではありません。残業代、祝日手当、社会保険、実際の手取りは「給与記録」で入力してください。",
     "fixed_total_hint": "固定項目合計（手取りではありません）",
     "fixed_item": "固定",
-    "not_recorded": "未入力"
+    "not_recorded": "未入力",
+    "social_self_pay": "社会保険を自己負担",
+    "social_self_pay_hint": "オンにすると、自己負担の社会保険を差し引いた可処分所得も表示します。",
+    "disposable_income": "可処分所得",
+    "self_social": "自己負担の社会保険"
   },
   "date_picker": {
     "placeholder": "日付を選択",
@@ -1314,6 +1320,10 @@
     "pdf_password_wrong": "PDF パスワードが違います",
     "pdf_parse_failed": "PDF を解析できません。工商銀行の取引明細 PDF を選択してください。",
     "pdf_empty": "PDF 内に取引が見つかりません",
-    "pdf_parsing": "PDF を解析中です。大きな明細は数秒かかります…"
+    "pdf_parsing": "PDF を解析中です。大きな明細は数秒かかります…",
+    "trend_title": "給与推移",
+    "trend_desc": "月ごとの手取り",
+    "trend_empty": "折れ線には2か月以上の給与記録が必要です",
+    "highest": "年間最高"
   }
 }

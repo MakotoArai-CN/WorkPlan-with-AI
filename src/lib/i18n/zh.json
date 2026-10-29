@@ -1054,7 +1054,9 @@
     "month_actual_clear": "恢复预估",
     "month_actual_saved": "已保存本月实际加班费",
     "month_actual_cleared": "已恢复公式估算",
-    "month_actual_banner": "本月总加班费已按实际 {amount} 结算；下方单条金额仍为公式预估，仅作计算参考。"
+    "month_actual_banner": "本月总加班费已按实际 {amount} 结算；下方单条金额仍为公式预估，仅作计算参考。",
+    "formula_learned": "智能校准时薪 {rate}（基于 {samples} 个月实际）",
+    "formula_multiplier": "约为标准时薪的 {value} 倍"
   },
   "leave": {
     "title": "请假记录",
@@ -1254,7 +1256,11 @@
     "components_scope_note": "这里只维护加班费/请假扣款的估算基准，不是实际工资条。加班费、过节费、社保和实际到手工资，请到“工资记录”录入工资条。",
     "fixed_total_hint": "固定项目合计（不是实发工资）",
     "fixed_item": "固定项目",
-    "not_recorded": "未录入"
+    "not_recorded": "未录入",
+    "social_self_pay": "社保由个人自行缴纳",
+    "social_self_pay_hint": "勾选后，年度收入会额外显示扣除自缴社保后的可支配金额。",
+    "disposable_income": "可支配收入",
+    "self_social": "自缴社保"
   },
   "date_picker": {
     "placeholder": "选择日期",
@@ -1314,6 +1320,10 @@
     "pdf_password_wrong": "PDF 密码错误，无法打开文件",
     "pdf_parse_failed": "PDF 解析失败，请确认是工商银行历史明细 PDF",
     "pdf_empty": "PDF 中没有识别到交易记录",
-    "pdf_parsing": "正在解析 PDF，95 页可能需要几秒…"
+    "pdf_parsing": "正在解析 PDF，95 页可能需要几秒…",
+    "trend_title": "工资趋势",
+    "trend_desc": "每月实发折线",
+    "trend_empty": "至少需要两个月工资记录才能画折线",
+    "highest": "年度最高"
   }
 }
