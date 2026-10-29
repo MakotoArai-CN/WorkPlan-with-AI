@@ -3,7 +3,8 @@
     import DatePicker from './DatePicker.svelte';
     import AnimatedModal from './AnimatedModal.svelte';
     import SelectMenu from './SelectMenu.svelte';
-    import { getPayCycle, parseDateValue, setActualSalary } from '../utils/payroll.js';
+    import { getAnnualIncome, getPayCycle, parseDateValue, setActualSalary } from '../utils/payroll.js';
+    import SalarySlipModal from './SalarySlipModal.svelte';
     import {
         BANK_PRESETS,
         detectPreset,
@@ -19,6 +20,7 @@
     export let config = {};
     export let onUpdateConfig = () => {};
     export let onClose = () => {};
+    export let overtimeRecords = [];
 
     let tab = 'history';
     let backfillDate = formatLocalDate(new Date());
@@ -26,6 +28,9 @@
     let backfillNote = '';
     let message = '';
     let error = '';
+    let showSlip = false;
+    let slipCycle = null;
+    let slipActual = null;
 
     let fileName = '';
     let encoding = 'utf-8';
@@ -48,6 +53,7 @@
         .slice()
         .sort((a, b) => String(b.periodEnd).localeCompare(String(a.periodEnd)));
     $: growth = getSalaryGrowth(actuals);
+    $: annual = getAnnualIncome(config, overtimeRecords, new Date().getFullYear());
     $: previewRows = transactions.filter(item => !salaryOnly || isSalaryDescription(item.description));
     $: selectedCount = previewRows.filter(item => selected[item.key]).length;
     $: allSelected = previewRows.length > 0 && selectedCount === previewRows.length;
@@ -58,6 +64,19 @@
             currency: config.currency || 'CNY',
             maximumFractionDigits: 2
         }).format(Number(value) || 0);
+    }
+
+    function openSlip(cycle = null, actual = null) {
+        slipCycle = cycle || getPayCycle(new Date(), config);
+        slipActual = actual;
+        showSlip = true;
+    }
+
+    function saveSlip(details) {
+        if (!slipCycle) return;
+        const next = setActualSalary(config, slipCycle, details);
+        onUpdateConfig({ salaryActuals: next });
+        message = $_('salary_history.backfill_saved');
     }
 
     function close() {
@@ -185,7 +204,13 @@
                     </h3>
                     <div class="text-[10px] text-slate-500 mt-0.5">{$_('salary_history.desc')}</div>
                 </div>
-                <button on:click={close} aria-label={$_('common.cancel')}><i class="ph ph-x text-xl"></i></button>
+                <div class="flex items-center gap-2">
+                    <button on:click={() => openSlip()}
+                        class="h-8 px-3 rounded-lg bg-orange-500 text-white text-[11px] font-bold">
+                        + {$_('payroll.add_slip')}
+                    </button>
+                    <button on:click={close} aria-label={$_('common.cancel')}><i class="ph ph-x text-xl"></i></button>
+                </div>
             </div>
 
             <div class="px-5 pt-3 flex gap-1 bg-slate-50/60 dark:bg-slate-900/20">
@@ -201,6 +226,29 @@
 
             <div class="flex-1 overflow-y-auto p-5 space-y-4">
                 {#if tab === 'history'}
+                    <div>
+                        <div class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2">{$_('salary_history.annual_summary')} · {annual.year}</div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            <div class="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-3">
+                                <div class="text-[10px] text-emerald-700 dark:text-emerald-300">{$_('payroll.annual_net')}</div>
+                                <div class="text-base font-black text-emerald-700 dark:text-emerald-300 mt-1">{money(annual.totalNet)}</div>
+                                <div class="text-[9px] text-emerald-600/70 mt-0.5">{$_('payroll.months_recorded')}: {annual.monthsRecorded}</div>
+                            </div>
+                            <div class="rounded-xl bg-orange-50 dark:bg-orange-900/20 p-3">
+                                <div class="text-[10px] text-orange-700 dark:text-orange-300">{$_('payroll.annual_overtime')}</div>
+                                <div class="text-base font-black text-orange-700 dark:text-orange-300 mt-1">{money(annual.totalOvertime)}</div>
+                            </div>
+                            <div class="rounded-xl bg-slate-50 dark:bg-slate-900/40 p-3">
+                                <div class="text-[10px] text-slate-400">{$_('payroll.monthly_average')}</div>
+                                <div class="text-base font-black text-slate-800 dark:text-slate-100 mt-1">{money(annual.averageNet)}</div>
+                            </div>
+                            <div class="rounded-xl bg-sky-50 dark:bg-sky-900/20 p-3">
+                                <div class="text-[10px] text-sky-700 dark:text-sky-300">{$_('payroll.social_insurance')}</div>
+                                <div class="text-base font-black text-sky-700 dark:text-sky-300 mt-1">{money(annual.totalSocial)}</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div class="rounded-xl bg-slate-50 dark:bg-slate-900/40 p-3">
                             <div class="text-[10px] text-slate-400">{$_('salary_history.latest')}</div>
@@ -267,6 +315,17 @@
                                                 {#if item.note}<span class="mx-1">·</span>{item.note}{/if}
                                             </div>
                                         </div>
+                                        <div class="hidden md:flex flex-wrap gap-1 flex-1 min-w-0">
+                                            {#each (item.components || []).filter(component => component.amount) as component}
+                                                <span class="rounded bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 text-[9px] text-slate-500 dark:text-slate-300">
+                                                    {component.name} {money(component.amount)}
+                                                </span>
+                                            {/each}
+                                        </div>
+                                        <button on:click={() => openSlip(getPayCycle(parseDateValue(item.periodEnd) || new Date(), config), item)}
+                                            class="shrink-0 text-[10px] font-bold text-orange-600 hover:text-orange-700">
+                                            {$_('payroll.salary_slip')}
+                                        </button>
                                         <div class="text-right shrink-0">
                                             <div class="text-sm font-black text-slate-700 dark:text-slate-100">{money(item.amount)}</div>
                                             {#if change?.change !== null && change?.change !== undefined}
@@ -373,3 +432,12 @@
                 {/if}
             </div>
 </AnimatedModal>
+
+<SalarySlipModal
+    bind:show={showSlip}
+    {config}
+    cycle={slipCycle}
+    actual={slipActual}
+    onSave={saveSlip}
+    onClose={() => (showSlip = false)}
+/>

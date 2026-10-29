@@ -1,7 +1,7 @@
 <script>
     import { _ } from 'svelte-i18n';
     import { settingsStore } from '../stores/settings.js';
-    import { getPayrollEstimate, formatCycle } from '../utils/payroll.js';
+    import { getAnnualIncome, getPayrollEstimate, formatCycle } from '../utils/payroll.js';
     import { getAnnualLeaveBalance, getLeaveMonthSummary } from '../utils/overtime.js';
     import SalarySettings from './SalarySettings.svelte';
     import SalaryHistory from './SalaryHistory.svelte';
@@ -15,6 +15,7 @@
     let showSalaryHistory = false;
 
     $: payroll = getPayrollEstimate(overtimeRecords, leaveRecords, new Date(), config);
+    $: annual = getAnnualIncome(config, overtimeRecords, new Date().getFullYear());
     $: balance = getAnnualLeaveBalance(leaveRecords, new Date().getFullYear(), config);
     $: monthLeave = getLeaveMonthSummary(leaveRecords, new Date().getFullYear(), new Date().getMonth() + 1, config);
 
@@ -46,6 +47,8 @@
                 <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
                     <div><span class="text-slate-400">{$_('payroll.fixed_salary')}</span><div class="font-black">{money(payroll.fixedTotal)}</div></div>
                     <div><span class="text-slate-400">{$_('payroll.estimated')}</span><div class="font-black text-orange-600">{money(payroll.current.estimated)}</div></div>
+                    <div><span class="text-slate-400">{$_('payroll.annual_net')}</span><div class="font-black text-emerald-600">{money(annual.totalNet)}</div></div>
+                    <div><span class="text-slate-400">{$_('payroll.annual_overtime')}</span><div class="font-black text-orange-600">{money(annual.totalOvertime)}</div></div>
                 </div>
             </div>
         {:else}
@@ -119,6 +122,16 @@
                             </span>
                         {/if}
                     </div>
+                    <div class="mt-2 flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 px-2 py-1.5 text-[9px]">
+                        <span class="text-slate-400">{$_('payroll.annual_net')}</span>
+                        <b class="text-emerald-600">{money(annual.totalNet)}</b>
+                        <span class="text-slate-300">·</span>
+                        <span class="text-slate-400">{$_('payroll.annual_overtime')}</span>
+                        <b class="text-orange-600">{money(annual.totalOvertime)}</b>
+                        <button on:click={() => (showSalaryHistory = true)} class="ml-auto font-bold text-slate-500 hover:text-orange-600">
+                            {$_('salary_history.entry')} →
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -183,5 +196,5 @@
 
 <SalarySettings bind:show={showSalarySettings} {config}
     onSave={saveSalaryConfig} onClose={() => (showSalarySettings = false)} />
-<SalaryHistory bind:show={showSalaryHistory} {config}
+<SalaryHistory bind:show={showSalaryHistory} {config} overtimeRecords={overtimeRecords}
     onUpdateConfig={saveSalaryConfig} onClose={() => (showSalaryHistory = false)} />
