@@ -3416,7 +3416,7 @@ function buildNativeToolMessages(userText, assistantContext = {}, intentHint = n
 2. 用户要求搜索网页、访问 URL、查询实时/最新信息时，调用 workplan_web_search。
 3. 用户要求本地文件搜索/读取/写入/删除时，调用 workplan_local_file。
 4. 普通闲聊、解释、写作、翻译、不需要项目工具的问题，不要调用工具，直接回答文本。
-5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。query 必须在 task_ids 中返回所有匹配项的完整 ID，不能为空，不能用 summary 代替任务列表；如果确实没有任何匹配项，也要说明筛选依据，但不能凭空声称数据不存在。
+5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。query 必须在 task_ids 中返回所有匹配项的完整 ID，不能用 summary 代替任务列表；只有确认当前数据里没有任何匹配项时才允许返回空 task_ids，并说明筛选依据；绝对不能为了凑数编造 ID。
 6. 普通任务时间使用 YYYY-MM-DDTHH:mm；定时任务 repeatDays 中周日=0，周一至周六=1-6。
 7. 普通任务的可操作数据已按时间范围过滤；用户未明确提到过去/历史时，不要操作未列出的历史任务。
 8. 用户描述要做/已做的工作内容（即使含"修改/删除/完成"等动词），若对象不在上面列出的任务中，应使用 operation=create 新建任务记录该工作，而非 update/delete 已有任务。
@@ -3589,6 +3589,42 @@ function describeSkippedOperations(message, skipped = []) {
         .map(({ id, reason }) => `${id || '(缺少 ID)'}：${SKIP_REASON_LABELS[reason] || reason}`)
         .join('；');
     return `${message}\n\n⚠️ 已跳过 ${skipped.length} 项操作 —— ${details}`;
+}
+
+function filterNativeItemsForQuery(items = [], userText = '', args = {}) {
+    const text = `${userText || ''} ${args.filter_description || ''} ${args.summary || ''}`.toLowerCase();
+    const dateInfo = getDateInfo();
+    let range = null;
+    if (/今天|今日/.test(text)) {
+        const day = formatDateForAI(dateInfo.today);
+        range = { start: day, end: day };
+    } else if (/明天|明日/.test(text)) {
+        const day = formatDateForAI(dateInfo.tomorrow);
+        range = { start: day, end: day };
+    } else if (/本周|这周|本星期/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.thisWeek.start), end: formatDateForAI(dateInfo.thisWeek.end) };
+    } else if (/上周/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.lastWeek.start), end: formatDateForAI(dateInfo.lastWeek.end) };
+    } else if (/下周/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.nextWeek.start), end: formatDateForAI(dateInfo.nextWeek.end) };
+    } else if (/本月|这个月/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.thisMonth.start), end: formatDateForAI(dateInfo.thisMonth.end) };
+    } else if (/上月|上个月/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.lastMonth.start), end: formatDateForAI(dateInfo.lastMonth.end) };
+    }
+    const wantsDone = /已完成|完成了|做完/.test(text);
+    const wantsDoing = /进行中|正在做/.test(text);
+    const wantsTodo = /未开始|待办|没开始/.test(text);
+    const wantsIncomplete = /未完成|没完成/.test(text);
+    return (Array.isArray(items) ? items : []).filter(item => {
+        const date = String(item.date || item.startDate || item.endDate || '').slice(0, 10);
+        if (range && (!date || date < range.start || date > range.end)) return false;
+        if (wantsDone && item.status !== 'done') return false;
+        if (wantsDoing && item.status !== 'doing') return false;
+        if (wantsTodo && item.status !== 'todo') return false;
+        if (wantsIncomplete && item.status === 'done') return false;
+        return true;
+    });
 }
 
 async function runNativeProjectAction(args = {}, userText = '', assistantContext = {}) {
@@ -4056,7 +4092,7 @@ async function tryResolveWithNativeTools(userText, assistantContext, config, int
                     ...baseMessages,
                     {
                         role: 'user',
-                        content: '【系统校验】上一轮 workplan_project_action 查询没有返回 task_ids。查询任务时必须把匹配到的完整任务 ID 放进 task_ids 数组，不能为空，也不能只给 summary。请根据用户问题重新调用工具并返回 task_ids。'
+                        content: '【系统校验】当前任务数据中存在可能匹配的记录，但上一轮查询没有返回可验证的 task_ids（或返回了不存在的 ID）。请返回真实存在的完整任务 ID；如果复核后确认没有任何匹配，可以返回空 task_ids 并说明筛选依据。不要编造 ID。'
                     }
                 ];
             response = await callAIWithMessagesAndTools(
@@ -4066,14 +4102,21 @@ async function tryResolveWithNativeTools(userText, assistantContext, config, int
                 { maxTokens: Number(config.maxTokens) || 4096, toolChoice: 'auto' }
             );
             toolCalls = response.toolCalls || [];
-            const missingTaskIds = toolCalls.some((call) => {
+            const contextItems = Array.isArray(assistantContext.items) ? assistantContext.items : [];
+            const needsRetry = toolCalls.some((call) => {
                 if (call.name !== 'workplan_project_action') return false;
                 const args = parseNativeToolArguments(call.arguments);
                 if (String(args.operation || '').toLowerCase() !== 'query') return false;
                 const ids = args.task_ids || args.matched_task_ids || args.task_id;
-                return !(Array.isArray(ids) ? ids.length : String(ids || '').trim());
+                const idList = Array.isArray(ids) ? ids.filter(Boolean) : (ids ? [ids] : []);
+                const candidates = filterNativeItemsForQuery(contextItems, userText, args);
+                // Genuine empty data: allow the model to return an empty result.
+                if (!candidates.length) return false;
+                if (!idList.length) return true;
+                // Non-empty but invented IDs are just as bad as empty IDs.
+                return findNativeItemsByIds(contextItems, idList).length === 0;
             });
-            if (!missingTaskIds) break;
+            if (!needsRetry) break;
             if (attempt === MAX_QUERY_ID_RETRIES) idRetryExhausted = true;
         }
 
