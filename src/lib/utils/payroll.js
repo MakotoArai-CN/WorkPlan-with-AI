@@ -284,6 +284,25 @@ export function getAnnualIncome(config, overtimeRecords = [], year) {
         month.count += 1;
         month.components.push(...(item.components || []));
     }
+    // A monthly actual overtime override is used when the salary slip for
+    // that month has no overtime component (e.g. PDF bank imports only carry
+    // the net credit). Avoid double-counting when the slip already has it.
+    const overtimeMonths = new Set(
+        actuals
+            .filter(item => Number(item.overtimePay) > 0
+                || (item.components || []).some(component => /加班/.test(component.name) && Number(component.amount) > 0))
+            .map(item => String(item.paydayDate || item.periodEnd || '').slice(0, 7))
+    );
+    const overtimeOverrides = (normalized.overtimeMonthlyActuals || [])
+        .filter(item => item.month.startsWith(String(year)) && !overtimeMonths.has(item.month));
+    for (const item of overtimeOverrides) {
+        totalOvertime += Number(item.amount) || 0;
+        if (!months.has(item.month)) {
+            months.set(item.month, { key: item.month, net: 0, gross: 0, overtime: 0, count: 0, components: [] });
+        }
+        const month = months.get(item.month);
+        month.overtime += Number(item.amount) || 0;
+    }
     const withActual = actuals.length;
     const round = value => Math.round(value * 100) / 100;
     return {
@@ -292,6 +311,7 @@ export function getAnnualIncome(config, overtimeRecords = [], year) {
         totalNet: round(totalNet),
         totalGross: round(totalGross),
         totalOvertime: round(totalOvertime),
+        overtimeOverrides: overtimeOverrides.length,
         totalSocial: round(totalSocial),
         totalDeductions: round(totalDeductions),
         averageNet: withActual ? round(totalNet / withActual) : 0,

@@ -109,6 +109,18 @@
                         </div>
                     </div>
 
+                    <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[9px]">
+                        {#if payroll.actual}
+                            <span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300 font-bold">
+                                {$_('payroll.last_cycle_actual')}: {money(payroll.actual.amount)}
+                            </span>
+                            <span class="text-slate-400">{$_('payroll.overtime_pay')}: {money(payroll.actual.overtimePay)}</span>
+                        {:else}
+                            <button on:click={() => (showSalaryHistory = true)} class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300 font-bold">
+                                {$_('payroll.last_cycle_actual')}: {$_('payroll.not_recorded')}
+                            </button>
+                        {/if}
+                    </div>
                     <div class="mt-auto pt-2 flex flex-wrap items-center gap-1.5 text-[9px]">
                         <span class="px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300 font-bold">
                             {$_('payroll.smart_estimate')}: {money(payroll.smart.estimated)}

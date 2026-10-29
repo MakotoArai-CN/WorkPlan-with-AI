@@ -1044,7 +1044,17 @@
     "use_estimate": "Use estimate",
     "export_actual_pay": "Actual overtime pay",
     "actual_label": "Actual",
-    "estimated_label": "Estimate"
+    "estimated_label": "Estimate",
+    "formula_title": "Overtime calculation details",
+    "formula_base": "Overtime base",
+    "formula_total": "Formula total",
+    "formula_overridden": "Actual overtime {amount} overrides the formula estimate",
+    "month_actual_title": "Actual overtime pay this month",
+    "month_actual_hint": "Leave empty to use the formula estimate",
+    "month_actual_clear": "Use estimate",
+    "month_actual_saved": "Monthly actual overtime saved",
+    "month_actual_cleared": "Restored the formula estimate",
+    "month_actual_banner": "This month uses actual overtime {amount}; per-record amounts below are formula estimates for reference."
   },
   "leave": {
     "title": "Leave records",

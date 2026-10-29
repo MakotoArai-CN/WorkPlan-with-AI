@@ -109,6 +109,14 @@ export function normalizeOvertimeConfig(config = {}) {
             .reduce((sum, item) => sum + item.amount, 0) * 100
     ) / 100;
     const payday = Math.round(number(merged.payday, 15, 1, 31, true));
+    const overtimeMonthlyActuals = (Array.isArray(merged.overtimeMonthlyActuals) ? merged.overtimeMonthlyActuals : [])
+        .filter(item => item && typeof item === 'object' && /^\d{4}-\d{2}$/.test(String(item.month || '')))
+        .map(item => ({
+            month: String(item.month),
+            amount: Math.round(number(item.amount, 0, 0, 100_000_000) * 100) / 100,
+            note: typeof item.note === 'string' ? item.note : '',
+            updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : ''
+        }));
     const salaryActuals = (Array.isArray(merged.salaryActuals) ? merged.salaryActuals : [])
         .filter(item => item && typeof item === 'object')
         .map(item => {
@@ -154,7 +162,8 @@ export function normalizeOvertimeConfig(config = {}) {
         overtimeBaseMode: merged.overtimeBaseMode === 'total' ? 'total' : 'base',
         leaveDeductionMode: merged.leaveDeductionMode === 'base' ? 'base' : 'fixed',
         salaryComponents,
-        salaryActuals
+        salaryActuals,
+        overtimeMonthlyActuals
     };
 }
 
@@ -306,12 +315,59 @@ export function filterRecordsByPeriod(records = [], { year, month, day } = {}) {
     });
 }
 
+export function getMonthlyOvertimeActual(config = DEFAULT_OVERTIME_CONFIG, monthKey = '') {
+    const normalized = normalizeOvertimeConfig(config);
+    return (normalized.overtimeMonthlyActuals || []).find(item => item.month === monthKey) || null;
+}
+
 export function getMonthSummary(records = [], year, month, config = DEFAULT_OVERTIME_CONFIG) {
-    return summarizeOvertimeRecords(filterRecordsByPeriod(records, { year, month }), config);
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    const base = summarizeOvertimeRecords(filterRecordsByPeriod(records, { year, month }), config);
+    const override = getMonthlyOvertimeActual(config, monthKey);
+    if (!override) return { ...base, actualOverride: false, estimatedPay: base.pay };
+    return {
+        ...base,
+        estimatedPay: base.pay,
+        pay: override.amount,
+        actualOverride: true,
+        actualNote: override.note || ''
+    };
 }
 
 export function getYearSummary(records = [], year, config = DEFAULT_OVERTIME_CONFIG) {
-    return summarizeOvertimeRecords(filterRecordsByPeriod(records, { year }), config);
+    const total = {
+        hours: 0,
+        payableHours: 0,
+        pay: 0,
+        estimatedPay: 0,
+        actualPayCount: 0,
+        actualOverrideCount: 0,
+        count: 0,
+        byType: { weekday: 0, weekend: 0, holiday: 0 },
+        payableByType: { weekday: 0, weekend: 0, holiday: 0 }
+    };
+    for (let month = 1; month <= 12; month += 1) {
+        const summary = getMonthSummary(records, year, month, config);
+        total.hours += summary.hours;
+        total.payableHours += summary.payableHours;
+        total.pay += summary.pay;
+        total.estimatedPay += summary.estimatedPay;
+        total.actualPayCount += summary.actualPayCount;
+        total.count += summary.count;
+        if (summary.actualOverride) total.actualOverrideCount += 1;
+        for (const key of OVERTIME_TYPES) {
+            total.byType[key] += summary.byType[key];
+            total.payableByType[key] += summary.payableByType[key];
+        }
+    }
+    for (const key of ['hours', 'payableHours', 'pay', 'estimatedPay']) {
+        total[key] = Math.round(total[key] * 100) / 100;
+    }
+    for (const key of OVERTIME_TYPES) {
+        total.byType[key] = Math.round(total.byType[key] * 100) / 100;
+        total.payableByType[key] = Math.round(total.payableByType[key] * 100) / 100;
+    }
+    return total;
 }
 
 export function groupRecordsByMonth(records = [], year) {

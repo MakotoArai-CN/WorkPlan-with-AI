@@ -3,7 +3,9 @@ import {
     DEFAULT_OVERTIME_CONFIG,
     getFixedSalaryTotal,
     getOvertimeBaseSalary,
+    getMonthSummary,
     getRecordPay,
+    getYearSummary,
     normalizeOvertimeConfig,
     summarizeOvertimeRecords
 } from '../src/lib/utils/overtime.js';
@@ -97,6 +99,33 @@ describe('fixed salary vs variable salary components', () => {
     });
 });
 
+describe('monthly actual overtime override', () => {
+    const records = [
+        { id: 'w', date: '2026-09-05', start: '10:00', end: '18:00', hours: 8, type: 'weekend', compensation: 'pay' },
+        { id: 'd', date: '2026-09-07', start: '18:00', end: '21:30', hours: 3.5, type: 'weekday', compensation: 'pay' }
+    ];
+
+    test('uses 213 as September actual while preserving the formula estimate', () => {
+        const withActual = {
+            ...config,
+            overtimeMonthlyActuals: [{ month: '2026-09', amount: 213 }]
+        };
+        const month = getMonthSummary(records, 2026, 9, withActual);
+        expect(month.pay).toBe(213);
+        expect(month.actualOverride).toBe(true);
+        expect(month.estimatedPay).toBeGreaterThan(400);
+        expect(month.hours).toBe(11.5);
+        expect(getYearSummary(records, 2026, withActual).pay).toBe(213);
+    });
+
+    test('falls back to the formula when no monthly actual is set', () => {
+        const month = getMonthSummary(records, 2026, 9, config);
+        expect(month.actualOverride).toBe(false);
+        expect(month.pay).toBe(month.estimatedPay);
+        expect(month.pay).toBeGreaterThan(400);
+    });
+});
+
 describe('salary actuals and annual income', () => {
     test('keeps the salary components and computes annual totals', () => {
         const income = getAnnualIncome(config, [], 2026);
@@ -106,6 +135,17 @@ describe('salary actuals and annual income', () => {
         expect(income.totalSocial).toBe(454.51);
         expect(income.monthsRecorded).toBe(1);
         expect(income.averageNet).toBe(4313);
+    });
+
+    test('annual overtime includes a monthly override when the salary slip has none', () => {
+        const noSlipOvertime = {
+            ...config,
+            salaryActuals: [{ ...config.salaryActuals[0], overtimePay: 0, components: config.salaryActuals[0].components.filter(component => !/加班/.test(component.name)) }],
+            overtimeMonthlyActuals: [{ month: '2026-09', amount: 213 }]
+        };
+        const income = getAnnualIncome(noSlipOvertime, [], 2026);
+        expect(income.totalOvertime).toBe(213);
+        expect(income.overtimeOverrides).toBe(1);
     });
 
     test('setActualSalary preserves detailed components', () => {
