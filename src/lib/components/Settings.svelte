@@ -29,6 +29,7 @@
     let showDataRepair = false;
 
     function handleVersionClick() {
+        if (isWebDemo) return;
         repairClicks += 1;
         if (repairClickTimer) clearTimeout(repairClickTimer);
         repairClickTimer = setTimeout(() => { repairClicks = 0; }, 1800);
@@ -1319,7 +1320,7 @@
                             title="连续点击 7 次打开数据修复工具">
                             {$_('settings.version')} {$settingsStore.appVersion}
                         </button>
-                        {#if repairClicks >= 3}
+                        {#if !isWebDemo && repairClicks >= 3}
                             <div class="mt-1 text-[9px] text-amber-600 dark:text-amber-400">再点击 {7 - repairClicks} 次打开数据修复工具</div>
                         {/if}
                     </div>
