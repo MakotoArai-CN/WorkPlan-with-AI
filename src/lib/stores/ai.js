@@ -3591,6 +3591,44 @@ function describeSkippedOperations(message, skipped = []) {
     return `${message}\n\n⚠️ 已跳过 ${skipped.length} 项操作 —— ${details}`;
 }
 
+function filterNativeItemsForQuery(items = [], userText = '', args = {}) {
+    const text = `${userText || ''} ${args.filter_description || ''} ${args.summary || ''}`.toLowerCase();
+    const dateInfo = getDateInfo();
+    let range = null;
+    if (/今天|今日/.test(text)) {
+        const day = formatDateForAI(dateInfo.today);
+        range = { start: day, end: day };
+    } else if (/明天|明日/.test(text)) {
+        const day = formatDateForAI(dateInfo.tomorrow);
+        range = { start: day, end: day };
+    } else if (/本周|这周|本星期/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.thisWeek.start), end: formatDateForAI(dateInfo.thisWeek.end) };
+    } else if (/上周/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.lastWeek.start), end: formatDateForAI(dateInfo.lastWeek.end) };
+    } else if (/下周/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.nextWeek.start), end: formatDateForAI(dateInfo.nextWeek.end) };
+    } else if (/本月|这个月/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.thisMonth.start), end: formatDateForAI(dateInfo.thisMonth.end) };
+    } else if (/上月|上个月/.test(text)) {
+        range = { start: formatDateForAI(dateInfo.lastMonth.start), end: formatDateForAI(dateInfo.lastMonth.end) };
+    }
+
+    const wantsDone = /已完成|完成了|做完/.test(text);
+    const wantsDoing = /进行中|正在做/.test(text);
+    const wantsTodo = /未开始|待办|没开始/.test(text);
+    const wantsIncomplete = /未完成|没完成/.test(text);
+
+    return (Array.isArray(items) ? items : []).filter(item => {
+        const date = String(item.date || item.startDate || item.endDate || '').slice(0, 10);
+        if (range && (!date || date < range.start || date > range.end)) return false;
+        if (wantsDone && item.status !== 'done') return false;
+        if (wantsDoing && item.status !== 'doing') return false;
+        if (wantsTodo && item.status !== 'todo') return false;
+        if (wantsIncomplete && item.status === 'done') return false;
+        return true;
+    });
+}
+
 async function runNativeProjectAction(args = {}, userText = '', assistantContext = {}) {
     const source = normalizeNativeProjectSource(args.source, assistantContext.source);
     const operation = String(args.operation || '').toLowerCase();
@@ -3630,7 +3668,16 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
     }
 
     if (operation === 'query') {
-        const matched = findNativeItemsByIds(items, args.task_ids || args.matched_task_ids || args.delete_task_ids || []);
+        const requestedIds = args.task_ids || args.matched_task_ids || args.delete_task_ids || args.task_id || [];
+        let matched = findNativeItemsByIds(items, requestedIds);
+
+        // Models often answer "查一下本周任务" without echoing IDs. Falling
+        // back to the visible task list is much better than claiming the user
+        // has no data; apply the obvious date/status filters from the prompt.
+        if (!matched.length) {
+            matched = filterNativeItemsForQuery(items, userText, args);
+        }
+
         if (matched.length > 0) {
             return {
                 role: 'assistant',
