@@ -15,6 +15,15 @@ import {
     deriveSyncSecret
 } from '../utils/crypto.js';
 import {
+    ensureVaultEntryKey,
+    encryptVaultEntryFields,
+    decryptVaultEntryFields,
+    encryptVaultPayload,
+    decryptVaultPayload,
+    getVaultMeta,
+    resetVaultKeyCache
+} from '../utils/vault-entry.js';
+import {
     getDeviceKey,
     composeVaultSecret,
     isDeviceBindingEnabled,
@@ -62,6 +71,7 @@ function createPasswordsStore() {
     // key when binding is enabled. Kept separate so the ~10 encrypt/decrypt call sites
     // cannot accidentally bypass the binding.
     let vaultSecret = null;
+    let vaultEntryKey = null;
     let sessionToken = null;
     let saveTimer = null;
     let migrationDone = false;
@@ -83,11 +93,79 @@ function createPasswordsStore() {
     async function setActiveSecrets(masterPassword) {
         currentMasterPassword = masterPassword;
         vaultSecret = await deriveVaultSecret(masterPassword);
+        const state = get({ subscribe });
+        const salt = (state.passwords || []).find(entry => entry.kdfSalt)?.kdfSalt || '';
+        vaultEntryKey = await ensureVaultEntryKey(vaultSecret, salt);
+        return vaultSecret;
     }
 
     function clearActiveSecrets() {
         currentMasterPassword = null;
         vaultSecret = null;
+        vaultEntryKey = null;
+        resetVaultKeyCache();
+    }
+
+    function encodeEntryForStorage(entry) {
+        if (!vaultEntryKey) return entry;
+        const meta = {
+            title: entry.title || '',
+            username: entry.username || '',
+            url: entry.url || '',
+            category: entry.category || '默认',
+            notes: entry.notes || ''
+        };
+        const password = String(entry.password || '').startsWith('v4:')
+            ? entry.password
+            : encryptVaultPayload(entry.password || '', vaultEntryKey);
+        return {
+            id: entry.id,
+            meta: encryptVaultEntryFields(meta, vaultEntryKey),
+            password,
+            kdfSalt: getVaultMeta()?.salt || '',
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+            schema: 2
+        };
+    }
+
+    function encodePasswordsForStorage(list = []) {
+        return list.map(encodeEntryForStorage);
+    }
+
+    function decryptEntryPassword(value) {
+        if (!value) return null;
+        if (String(value).startsWith('v4:')) return decryptVaultPayload(value, vaultEntryKey);
+        return decrypt(value, vaultSecret);
+    }
+
+    async function hydrateVaultEntries() {
+        if (!vaultSecret || !vaultEntryKey) return;
+        const state = get({ subscribe });
+        let changed = false;
+        const hydrated = state.passwords.map(entry => {
+            let next = { ...entry };
+            if (entry.meta) {
+                const meta = decryptVaultEntryFields(entry.meta, vaultEntryKey);
+                if (meta) next = { ...next, ...meta };
+                delete next.meta;
+            } else {
+                changed = true;
+            }
+            const password = String(next.password || '');
+            if (password && !password.startsWith('v4:')) {
+                const plain = decrypt(password, vaultSecret);
+                if (plain !== null) {
+                    next.password = encryptVaultPayload(plain, vaultEntryKey);
+                    changed = true;
+                }
+            }
+            return next;
+        });
+        const nextState = { ...state, passwords: hydrated };
+        update(() => nextState);
+        if (changed) saveImmediate(nextState);
+        migrationDone = true;
     }
 
     function loadSettings() {
@@ -155,31 +233,8 @@ function createPasswordsStore() {
         });
 
         if (sessionUnlocked && !migrationDone) {
-            migrateAllPasswords();
+            void hydrateVaultEntries();
         }
-    }
-
-    function migrateAllPasswords() {
-        if (migrationDone || !vaultSecret) return;
-        
-        const state = get({ subscribe });
-        let needsSave = false;
-        const migratedPasswords = state.passwords.map(p => {
-            if (needsMigration(p.password)) {
-                const migrated = migrateEncryption(p.password, vaultSecret);
-                if (migrated) {
-                    needsSave = true;
-                    return { ...p, password: migrated };
-                }
-            }
-            return p;
-        });
-
-        if (needsSave) {
-            update(s => ({ ...s, passwords: migratedPasswords }));
-            saveImmediate({ ...state, passwords: migratedPasswords });
-        }
-        migrationDone = true;
     }
 
     function save(state) {
@@ -188,7 +243,8 @@ function createPasswordsStore() {
             clearTimeout(saveTimer);
         }
         saveTimer = setTimeout(() => {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state.passwords));
+            if (!vaultEntryKey) return;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(encodePasswordsForStorage(state.passwords)));
             if (state.masterPasswordHash) {
                 localStorage.setItem(MASTER_KEY, state.masterPasswordHash);
             }
@@ -198,7 +254,8 @@ function createPasswordsStore() {
 
     function saveImmediate(state) {
         if (typeof window === 'undefined') return;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.passwords));
+        if (!vaultEntryKey) return;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(encodePasswordsForStorage(state.passwords)));
         if (state.masterPasswordHash) {
             localStorage.setItem(MASTER_KEY, state.masterPasswordHash);
         }
@@ -249,11 +306,9 @@ function createPasswordsStore() {
             return { success: false, error: 'no_device_key', attemptsRemaining: 0 };
         }
 
+        await hydrateVaultEntries();
         update(s => ({ ...s, isUnlocked: true }));
         saveSession(result.masterPassword);
-        if (!migrationDone) {
-            setTimeout(() => migrateAllPasswords(), 100);
-        }
         return { success: true };
     }
 
@@ -291,10 +346,8 @@ function createPasswordsStore() {
                     sessionStorage.removeItem(SESSION_KEY);
                     return false;
                 }
+                await hydrateVaultEntries();
                 update(s => ({ ...s, isUnlocked: true }));
-                if (!migrationDone) {
-                    setTimeout(() => migrateAllPasswords(), 100);
-                }
                 return true;
             }
 
@@ -321,6 +374,7 @@ function createPasswordsStore() {
             }
 
             await setActiveSecrets(password);
+            await hydrateVaultEntries();
 
             // Transparently re-hash legacy verifiers (unsalted SHA-256 / low-iteration
             // PBKDF2) now that we hold the correct plaintext password.
@@ -341,9 +395,6 @@ function createPasswordsStore() {
             }
 
             saveSession(password);
-            if (!migrationDone) {
-                setTimeout(() => migrateAllPasswords(), 100);
-            }
             return true;
         },
         lock: () => {
@@ -370,7 +421,7 @@ function createPasswordsStore() {
         }),
         addPassword: (entry) => update(s => {
             if (!vaultSecret) return s;
-            const encryptedPassword = encrypt(entry.password, vaultSecret);
+            const encryptedPassword = vaultEntryKey ? encryptVaultPayload(entry.password, vaultEntryKey) : encrypt(entry.password, vaultSecret);
             const newEntry = {
                 id: Date.now().toString(),
                 title: entry.title || '',
@@ -392,7 +443,7 @@ function createPasswordsStore() {
                 id: (Date.now() + Math.random()).toString(),
                 title: entry.title || '',
                 username: entry.username || '',
-                password: encrypt(entry.password, vaultSecret),
+                password: vaultEntryKey ? encryptVaultPayload(entry.password, vaultEntryKey) : encrypt(entry.password, vaultSecret),
                 url: entry.url || '',
                 category: entry.category || '默认',
                 notes: entry.notes || '',
@@ -412,7 +463,7 @@ function createPasswordsStore() {
                 if (p.id !== id) return p;
                 const newEntry = { ...p, ...updates, updatedAt: new Date().toISOString() };
                 if (updates.password) {
-                    newEntry.password = encrypt(updates.password, vaultSecret);
+                    newEntry.password = vaultEntryKey ? encryptVaultPayload(updates.password, vaultEntryKey) : encrypt(updates.password, vaultSecret);
                 }
                 return newEntry;
             });
@@ -428,7 +479,7 @@ function createPasswordsStore() {
         }),
         decryptPassword: (encryptedPassword) => {
             if (!vaultSecret) return null;
-            return decrypt(encryptedPassword, vaultSecret);
+            return decryptEntryPassword(encryptedPassword);
         },
         getMasterPassword: () => currentMasterPassword,
         /**
@@ -440,7 +491,7 @@ function createPasswordsStore() {
             if (!vaultSecret) return null;
             const state = get({ subscribe });
             return {
-                passwords: state.passwords,
+                passwords: encodePasswordsForStorage(state.passwords),
                 categories: state.categories
             };
         },
@@ -453,7 +504,7 @@ function createPasswordsStore() {
             const state = get({ subscribe });
             const passwords = state.passwords.map(entry => {
                 if (!entry.password) return { ...entry, password: '' };
-                const plain = decrypt(entry.password, vaultSecret);
+                const plain = decryptEntryPassword(entry.password);
                 if (plain === null) {
                     throw new Error(`无法解密密码条目“${entry.title || entry.id}”`);
                 }
@@ -466,7 +517,7 @@ function createPasswordsStore() {
             if (!vaultSecret || !payload || !Array.isArray(payload.passwords)) return null;
             const passwords = payload.passwords.map(entry => {
                 if (!entry.password) return { ...entry, password: '' };
-                const plain = decrypt(entry.password, vaultSecret);
+                const plain = decryptEntryPassword(entry.password);
                 if (plain === null) {
                     throw new Error(`无法解密旧云端条目“${entry.title || entry.id}”`);
                 }
@@ -483,7 +534,7 @@ function createPasswordsStore() {
                 .filter(entry => entry && typeof entry.id === 'string' && typeof entry.password === 'string')
                 .map(entry => ({
                     ...entry,
-                    password: entry.password ? encrypt(entry.password, vaultSecret) : ''
+                    password: entry.password ? (vaultEntryKey ? encryptVaultPayload(entry.password, vaultEntryKey) : encrypt(entry.password, vaultSecret)) : ''
                 }));
             const categories = Array.isArray(payload.categories) && payload.categories.length > 0
                 ? payload.categories
@@ -584,22 +635,19 @@ function createPasswordsStore() {
                 return { success: false, error: e.message || '设备密钥不可用' };
             }
 
+            const decryptedEntries = [];
             for (let i = 0; i < passwords.length; i += BATCH_SIZE) {
                 await new Promise(resolve => setTimeout(resolve, 0));
                 const batch = passwords.slice(i, i + BATCH_SIZE);
                 for (const p of batch) {
-                    const plain = decrypt(p.password, oldSecret);
+                    const plain = decryptEntryPassword(p.password);
                     if (plain === null) {
                         // Never rewrite an entry we could not read: encrypt('') is
                         // null and would permanently destroy the stored secret.
                         failedPasswords.push(p.title || p.id);
                         continue;
                     }
-                    reEncryptedPasswords.push({
-                        ...p,
-                        password: plain === '' ? '' : encrypt(plain, newSecret),
-                        updatedAt: now
-                    });
+                    decryptedEntries.push({ entry: p, plain });
                 }
             }
 
@@ -611,6 +659,18 @@ function createPasswordsStore() {
             }
 
             const newHash = await hashPassword(newPassword);
+            // Re-derive the fast entry key under the new master before writing.
+            // Metadata is re-encrypted by saveImmediate().
+            resetVaultKeyCache();
+            vaultSecret = newSecret;
+            vaultEntryKey = await ensureVaultEntryKey(newSecret);
+            for (const { entry, plain } of decryptedEntries) {
+                reEncryptedPasswords.push({
+                    ...entry,
+                    password: plain === '' ? '' : encryptVaultPayload(plain, vaultEntryKey),
+                    updatedAt: now
+                });
+            }
             await setActiveSecrets(newPassword);
 
             try {
@@ -623,6 +683,8 @@ function createPasswordsStore() {
                 // Nothing reached disk: keep the old master usable in this session.
                 currentMasterPassword = oldPassword;
                 vaultSecret = oldSecret;
+                resetVaultKeyCache();
+                vaultEntryKey = await ensureVaultEntryKey(oldSecret);
                 return { success: false, error: `主密码更新保存失败：${error.message || error}` };
             }
 
@@ -659,7 +721,7 @@ function createPasswordsStore() {
             }
             return passwords.map(p => ({
                 ...p,
-                password: decrypt(p.password, vaultSecret) || '解密失败'
+                password: decryptEntryPassword(p.password) || '解密失败'
             }));
         },
 
@@ -695,13 +757,18 @@ function createPasswordsStore() {
             // Re-encrypt from the plain master password to the bound secret.
             const boundSecret = composeVaultSecret(currentMasterPassword, bindingKey);
             const now = new Date().toISOString();
-            const rebound = state.passwords.map(p => {
-                const plain = decrypt(p.password, currentMasterPassword);
-                if (plain === null) return p;
-                return { ...p, password: encrypt(plain, boundSecret), updatedAt: now };
-            });
-
+            const plains = state.passwords.map(p => ({ entry: p, plain: decryptEntryPassword(p.password) }));
+            if (plains.some(item => item.plain === null)) {
+                return { success: false, error: '有密码条目无法解密，已取消设备绑定' };
+            }
+            resetVaultKeyCache();
             vaultSecret = boundSecret;
+            vaultEntryKey = await ensureVaultEntryKey(boundSecret);
+            const rebound = plains.map(({ entry, plain }) => ({
+                ...entry,
+                password: encryptVaultPayload(plain, vaultEntryKey),
+                updatedAt: now
+            }));
             try {
                 update(s => {
                     const next = { ...s, passwords: rebound };
@@ -731,16 +798,20 @@ function createPasswordsStore() {
                 return { success: false, error: '设备绑定未启用' };
             }
 
-            const previousSecret = vaultSecret;
             const now = new Date().toISOString();
-            const unbound = state.passwords.map(p => {
-                const plain = decrypt(p.password, previousSecret);
-                if (plain === null) return p;
-                return { ...p, password: encrypt(plain, currentMasterPassword), updatedAt: now };
-            });
-
+            const plains = state.passwords.map(p => ({ entry: p, plain: decryptEntryPassword(p.password) }));
+            if (plains.some(item => item.plain === null)) {
+                return { success: false, error: '有密码条目无法解密，已取消解除绑定' };
+            }
             disableDeviceBinding();
+            resetVaultKeyCache();
             vaultSecret = currentMasterPassword;
+            vaultEntryKey = await ensureVaultEntryKey(vaultSecret);
+            const unbound = plains.map(({ entry, plain }) => ({
+                ...entry,
+                password: encryptVaultPayload(plain, vaultEntryKey),
+                updatedAt: now
+            }));
             update(s => {
                 const next = { ...s, passwords: unbound };
                 saveImmediate(next);
@@ -772,8 +843,17 @@ function createPasswordsStore() {
             const oldSecret = composeVaultSecret(masterPassword, oldBindingKey);
 
             // Confirm the recovered key actually opens the vault before rewriting it.
+            // v4 entries are opened by the cached entry key; legacy entries fall back
+            // to the old per-entry PBKDF2 format.
+            resetVaultKeyCache();
+            const recoverySalt = state.passwords.find(p => p.kdfSalt)?.kdfSalt || '';
+            const recoveredEntryKey = await ensureVaultEntryKey(oldSecret, recoverySalt);
             const sample = state.passwords.find(p => p.password);
-            if (sample && decrypt(sample.password, oldSecret) === null) {
+            const sampleOk = !sample || (String(sample.password).startsWith('v4:')
+                ? decryptVaultPayload(sample.password, recoveredEntryKey) !== null
+                : decrypt(sample.password, oldSecret) !== null);
+            if (!sampleOk) {
+                resetVaultKeyCache();
                 return { success: false, error: '恢复码与当前数据不匹配' };
             }
 
@@ -796,8 +876,10 @@ function createPasswordsStore() {
 
             currentMasterPassword = masterPassword;
             vaultSecret = oldSecret;
+            vaultEntryKey = recoveredEntryKey;
             clearPin();
 
+            await hydrateVaultEntries();
             update(s => ({ ...s, isUnlocked: true }));
 
             const normalizedCode = normalizeRecoveryCode(recoveryCode);
@@ -828,19 +910,24 @@ function createPasswordsStore() {
             const nextBindingKey = bindingKeyFromRecoveryCode(recoveryCode);
             const nextSecret = composeVaultSecret(currentMasterPassword, nextBindingKey);
 
-            const previousSecret = vaultSecret;
             const now = new Date().toISOString();
-            const rebound = state.passwords.map(p => {
-                const plain = decrypt(p.password, previousSecret);
-                if (plain === null) return p;
-                return { ...p, password: encrypt(plain, nextSecret), updatedAt: now };
-            });
+            const plains = state.passwords.map(p => ({ entry: p, plain: decryptEntryPassword(p.password) }));
+            if (plains.some(item => item.plain === null)) {
+                return { success: false, error: '有密码条目无法解密，已取消生成恢复码' };
+            }
 
             if (!storeBindingEnvelope(nextBindingKey, deviceKey)) {
                 return { success: false, error: '生成恢复码失败' };
             }
 
+            resetVaultKeyCache();
             vaultSecret = nextSecret;
+            vaultEntryKey = await ensureVaultEntryKey(nextSecret);
+            const rebound = plains.map(({ entry, plain }) => ({
+                ...entry,
+                password: encryptVaultPayload(plain, vaultEntryKey),
+                updatedAt: now
+            }));
             update(s => {
                 const next = { ...s, passwords: rebound };
                 saveImmediate(next);

@@ -25,6 +25,7 @@ use base64::Engine;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod autostart;
 mod device;
+mod local_db;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
 
@@ -1478,7 +1479,13 @@ pub fn run() {
             get_close_to_quit,
             exit_app,
             device::get_device_key,
-            device::reset_device_key
+            device::reset_device_key,
+            local_db::local_db_load,
+            local_db::local_db_save,
+            local_db::local_db_info,
+            local_db::local_db_backup,
+            local_db::local_db_restore,
+            local_db::local_db_open_folder
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

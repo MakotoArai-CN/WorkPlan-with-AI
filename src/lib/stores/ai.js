@@ -3416,7 +3416,7 @@ function buildNativeToolMessages(userText, assistantContext = {}, intentHint = n
 2. 用户要求搜索网页、访问 URL、查询实时/最新信息时，调用 workplan_web_search。
 3. 用户要求本地文件搜索/读取/写入/删除时，调用 workplan_local_file。
 4. 普通闲聊、解释、写作、翻译、不需要项目工具的问题，不要调用工具，直接回答文本。
-5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。
+5. update/delete/query/subtask 必须使用上下文中的完整 ID，不要编造 ID。query 必须在 task_ids 中返回所有匹配项的完整 ID，不能为空，不能用 summary 代替任务列表；如果确实没有任何匹配项，也要说明筛选依据，但不能凭空声称数据不存在。
 6. 普通任务时间使用 YYYY-MM-DDTHH:mm；定时任务 repeatDays 中周日=0，周一至周六=1-6。
 7. 普通任务的可操作数据已按时间范围过滤；用户未明确提到过去/历史时，不要操作未列出的历史任务。
 8. 用户描述要做/已做的工作内容（即使含"修改/删除/完成"等动词），若对象不在上面列出的任务中，应使用 operation=create 新建任务记录该工作，而非 update/delete 已有任务。
@@ -3591,44 +3591,6 @@ function describeSkippedOperations(message, skipped = []) {
     return `${message}\n\n⚠️ 已跳过 ${skipped.length} 项操作 —— ${details}`;
 }
 
-function filterNativeItemsForQuery(items = [], userText = '', args = {}) {
-    const text = `${userText || ''} ${args.filter_description || ''} ${args.summary || ''}`.toLowerCase();
-    const dateInfo = getDateInfo();
-    let range = null;
-    if (/今天|今日/.test(text)) {
-        const day = formatDateForAI(dateInfo.today);
-        range = { start: day, end: day };
-    } else if (/明天|明日/.test(text)) {
-        const day = formatDateForAI(dateInfo.tomorrow);
-        range = { start: day, end: day };
-    } else if (/本周|这周|本星期/.test(text)) {
-        range = { start: formatDateForAI(dateInfo.thisWeek.start), end: formatDateForAI(dateInfo.thisWeek.end) };
-    } else if (/上周/.test(text)) {
-        range = { start: formatDateForAI(dateInfo.lastWeek.start), end: formatDateForAI(dateInfo.lastWeek.end) };
-    } else if (/下周/.test(text)) {
-        range = { start: formatDateForAI(dateInfo.nextWeek.start), end: formatDateForAI(dateInfo.nextWeek.end) };
-    } else if (/本月|这个月/.test(text)) {
-        range = { start: formatDateForAI(dateInfo.thisMonth.start), end: formatDateForAI(dateInfo.thisMonth.end) };
-    } else if (/上月|上个月/.test(text)) {
-        range = { start: formatDateForAI(dateInfo.lastMonth.start), end: formatDateForAI(dateInfo.lastMonth.end) };
-    }
-
-    const wantsDone = /已完成|完成了|做完/.test(text);
-    const wantsDoing = /进行中|正在做/.test(text);
-    const wantsTodo = /未开始|待办|没开始/.test(text);
-    const wantsIncomplete = /未完成|没完成/.test(text);
-
-    return (Array.isArray(items) ? items : []).filter(item => {
-        const date = String(item.date || item.startDate || item.endDate || '').slice(0, 10);
-        if (range && (!date || date < range.start || date > range.end)) return false;
-        if (wantsDone && item.status !== 'done') return false;
-        if (wantsDoing && item.status !== 'doing') return false;
-        if (wantsTodo && item.status !== 'todo') return false;
-        if (wantsIncomplete && item.status === 'done') return false;
-        return true;
-    });
-}
-
 async function runNativeProjectAction(args = {}, userText = '', assistantContext = {}) {
     const source = normalizeNativeProjectSource(args.source, assistantContext.source);
     const operation = String(args.operation || '').toLowerCase();
@@ -3669,14 +3631,7 @@ async function runNativeProjectAction(args = {}, userText = '', assistantContext
 
     if (operation === 'query') {
         const requestedIds = args.task_ids || args.matched_task_ids || args.delete_task_ids || args.task_id || [];
-        let matched = findNativeItemsByIds(items, requestedIds);
-
-        // Models often answer "查一下本周任务" without echoing IDs. Falling
-        // back to the visible task list is much better than claiming the user
-        // has no data; apply the obvious date/status filters from the prompt.
-        if (!matched.length) {
-            matched = filterNativeItemsForQuery(items, userText, args);
-        }
+        const matched = findNativeItemsByIds(items, requestedIds);
 
         if (matched.length > 0) {
             return {
@@ -4088,14 +4043,47 @@ async function tryResolveWithNativeTools(userText, assistantContext, config, int
 
     try {
         const { callAIWithMessagesAndTools } = await import('../utils/ai-providers.js');
-        const response = await callAIWithMessagesAndTools(
-            config,
-            buildNativeToolMessages(userText, assistantContext, intentHint, allowLocalFiles),
-            tools,
-            { maxTokens: Number(config.maxTokens) || 4096, toolChoice: 'auto' }
-        );
+        const baseMessages = buildNativeToolMessages(userText, assistantContext, intentHint, allowLocalFiles);
+        const MAX_QUERY_ID_RETRIES = 3;
+        let response = null;
+        let toolCalls = [];
+        let idRetryExhausted = false;
 
-        let toolCalls = response.toolCalls || [];
+        for (let attempt = 0; attempt <= MAX_QUERY_ID_RETRIES; attempt += 1) {
+            const messages = attempt === 0
+                ? baseMessages
+                : [
+                    ...baseMessages,
+                    {
+                        role: 'user',
+                        content: '【系统校验】上一轮 workplan_project_action 查询没有返回 task_ids。查询任务时必须把匹配到的完整任务 ID 放进 task_ids 数组，不能为空，也不能只给 summary。请根据用户问题重新调用工具并返回 task_ids。'
+                    }
+                ];
+            response = await callAIWithMessagesAndTools(
+                config,
+                messages,
+                tools,
+                { maxTokens: Number(config.maxTokens) || 4096, toolChoice: 'auto' }
+            );
+            toolCalls = response.toolCalls || [];
+            const missingTaskIds = toolCalls.some((call) => {
+                if (call.name !== 'workplan_project_action') return false;
+                const args = parseNativeToolArguments(call.arguments);
+                if (String(args.operation || '').toLowerCase() !== 'query') return false;
+                const ids = args.task_ids || args.matched_task_ids || args.task_id;
+                return !(Array.isArray(ids) ? ids.length : String(ids || '').trim());
+            });
+            if (!missingTaskIds) break;
+            if (attempt === MAX_QUERY_ID_RETRIES) idRetryExhausted = true;
+        }
+
+        if (idRetryExhausted) {
+            return {
+                role: 'assistant',
+                type: 'text',
+                content: '查询失败：模型连续 3 次没有返回任务 ID，无法确定要查询的数据。请重试，或在 AI 设置里更换模型。'
+            };
+        }
         // Task authoring must not be swallowed by a stray web-search tool call.
         if (options.skipWebSearch) {
             const filtered = toolCalls.filter(call => call.name !== 'workplan_web_search');
