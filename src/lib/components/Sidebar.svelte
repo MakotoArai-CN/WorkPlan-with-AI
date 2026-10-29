@@ -4,12 +4,13 @@
     import { showConfirm, showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
-    import { exportToJSON, describeSavedLocation } from '../utils/export.js';
+    import BackupModal from './BackupModal.svelte';
     import { tick } from 'svelte';
 
     const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
 
-    let fileInput;
+    let showBackup = false;
+    let backupMode = 'export';
     let navEl;
     let pillTop = 0;
     let pillHeight = 0;
@@ -155,44 +156,6 @@
         return 'bg-slate-50 text-slate-400 border-slate-200';
     }
 
-    async function exportData() {
-        const t = get(_);
-        showToast({ message: t('settings.backup'), type: 'info', duration: 1500 });
-        const result = await exportToJSON(
-            JSON.parse(taskStore.exportData($taskStore)),
-            `planpro_backup_${new Date().toISOString().split('T')[0]}.json`
-        );
-        if (result?.cancelled) {
-            showToast({ message: t('common.cancel'), type: 'info' });
-        } else if (result?.success) {
-            const location = describeSavedLocation(result.path);
-            showToast({ message: location ? `${t('settings.backup_success')}: ${location}` : t('settings.backup_success'), type: 'success', duration: 6000 });
-        } else {
-            showToast({ message: String(result?.error || t('common.error')), type: 'error' });
-        }
-    }
-
-    function handleImport(event) {
-        const t = get(_);
-        const file = event.target.files[0];
-        if (!file) return;
-        showToast({ message: t('settings.import_importing') || '...', type: 'info', duration: 1500 });
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const result = taskStore.importData(e.target.result);
-            if (result.success) {
-                showToast({ message: t('settings.import_success'), type: 'success' });
-            } else {
-                showToast({ message: t('settings.import_failed', { values: { error: result.error } }), type: 'error' });
-            }
-        };
-        reader.onerror = () => {
-            showToast({ message: t('settings.file_read_failed'), type: 'error' });
-        };
-        reader.readAsText(file);
-        event.target.value = '';
-    }
-
     async function logout() {
         const t = get(_);
         const confirmed = await showConfirm({
@@ -335,7 +298,7 @@
 
         <div class={`grid gap-2 ${collapsed ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <button
-                on:click={exportData}
+                on:click={() => { backupMode = 'export'; showBackup = true; }}
                 class={`flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-xs'}`}
                 title={$_('settings.backup')}
             >
@@ -344,7 +307,7 @@
             </button>
 
             <button
-                on:click={() => fileInput.click()}
+                on:click={() => { backupMode = 'import'; showBackup = true; }}
                 class={`flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-xs'}`}
                 title={$_('settings.restore')}
             >
@@ -370,7 +333,9 @@
                 {#if !collapsed}<span>{$_('settings.danger_zone')}</span>{/if}
             </button>
 
-            <input type="file" bind:this={fileInput} on:change={handleImport} class="hidden" accept=".json">
         </div>
     </div>
+
+<BackupModal bind:show={showBackup} mode={backupMode} onClose={() => (showBackup = false)} />
+
 </aside>
