@@ -15,6 +15,15 @@
         suggestMapping
     } from '../utils/bank-import.js';
     import { formatLocalDate } from '../utils/datetime.js';
+    import {
+        calibrateOvertimeRate,
+        getHourlyRate,
+        getMonthSummary,
+        getMonthlyOvertimeActual,
+        getOvertimeBaseSalary,
+        getOvertimeCalibration,
+        getStandardHourlyRate
+    } from '../utils/overtime.js';
     import { parsePdfBankStatement } from '../utils/pdf-import.js';
 
     export let show = false;
@@ -52,6 +61,13 @@
     let selected = {};
     let importMessage = '';
     let selectedYear = String(new Date().getFullYear());
+    let actualMonth = (() => {
+        const overrides = Array.isArray(config.overtimeMonthlyActuals) ? config.overtimeMonthlyActuals : [];
+        const latest = overrides.slice().sort((a, b) => String(a.month).localeCompare(String(b.month))).at(-1);
+        return latest?.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    })();
+    let monthActualInput = '';
+    let loadedActualMonth = '';
 
     $: actuals = (Array.isArray(config.salaryActuals) ? config.salaryActuals : [])
         .slice()
@@ -70,6 +86,58 @@
     $: previewRows = transactions.filter(item => !salaryOnly || isSalaryDescription(item.description));
     $: selectedCount = previewRows.filter(item => selected[item.key]).length;
     $: allSelected = previewRows.length > 0 && selectedCount === previewRows.length;
+
+    $: actualYear = Number(actualMonth.slice(0, 4));
+    $: actualMonthNumber = Number(actualMonth.slice(5, 7));
+    $: monthSummary = getMonthSummary(overtimeRecords, actualYear, actualMonthNumber, config);
+    $: monthlyOverride = getMonthlyOvertimeActual(config, actualMonth);
+    $: if (actualMonth && actualMonth !== loadedActualMonth) {
+        loadedActualMonth = actualMonth;
+        monthActualInput = monthlyOverride ? String(monthlyOverride.amount) : '';
+    }
+    $: overtimeBase = getOvertimeBaseSalary(config);
+    $: standardHourlyRate = getStandardHourlyRate(config);
+    $: hourlyRate = getHourlyRate(config);
+    $: calibration = getOvertimeCalibration(overtimeRecords, config);
+    $: formulaBreakdown = (() => {
+        const byType = monthSummary.payableByType || { weekday: 0, weekend: 0, holiday: 0 };
+        const items = [
+            { key: 'weekend', hours: byType.weekend, multiplier: config.weekendMultiplier || 2 },
+            { key: 'weekday', hours: byType.weekday, multiplier: config.weekdayMultiplier || 1.5 },
+            { key: 'holiday', hours: byType.holiday, multiplier: config.holidayMultiplier || 3 }
+        ].filter(item => item.hours > 0).map(item => ({
+            ...item,
+            amount: Math.round(item.hours * item.multiplier * hourlyRate * 100) / 100
+        }));
+        return { items, total: Math.round(items.reduce((sum, item) => sum + item.amount, 0) * 100) / 100 };
+    })();
+
+    function saveMonthActual() {
+        const raw = String(monthActualInput ?? '').trim();
+        if (raw !== '' && (!Number.isFinite(Number(raw)) || Number(raw) < 0)) return;
+        const next = (config.overtimeMonthlyActuals || []).filter(item => item.month !== actualMonth);
+        if (raw !== '') next.push({ month: actualMonth, amount: Math.round(Number(raw) * 100) / 100, updatedAt: new Date().toISOString() });
+        const nextConfig = { ...config, overtimeMonthlyActuals: next };
+        const learned = calibrateOvertimeRate(overtimeRecords, nextConfig);
+        onUpdateConfig({
+            overtimeMonthlyActuals: next,
+            overtimeLearnedRate: learned.rate,
+            overtimeCalibrationSamples: learned.samples
+        });
+        message = raw !== '' ? $_('salary_history.month_actual_saved') : $_('salary_history.month_actual_cleared');
+    }
+
+    function clearMonthActual() {
+        monthActualInput = '';
+        const next = (config.overtimeMonthlyActuals || []).filter(item => item.month !== actualMonth);
+        const learned = calibrateOvertimeRate(overtimeRecords, { ...config, overtimeMonthlyActuals: next });
+        onUpdateConfig({
+            overtimeMonthlyActuals: next,
+            overtimeLearnedRate: learned.rate,
+            overtimeCalibrationSamples: learned.samples
+        });
+        message = $_('salary_history.month_actual_cleared');
+    }
 
     $: trendRows = yearActuals.slice().reverse();
     $: trendValues = trendRows.map(item => Number(item.amount) || 0);
@@ -317,6 +385,55 @@
                                 </div>
                             {/if}
                         </div>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 p-3.5">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <div class="mr-auto min-w-0">
+                                <div class="text-sm font-bold text-slate-700 dark:text-slate-200">{$_('salary_history.month_actual_title')}</div>
+                                <div class="text-[10px] text-slate-500 mt-0.5">{$_('salary_history.month_actual_desc')}</div>
+                            </div>
+                            <input type="month" bind:value={actualMonth}
+                                class="h-8 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs text-slate-600 dark:text-slate-300" />
+                            <input type="number" min="0" step="0.01" bind:value={monthActualInput}
+                                placeholder={money(monthSummary.estimatedPay)}
+                                class="h-8 w-28 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs" />
+                            <button type="button" on:click={saveMonthActual}
+                                class="h-8 px-3 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold">
+                                {$_('common.save')}
+                            </button>
+                            {#if monthlyOverride}
+                                <button type="button" on:click={clearMonthActual}
+                                    class="h-8 px-2 rounded-lg border border-slate-200 dark:border-slate-600 text-[10px] font-bold text-slate-500">
+                                    {$_('salary_history.month_actual_clear')}
+                                </button>
+                            {/if}
+                        </div>
+                        <div class="mt-2 text-[10px] text-slate-500">
+                            {$_(`overtime.month_total`)}: <b class="text-orange-600">{money(monthSummary.pay)}</b>
+                            <span class="mx-1">·</span>{$_('overtime.formula_total')}: <b>{money(monthSummary.estimatedPay)}</b>
+                            {#if monthlyOverride}<span class="ml-1 font-bold text-emerald-600">· {$_('overtime.actual_label')}</span>{/if}
+                        </div>
+                        <details class="mt-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 px-2.5 py-2 text-[10px]">
+                            <summary class="cursor-pointer font-bold text-slate-500">{$_('overtime.formula_title')}</summary>
+                            <div class="mt-1 space-y-1 text-slate-500 dark:text-slate-400">
+                                <div>{$_('overtime.formula_base')}: {money(overtimeBase)} ÷ {config.workdaysPerMonth || 21.75} ÷ {config.hoursPerDay || 8} = <b>{money(standardHourlyRate)}</b> / h</div>
+                                {#if calibration.learnedRate > 0}
+                                    <div class="font-bold text-indigo-600 dark:text-indigo-400">
+                                        {$_('overtime.formula_learned', { values: { rate: money(calibration.effectiveRate), samples: calibration.samples } })}
+                                        · {$_('overtime.formula_multiplier', { values: { value: calibration.impliedMultiplier } })}
+                                    </div>
+                                {/if}
+                                {#each formulaBreakdown.items as item}
+                                    <div>
+                                        {item.key === 'weekend' ? $_('overtime.type_weekend') : item.key === 'holiday' ? $_('overtime.type_holiday') : $_('overtime.type_weekday')}
+                                        {item.hours}h × {item.multiplier} × {money(hourlyRate)} = <b>{money(item.amount)}</b>
+                                    </div>
+                                {/each}
+                                <div>{$_('overtime.formula_total')}: <b>{money(formulaBreakdown.total)}</b></div>
+                            </div>
+                        </details>
+                        {#if message}<div class="text-[10px] text-emerald-600 mt-1">{message}</div>{/if}
                     </div>
 
                     <div class="rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 p-3.5">

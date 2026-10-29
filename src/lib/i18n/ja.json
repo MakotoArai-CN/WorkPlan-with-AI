@@ -1327,6 +1327,11 @@
     "trend_title": "給与推移",
     "trend_desc": "月ごとの手取り",
     "trend_empty": "折れ線には2か月以上の給与記録が必要です",
-    "highest": "年間最高"
+    "highest": "年間最高",
+    "month_actual_title": "今月の実際の残業代",
+    "month_actual_desc": "月の実際額で校准します。空欄なら計算式の概算です。",
+    "month_actual_clear": "計算式に戻す",
+    "month_actual_saved": "月の実際の残業代を保存しました",
+    "month_actual_cleared": "計算式の概算に戻しました"
   }
 }
