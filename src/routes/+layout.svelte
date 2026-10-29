@@ -11,6 +11,7 @@
     import { passwordsStore } from '$lib/stores/passwords.js';
     import { initSecureSync } from '$lib/utils/secure-sync.js';
     import { isWebDemo } from '$lib/utils/runtime.js';
+    import { initLocalDatabase, installLocalDatabaseMirror } from '$lib/utils/local-db.js';
     import { formatLocalDate } from '$lib/utils/datetime.js';
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
@@ -45,6 +46,17 @@
                 });
             }
             if (destroyed) return;
+
+            try {
+                const localDb = await initLocalDatabase();
+                if (localDb.reloaded) {
+                    location.reload();
+                    return;
+                }
+                installLocalDatabaseMirror();
+            } catch (error) {
+                console.warn('Local database init failed:', error);
+            }
 
             i18nReady = true;
             taskStore.loadFromLocal();
