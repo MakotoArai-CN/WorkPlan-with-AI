@@ -106,7 +106,7 @@
                 variant: 'danger'
             });
             if (!confirmed) return;
-            applyLocalBackupPayload(payload);
+            await applyLocalBackupPayload(payload);
             showToast({ message: $_('settings.secure_backup_imported'), type: 'success', duration: 2200 });
             setTimeout(() => location.reload(), 450);
         } catch (e) {
