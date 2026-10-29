@@ -37,6 +37,18 @@ export const SALARY_COMPONENT_TEMPLATE = Object.freeze([
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME_PATTERN = /^(\d{2}):(\d{2})$/;
 
+const VARIABLE_SALARY_PATTERN = /(加班|过节|节日|奖金|提成|一次性|社保|公积金)/;
+
+export function isFixedSalaryComponent(component) {
+    if (!component || typeof component !== 'object') return false;
+    if (component.fixed === true) return true;
+    if (component.fixed === false) return false;
+    // Legacy configs have no `fixed` flag: variable/one-off items such as
+    // overtime, holiday pay and social insurance must not inflate the fixed
+    // salary used for hourly/overtime estimates.
+    return !VARIABLE_SALARY_PATTERN.test(String(component.name || ''));
+}
+
 function normalizeSalaryComponents(components, monthlySalary) {
     const source = Array.isArray(components) && components.length > 0
         ? components
@@ -51,7 +63,8 @@ function normalizeSalaryComponents(components, monthlySalary) {
                 id: typeof item.id === 'string' && item.id ? item.id : `component_${index + 1}`,
                 name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `项目 ${index + 1}`,
                 amount: Number.isFinite(amount) ? Math.min(100_000_000, Math.max(0, amount)) : 0,
-                inOvertimeBase: item.inOvertimeBase === true
+                fixed: isFixedSalaryComponent(item),
+                inOvertimeBase: item.inOvertimeBase === true && isFixedSalaryComponent(item)
             };
         });
 }
@@ -62,14 +75,18 @@ export function getSalaryComponents(config = DEFAULT_OVERTIME_CONFIG) {
 
 export function getFixedSalaryTotal(config = DEFAULT_OVERTIME_CONFIG) {
     const components = getSalaryComponents(config);
-    return Math.round(components.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+    return Math.round(
+        components
+            .filter(item => isFixedSalaryComponent(item))
+            .reduce((sum, item) => sum + item.amount, 0) * 100
+    ) / 100;
 }
 
 export function getOvertimeBaseSalary(config = DEFAULT_OVERTIME_CONFIG) {
     const normalized = normalizeOvertimeConfig(config);
     if (normalized.overtimeBaseMode === 'total') return getFixedSalaryTotal(normalized);
     const components = normalized.salaryComponents;
-    const selected = components.filter(item => item.inOvertimeBase);
+    const selected = components.filter(item => item.inOvertimeBase && isFixedSalaryComponent(item));
     if (selected.length > 0) {
         return Math.round(selected.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
     }
@@ -86,7 +103,11 @@ export function normalizeOvertimeConfig(config = {}) {
     };
     const monthlySalary = number(merged.monthlySalary, 0, 0, 100_000_000);
     const salaryComponents = normalizeSalaryComponents(merged.salaryComponents, monthlySalary);
-    const componentTotal = Math.round(salaryComponents.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+    const fixedComponentTotal = Math.round(
+        salaryComponents
+            .filter(item => isFixedSalaryComponent(item))
+            .reduce((sum, item) => sum + item.amount, 0) * 100
+    ) / 100;
     const payday = Math.round(number(merged.payday, 15, 1, 31, true));
     const salaryActuals = (Array.isArray(merged.salaryActuals) ? merged.salaryActuals : [])
         .filter(item => item && typeof item === 'object')
@@ -120,7 +141,7 @@ export function normalizeOvertimeConfig(config = {}) {
             };
         });
     return {
-        monthlySalary: componentTotal > 0 ? componentTotal : monthlySalary,
+        monthlySalary: fixedComponentTotal > 0 ? fixedComponentTotal : monthlySalary,
         currency: typeof merged.currency === 'string' && merged.currency ? merged.currency : 'CNY',
         workdaysPerMonth: number(merged.workdaysPerMonth, 21.75, 1, 31, true),
         hoursPerDay: number(merged.hoursPerDay, 8, 1, 24, true),

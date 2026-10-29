@@ -1,10 +1,12 @@
 <script>
     import { currentView, taskStore, enabledScheduledCount, activeTasks } from '../stores/tasks.js';
     import { settingsStore } from '../stores/settings.js';
+    import { passwordsStore } from '../stores/passwords.js';
     import { showConfirm, showToast } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { tick } from 'svelte';
+    import { flushLocalDatabase } from '../utils/local-db.js';
     import { openBackupModal } from '../stores/backup-modal.js';
     import { isWebDemo } from '../utils/runtime.js';
 
@@ -165,8 +167,11 @@
             variant: 'warning'
         });
         if (confirmed) {
+            passwordsStore.suspendForAccountSwitch();
             taskStore.logout();
+            await flushLocalDatabase();
             showToast({ message: t('settings.logout_success'), type: 'info' });
+            location.reload();
         }
     }
 

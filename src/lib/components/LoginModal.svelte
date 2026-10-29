@@ -156,6 +156,9 @@
         loginSuccess = true;
         if (!reduced) await new Promise((resolve) => setTimeout(resolve, 320));
         taskStore.login(inputKey.trim());
+        // Stores are module singletons; a full reload is required so notes,
+        // passwords and salary data are re-read for the selected account.
+        setTimeout(() => location.reload(), 450);
     }
 
     function generateKey() {

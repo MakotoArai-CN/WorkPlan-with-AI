@@ -47,8 +47,8 @@
                 <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
                     <div><span class="text-slate-400">{$_('payroll.fixed_salary')}</span><div class="font-black">{money(payroll.fixedTotal)}</div></div>
                     <div><span class="text-slate-400">{$_('payroll.estimated')}</span><div class="font-black text-orange-600">{money(payroll.current.estimated)}</div></div>
-                    <div><span class="text-slate-400">{$_('payroll.annual_net')}</span><div class="font-black text-emerald-600">{money(annual.totalNet)}</div></div>
-                    <div><span class="text-slate-400">{$_('payroll.annual_overtime')}</span><div class="font-black text-orange-600">{money(annual.totalOvertime)}</div></div>
+                    <div><span class="text-slate-400">{$_('payroll.annual_net')}</span><div class="font-black text-emerald-600">{annual.monthsRecorded ? money(annual.totalNet) : $_('payroll.not_recorded')}</div></div>
+                    <div><span class="text-slate-400">{$_('payroll.annual_overtime')}</span><div class="font-black text-orange-600">{annual.monthsRecorded ? money(annual.totalOvertime) : '-'}</div></div>
                 </div>
             </div>
         {:else}
@@ -124,10 +124,14 @@
                     </div>
                     <div class="mt-2 flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 px-2 py-1.5 text-[9px]">
                         <span class="text-slate-400">{$_('payroll.annual_net')}</span>
-                        <b class="text-emerald-600">{money(annual.totalNet)}</b>
-                        <span class="text-slate-300">·</span>
-                        <span class="text-slate-400">{$_('payroll.annual_overtime')}</span>
-                        <b class="text-orange-600">{money(annual.totalOvertime)}</b>
+                        {#if annual.monthsRecorded}
+                            <b class="text-emerald-600">{money(annual.totalNet)}</b>
+                            <span class="text-slate-300">·</span>
+                            <span class="text-slate-400">{$_('payroll.annual_overtime')}</span>
+                            <b class="text-orange-600">{money(annual.totalOvertime)}</b>
+                        {:else}
+                            <b class="text-slate-400">{$_('payroll.not_recorded')}</b>
+                        {/if}
                         <button on:click={() => (showSalaryHistory = true)} class="ml-auto font-bold text-slate-500 hover:text-orange-600">
                             {$_('salary_history.entry')} →
                         </button>
