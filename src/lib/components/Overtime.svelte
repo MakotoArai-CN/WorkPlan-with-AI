@@ -117,9 +117,8 @@
         { value: 'none', label: $_('overtime.comp_none') }
     ];
     $: viewOptions = [
-        { value: 'year', label: $_('overtime.view_year') },
         { value: 'month', label: $_('overtime.view_month') },
-        { value: 'day', label: $_('overtime.view_day') }
+        { value: 'year', label: $_('overtime.view_year') }
     ];
     $: detailOptions = [
         { value: 'list', label: $_('overtime.layout_list'), icon: 'ph-list-bullets' },
