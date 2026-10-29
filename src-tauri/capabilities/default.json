@@ -40,6 +40,7 @@
     "store:allow-save",
     "store:allow-load",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

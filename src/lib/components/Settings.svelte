@@ -13,6 +13,7 @@
     import { exportToJSON, describeSavedLocation } from "../utils/export.js";
     import { pickTrustedDirectory } from "../utils/local-file-tools.js";
     import VaultwardenImport from "./VaultwardenImport.svelte";
+    import DataRepairModal from "./DataRepairModal.svelte";
     import {
         DATABASE_PROVIDER_CATALOG,
         DATABASE_SETUP_SQL,
@@ -23,6 +24,20 @@
     let isAndroid = false;
 
     let checkingUpdate = false;
+    let repairClicks = 0;
+    let repairClickTimer = null;
+    let showDataRepair = false;
+
+    function handleVersionClick() {
+        repairClicks += 1;
+        if (repairClickTimer) clearTimeout(repairClickTimer);
+        repairClickTimer = setTimeout(() => { repairClicks = 0; }, 1800);
+        if (repairClicks >= 7) {
+            repairClicks = 0;
+            if (repairClickTimer) clearTimeout(repairClickTimer);
+            showDataRepair = true;
+        }
+    }
     $: databaseProviderOptions = DATABASE_PROVIDER_CATALOG.map(provider => ({ value: provider.id, label: provider.name }));
     let themeGridEl;
     let languageGridEl;
@@ -1299,7 +1314,14 @@
                     </div>
                     <div class="flex-1">
                         <h3 class="text-lg md:text-xl font-bold text-slate-800 dark:text-slate-100">WorkPlan with AI</h3>
-                        <div class="text-xs md:text-sm text-slate-500 dark:text-slate-400">{$_('settings.version')} {$settingsStore.appVersion}</div>
+                        <button type="button" on:click={handleVersionClick}
+                            class="text-left text-xs md:text-sm text-slate-500 dark:text-slate-400 transition hover:text-slate-700 dark:hover:text-slate-200"
+                            title="连续点击 7 次打开数据修复工具">
+                            {$_('settings.version')} {$settingsStore.appVersion}
+                        </button>
+                        {#if repairClicks >= 3}
+                            <div class="mt-1 text-[9px] text-amber-600 dark:text-amber-400">再点击 {7 - repairClicks} 次打开数据修复工具</div>
+                        {/if}
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2 md:gap-3">
@@ -1326,4 +1348,6 @@
             Powered by ❤️ MakotoArai-CN
         </div>
     </div>
+
+<DataRepairModal bind:show={showDataRepair} onClose={() => (showDataRepair = false)} />
 </div>
