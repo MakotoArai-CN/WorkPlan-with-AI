@@ -401,6 +401,19 @@ export async function exportToEncryptedJSON(data, filename = 'export.json', pass
     }
 }
 
+export async function exportBackupPackage(packageValue, filename = 'WorkPlan_Backup.wpb') {
+    try {
+        const content = JSON.stringify(packageValue, null, 2);
+        return await downloadFile(content, filename, {
+            useSaveDialog: isTauriRuntime,
+            filters: [{ name: 'WorkPlan Backup', extensions: ['wpb'] }]
+        });
+    } catch (e) {
+        console.error('Backup export failed:', e);
+        return { success: false, error: e.message };
+    }
+}
+
 export async function exportToJSON(data, filename = 'export.json', options = {}) {
     const { showToast } = options;
 
