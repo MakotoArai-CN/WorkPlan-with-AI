@@ -43,6 +43,7 @@
     let editingId = null;
     let saving = false;
     let exportOpen = false;
+    let detailLayout = 'list';
     let form = createEmptyForm();
 
     const now = new Date();
@@ -64,6 +65,32 @@
     $: dayRecords = leaveRecords
         .filter(record => record.startDate <= selectedDayValue() && record.endDate >= selectedDayValue())
         .sort((a, b) => a.startDate.localeCompare(b.startDate));
+    $: detailOptions = [
+        { value: 'list', label: $_('overtime.layout_list'), icon: 'ph-list-bullets' },
+        { value: 'calendar', label: $_('overtime.layout_calendar'), icon: 'ph-calendar-blank' }
+    ];
+    $: calendarCells = (() => {
+        const firstWeekday = (new Date(cursorYear, cursorMonth - 1, 1).getDay() + 6) % 7;
+        const days = new Date(cursorYear, cursorMonth, 0).getDate();
+        return [...Array(firstWeekday).fill(null), ...Array.from({ length: days }, (_, index) => index + 1)];
+    })();
+    $: leaveByDay = (() => {
+        const map = new Map();
+        const { start, end } = monthBounds(cursorYear, cursorMonth);
+        for (const record of monthRecords) {
+            const from = record.startDate > start ? record.startDate : start;
+            const to = record.endDate < end ? record.endDate : end;
+            let cursor = new Date(`${from}T00:00:00`);
+            const last = new Date(`${to}T00:00:00`);
+            while (cursor <= last) {
+                const key = formatLocalDate(cursor);
+                if (!map.has(key)) map.set(key, []);
+                map.get(key).push(record);
+                cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+            }
+        }
+        return map;
+    })();
     $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
         month: index + 1,
         summary: getLeaveMonthSummary(leaveRecords, cursorYear, index + 1, config)
@@ -202,6 +229,11 @@
         cursorMonth = month;
         cursorDay = 1;
         viewMode = 'month';
+    }
+
+    function selectDay(day) {
+        cursorDay = day;
+        viewMode = 'day';
     }
 
     function openCreateInternal() {
@@ -473,6 +505,8 @@
                     title={viewMode === 'day' ? $_('leave.day_detail') : $_('leave.month_detail')}
                     summary={formatLeave(viewMode === 'day' ? daySummary : monthSummary)}
                     rows={visibleRecords.map(makeLeaveRow)}
+                    showLayout={viewMode === 'month'}
+                    bind:layout={detailLayout}
                     emptyTitle={$_('leave.empty')}
                     emptyDesc={$_('leave.empty_desc')}
                     addLabel={$_('leave.add_record')}
@@ -481,7 +515,43 @@
                     onDelete={deleteRecord}
                     editLabel={$_('leave.edit_record')}
                     deleteLabel={$_('leave.delete')}
-                />
+                >
+                    <div slot="calendar" class="p-3">
+                        <div class="grid grid-cols-7 gap-1 mb-1">
+                            {#each ['一', '二', '三', '四', '五', '六', '日'] as label}
+                                <div class="h-7 flex items-center justify-center text-[10px] font-bold text-slate-400">{label}</div>
+                            {/each}
+                        </div>
+                        <div class="grid grid-cols-7 gap-1">
+                            {#each calendarCells as day}
+                                {#if day}
+                                    {@const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
+                                    {@const dayLeave = leaveByDay.get(dayKey) || []}
+                                    {@const dayLeaveSummary = summarizeLeaveRecords(dayLeave, config, { year: cursorYear, month: cursorMonth, day })}
+                                    <button on:click={() => selectDay(day)}
+                                        class={`min-h-20 md:min-h-24 rounded-lg border p-1.5 text-left transition
+                                            ${dayLeave.length
+                                                ? 'border-rose-200 bg-rose-50/70 dark:border-rose-800 dark:bg-rose-900/20'
+                                                : 'border-slate-100 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-900/20 hover:border-rose-200'}`}>
+                                        <div class="text-[11px] font-black ${dayLeave.length ? 'text-rose-600' : 'text-slate-400'}">{day}</div>
+                                        {#if dayLeave.length}
+                                            <div class="mt-1 text-[9px] font-bold text-slate-600 dark:text-slate-300">{formatLeave(dayLeaveSummary)}</div>
+                                            <div class="mt-1 flex flex-wrap gap-0.5">
+                                                {#each dayLeave.slice(0, 3) as record}
+                                                    <span class="w-1.5 h-1.5 rounded-full ${record.type === 'annual' ? 'bg-rose-500' : record.type === 'sick' ? 'bg-sky-400' : 'bg-orange-400'}"></span>
+                                                {/each}
+                                            </div>
+                                        {:else}
+                                            <div class="mt-2 text-[9px] text-slate-300 dark:text-slate-600">{$_('leave.empty')}</div>
+                                        {/if}
+                                    </button>
+                                {:else}
+                                    <div></div>
+                                {/if}
+                            {/each}
+                        </div>
+                    </div>
+                </WorklogDetailCard>
             {/if}
         </div>
     </div>
