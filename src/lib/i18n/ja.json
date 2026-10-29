@@ -1038,7 +1038,11 @@
         "layout_list": "リスト",
         "layout_calendar": "カレンダー",
         "field_minutes": "分",
-        "field_hours": "時"
+        "field_hours": "時",
+        "actual_pay": "実際の残業代",
+        "actual_pay_hint": "空欄なら見積りを使用",
+        "use_estimate": "見積りを使用",
+        "export_actual_pay": "実際の残業代"
     },
     "leave": {
         "title": "休暇記録",
@@ -1216,7 +1220,24 @@
         "hourly_rate": "時給",
         "smart_estimate": "スマート見積",
         "smart_hint": "今期と直近3期間の合成：残業 {overtime} · 休暇 {leave}",
-        "salary_growth": "昇給額"
+        "salary_growth": "昇給額",
+        "slip_title": "給与明細",
+        "slip_desc": "給与構成、社会保険、控除、手取りを入力",
+        "gross_pay": "総支給額",
+        "social_insurance": "社会保険",
+        "net_pay": "手取り",
+        "deductions": "控除合計",
+        "net_auto_hint": "空欄の場合は自動計算：",
+        "note": "メモ",
+        "slip_note_placeholder": "例：9月分給与",
+        "slip_hint": "給与明細は実際の支給額を記録します。残業代は直接入力するか残業記録から見積れます。社会保険などで手取りが総支給額と異なる場合もそのまま記録できます。",
+        "annual_income": "年間収入",
+        "annual_net": "年間手取り",
+        "annual_overtime": "年間残業代",
+        "monthly_average": "月平均手取り",
+        "months_recorded": "記録月数",
+        "salary_slip": "給与明細",
+        "add_slip": "給与明細を追加"
     },
     "date_picker": {
         "placeholder": "日付を選択",
@@ -1263,6 +1284,12 @@
         "no_selected": "取り込む行を選択してください",
         "invalid_date": "有効な日付を選択してください",
         "invalid_amount": "0 より大きい実払額を入力してください",
-        "backfill_saved": "給与の補録を保存しました"
+        "backfill_saved": "給与の補録を保存しました",
+        "annual_summary": "年間収入",
+        "components": "給与構成",
+        "gross": "総支給",
+        "net": "手取り",
+        "monthly_records": "月別給与記録",
+        "slip_entry": "給与明細を追加"
     }
 }
