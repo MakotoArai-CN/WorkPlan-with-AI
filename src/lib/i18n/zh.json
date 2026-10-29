@@ -1327,6 +1327,11 @@
     "trend_title": "工资趋势",
     "trend_desc": "每月实发折线",
     "trend_empty": "至少需要两个月工资记录才能画折线",
-    "highest": "年度最高"
+    "highest": "年度最高",
+    "month_actual_title": "本月实际加班费",
+    "month_actual_desc": "按整月实际金额校准；留空则使用公式估算。",
+    "month_actual_clear": "恢复公式",
+    "month_actual_saved": "已保存整月实际加班费",
+    "month_actual_cleared": "已恢复公式估算"
   }
 }

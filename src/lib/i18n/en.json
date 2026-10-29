@@ -1327,6 +1327,11 @@
     "trend_title": "Salary trend",
     "trend_desc": "Monthly take-home",
     "trend_empty": "At least two salary records are needed for the chart",
-    "highest": "Year high"
+    "highest": "Year high",
+    "month_actual_title": "Actual overtime pay this month",
+    "month_actual_desc": "Calibrate with the actual monthly amount; leave empty for the formula estimate.",
+    "month_actual_clear": "Use formula",
+    "month_actual_saved": "Monthly actual overtime saved",
+    "month_actual_cleared": "Restored the formula estimate"
   }
 }
