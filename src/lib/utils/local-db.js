@@ -7,6 +7,17 @@ const PREFIX = 'planpro_';
 const MARKER_KEY = 'planpro_db_saved_at';
 const HYDRATED_FLAG = 'workplan_db_hydrated_once';
 const EXCLUDED = new Set(['planpro_passwords_session', MARKER_KEY]);
+function hasWorkingCopy(keys) {
+    if (typeof keys?.planpro_access_key === 'string' && keys.planpro_access_key.trim()) {
+        return true;
+    }
+    try {
+        const cache = JSON.parse(keys?.planpro_tasks_local_cache || '{}');
+        return Array.isArray(cache.tasks) && cache.tasks.length > 0;
+    } catch {
+        return false;
+    }
+}
 
 let mirroring = false;
 let hydrating = false;
@@ -88,6 +99,13 @@ async function activateMemoryStorage() {
         if (typeof value === 'string') memoryKeys.set(key, value);
     }
     memoryMode = true;
+    if (!hasWorkingCopy(Object.fromEntries(memoryKeys.entries()))) {
+        // A stray connector/theme key without an access key or task cache is not
+        // a complete working copy. Keep WebView storage and let the next launch
+        // finish hydrating instead of overwriting the database with a partial map.
+        memoryMode = false;
+        return false;
+    }
     // Flush the in-memory snapshot before dropping the WebView copy. This also
     // covers the case where localStorage was newer than the on-disk database.
     let flushed = false;
@@ -167,7 +185,7 @@ export async function initLocalDatabase() {
     try {
         const raw = await invoke('local_db_load');
         const localKeys = collectKeys();
-        const hasLocal = Object.keys(localKeys).length > 0;
+        const hasLocal = hasWorkingCopy(localKeys);
         const snapshot = readSnapshot(raw);
         if (!snapshot) {
             if (hasLocal) {
@@ -177,22 +195,21 @@ export async function initLocalDatabase() {
             return { supported: true, migrated: false, reloaded: false, empty: true };
         }
 
-        const dbSaved = Number(snapshot.savedAt) || 0;
-        const localSaved = Number(localStorage.getItem(MARKER_KEY)) || 0;
-        if (hasLocal && localSaved >= dbSaved) {
+        // If WebView still has business data, it is the current working copy
+        // (writes are mirrored continuously). Never overwrite it merely because
+        // the database's timestamp is a few milliseconds newer.
+        if (hasLocal) {
             return { supported: true, migrated: false, reloaded: false };
         }
 
-        if (!hasLocal || dbSaved > localSaved) {
-            const applied = applyKeys(snapshot.keys);
-            localStorage.setItem(MARKER_KEY, String(dbSaved));
-            if (applied > 0) {
-                // Stores have not read the database yet; one reload lets them
-                // initialize from it. The next pass activates memory storage and
-                // removes the duplicated WebView copy.
-                sessionStorage.setItem(HYDRATED_FLAG, '1');
-                return { supported: true, migrated: false, reloaded: true, applied };
-            }
+        const applied = applyKeys(snapshot.keys);
+        localStorage.setItem(MARKER_KEY, String(Number(snapshot.savedAt) || Date.now()));
+        if (applied > 0) {
+            // Stores have not read the database yet; one reload lets them
+            // initialize from it. The next pass activates memory storage and
+            // removes this temporary WebView copy.
+            sessionStorage.setItem(HYDRATED_FLAG, '1');
+            return { supported: true, migrated: false, reloaded: true, applied };
         }
         return { supported: true, migrated: false, reloaded: false, applied: 0 };
     } catch (error) {
