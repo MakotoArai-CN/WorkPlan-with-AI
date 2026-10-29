@@ -64,6 +64,37 @@ describe('home-directory local database', () => {
         expect(localStorage.getItem('planpro_notes')).toContain('n1');
     });
 
+    test('a lone incidental key does not block database hydration', async () => {
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 123456,
+            keys: {
+                planpro_access_key: 'from-db',
+                planpro_tasks_local_cache: '{"tasks":[{"id":"db-task"}]}'
+            }
+        });
+        localStorage.setItem('planpro_connector_config', '{"enabled":false}');
+        const result = await initLocalDatabase();
+        expect(result.reloaded).toBe(true);
+        expect(localStorage.getItem('planpro_access_key')).toBe('from-db');
+        expect(localStorage.getItem('planpro_tasks_local_cache')).toContain('db-task');
+    });
+
+    test('never overwrites a non-empty WebView working copy with a newer DB timestamp', async () => {
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 999999,
+            keys: { planpro_access_key: 'from-db' }
+        });
+        localStorage.setItem('planpro_db_saved_at', '1');
+        localStorage.setItem('planpro_access_key', 'local-current');
+        const result = await initLocalDatabase();
+        expect(result.reloaded).toBe(false);
+        expect(localStorage.getItem('planpro_access_key')).toBe('local-current');
+    });
+
     test('does not rehydrate repeatedly after the marker matches', async () => {
         dbContent = JSON.stringify({
             format: 'workplan-local-db',
