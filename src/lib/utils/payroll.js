@@ -11,6 +11,7 @@ import {
     getFixedSalaryTotal,
     getOvertimeBaseSalary,
     getHourlyRate,
+    getYearSummary,
     isValidDate,
     normalizeLeaveRecord,
     normalizeOvertimeConfig,
@@ -196,10 +197,23 @@ export function getPayrollEstimate(records = [], leaveRecords = [], referenceDat
     };
 }
 
-export function setActualSalary(config, cycle, amount, note = '', source = 'manual') {
+export function setActualSalary(config, cycle, amountOrDetails, note = '', source = 'manual') {
     const normalized = normalizeOvertimeConfig(config);
-    const value = Number(amount);
+    const details = amountOrDetails && typeof amountOrDetails === 'object'
+        ? amountOrDetails
+        : { amount: amountOrDetails, note };
+    const value = Number(details.amount);
     if (!Number.isFinite(value) || value < 0) return normalized.salaryActuals;
+    const components = (Array.isArray(details.components) ? details.components : [])
+        .filter(item => item && typeof item === 'object')
+        .map((item, index) => ({
+            id: typeof item.id === 'string' && item.id ? item.id : `salary_component_${index + 1}`,
+            name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `项目 ${index + 1}`,
+            amount: Math.max(0, Number(item.amount) || 0),
+            category: typeof item.category === 'string' ? item.category : 'other'
+        }));
+    const grossAmount = Number(details.grossAmount);
+    const deductions = Number(details.deductions);
     const next = (normalized.salaryActuals || []).filter(item => item.periodEnd !== cycle.end);
     next.push({
         id: `actual_${cycle.end}`,
@@ -207,9 +221,83 @@ export function setActualSalary(config, cycle, amount, note = '', source = 'manu
         periodEnd: cycle.end,
         paydayDate: cycle.paydayDate,
         amount: Math.round(value * 100) / 100,
-        note,
+        grossAmount: Number.isFinite(grossAmount) && grossAmount >= 0
+            ? Math.round(grossAmount * 100) / 100
+            : Math.round(components.reduce((sum, item) => sum + item.amount, 0) * 100) / 100,
+        deductions: Number.isFinite(deductions) && deductions >= 0
+            ? Math.round(deductions * 100) / 100
+            : 0,
+        components,
+        overtimePay: Math.max(0, Number(details.overtimePay) || 0),
+        socialInsurance: Math.max(0, Number(details.socialInsurance) || 0),
+        note: typeof details.note === 'string' ? details.note : String(note || ''),
         source,
         updatedAt: new Date().toISOString()
     });
     return next;
+}
+
+/** Actual salary rows for a calendar year, newest first. */
+export function getSalaryActualsForYear(config, year) {
+    const normalized = normalizeOvertimeConfig(config);
+    const prefix = String(year);
+    return (normalized.salaryActuals || [])
+        .filter(item => String(item.paydayDate || item.periodEnd || '').startsWith(prefix)
+            || String(item.periodEnd || '').startsWith(prefix))
+        .sort((a, b) => String(b.periodEnd).localeCompare(String(a.periodEnd)));
+}
+
+/**
+ * Annual take-home / composition. Actual rows are the source of truth for
+ * income already paid; overtime records only fill the "estimated" helper.
+ */
+export function getAnnualIncome(config, overtimeRecords = [], year) {
+    const normalized = normalizeOvertimeConfig(config);
+    const actuals = getSalaryActualsForYear(normalized, year);
+    const months = new Map();
+    let totalNet = 0;
+    let totalGross = 0;
+    let totalOvertime = 0;
+    let totalSocial = 0;
+    let totalDeductions = 0;
+    for (const item of actuals) {
+        const gross = Number(item.grossAmount) || Number(item.amount) || 0;
+        const overtime = Number(item.overtimePay) || (item.components || [])
+            .filter(component => /加班/.test(component.name))
+            .reduce((sum, component) => sum + component.amount, 0);
+        const social = Number(item.socialInsurance) || (item.components || [])
+            .filter(component => /社保/.test(component.name))
+            .reduce((sum, component) => sum + component.amount, 0);
+        totalNet += Number(item.amount) || 0;
+        totalGross += gross;
+        totalOvertime += overtime;
+        totalSocial += social;
+        totalDeductions += Number(item.deductions) || 0;
+        const key = String(item.paydayDate || item.periodEnd || '').slice(0, 7);
+        if (!months.has(key)) {
+            months.set(key, { key, net: 0, gross: 0, overtime: 0, count: 0, components: [] });
+        }
+        const month = months.get(key);
+        month.net += Number(item.amount) || 0;
+        month.gross += gross;
+        month.overtime += overtime;
+        month.count += 1;
+        month.components.push(...(item.components || []));
+    }
+    const withActual = actuals.length;
+    const round = value => Math.round(value * 100) / 100;
+    return {
+        year,
+        monthsRecorded: withActual,
+        totalNet: round(totalNet),
+        totalGross: round(totalGross),
+        totalOvertime: round(totalOvertime),
+        totalSocial: round(totalSocial),
+        totalDeductions: round(totalDeductions),
+        averageNet: withActual ? round(totalNet / withActual) : 0,
+        estimatedOvertime: round(getYearSummary(overtimeRecords || [], year, normalized).pay),
+        byMonth: [...months.values()]
+            .map(month => ({ ...month, net: round(month.net), gross: round(month.gross), overtime: round(month.overtime) }))
+            .sort((a, b) => b.key.localeCompare(a.key))
+    };
 }

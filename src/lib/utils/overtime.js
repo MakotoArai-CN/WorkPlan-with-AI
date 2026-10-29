@@ -90,16 +90,35 @@ export function normalizeOvertimeConfig(config = {}) {
     const payday = Math.round(number(merged.payday, 15, 1, 31, true));
     const salaryActuals = (Array.isArray(merged.salaryActuals) ? merged.salaryActuals : [])
         .filter(item => item && typeof item === 'object')
-        .map(item => ({
-            id: typeof item.id === 'string' && item.id ? item.id : `actual_${item.periodEnd || ''}`,
-            periodStart: isValidDate(item.periodStart) ? item.periodStart : '',
-            periodEnd: isValidDate(item.periodEnd) ? item.periodEnd : '',
-            paydayDate: isValidDate(item.paydayDate) ? item.paydayDate : '',
-            amount: number(item.amount, 0, 0, 100_000_000),
-            note: typeof item.note === 'string' ? item.note : '',
-            source: item.source === 'bank' ? 'bank' : 'manual',
-            updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : ''
-        }));
+        .map(item => {
+            const components = (Array.isArray(item.components) ? item.components : [])
+                .filter(component => component && typeof component === 'object')
+                .map((component, index) => ({
+                    id: typeof component.id === 'string' && component.id ? component.id : `salary_component_${index + 1}`,
+                    name: typeof component.name === 'string' && component.name.trim() ? component.name.trim() : `项目 ${index + 1}`,
+                    amount: number(component.amount, 0, 0, 100_000_000),
+                    category: typeof component.category === 'string' ? component.category : 'other'
+                }));
+            const componentTotal = Math.round(components.reduce((sum, component) => sum + component.amount, 0) * 100) / 100;
+            const deductions = number(item.deductions, 0, 0, 100_000_000);
+            const grossAmount = number(item.grossAmount, componentTotal || 0, 0, 100_000_000);
+            const amount = number(item.amount, Math.max(0, grossAmount - deductions), 0, 100_000_000);
+            return {
+                id: typeof item.id === 'string' && item.id ? item.id : `actual_${item.periodEnd || ''}`,
+                periodStart: isValidDate(item.periodStart) ? item.periodStart : '',
+                periodEnd: isValidDate(item.periodEnd) ? item.periodEnd : '',
+                paydayDate: isValidDate(item.paydayDate) ? item.paydayDate : '',
+                amount,
+                grossAmount,
+                deductions,
+                components,
+                overtimePay: number(item.overtimePay, 0, 0, 100_000_000),
+                socialInsurance: number(item.socialInsurance, 0, 0, 100_000_000),
+                note: typeof item.note === 'string' ? item.note : '',
+                source: item.source === 'bank' ? 'bank' : 'manual',
+                updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : ''
+            };
+        });
     return {
         monthlySalary: componentTotal > 0 ? componentTotal : monthlySalary,
         currency: typeof merged.currency === 'string' && merged.currency ? merged.currency : 'CNY',
@@ -187,6 +206,10 @@ export function normalizeOvertimeRecord(record = {}) {
         type: OVERTIME_TYPES.includes(record.type) ? record.type : 'weekday',
         compensation: COMPENSATION_TYPES.includes(record.compensation) ? record.compensation : 'pay',
         note: typeof record.note === 'string' ? record.note : '',
+        actualPay: record.actualPay !== null && record.actualPay !== undefined && record.actualPay !== ''
+            && Number.isFinite(Number(record.actualPay)) && Number(record.actualPay) >= 0
+            ? Math.round(Number(record.actualPay) * 100) / 100
+            : null,
         aiLocked: record.aiLocked === true,
         createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
         updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : ''
@@ -198,6 +221,14 @@ export function calculateRecordPay(record, config = DEFAULT_OVERTIME_CONFIG) {
     if (normalizedRecord.compensation !== 'pay') return 0;
     const rate = getHourlyRate(config) * getOvertimeMultiplier(normalizedRecord.type, config);
     return Math.round(rate * normalizedRecord.hours * 100) / 100;
+}
+
+/** Actual paid amount wins over the configured estimate when present. */
+export function getRecordPay(record, config = DEFAULT_OVERTIME_CONFIG) {
+    const normalizedRecord = normalizeOvertimeRecord(record);
+    if (normalizedRecord.compensation !== 'pay') return 0;
+    if (normalizedRecord.actualPay !== null) return normalizedRecord.actualPay;
+    return calculateRecordPay(normalizedRecord, config);
 }
 
 export function getMonthKey(date) {
@@ -213,6 +244,8 @@ export function summarizeOvertimeRecords(records = [], config = DEFAULT_OVERTIME
         hours: 0,
         payableHours: 0,
         pay: 0,
+        estimatedPay: 0,
+        actualPayCount: 0,
         count: 0,
         byType: { weekday: 0, weekend: 0, holiday: 0 },
         payableByType: { weekday: 0, weekend: 0, holiday: 0 }
@@ -226,12 +259,15 @@ export function summarizeOvertimeRecords(records = [], config = DEFAULT_OVERTIME
         if (normalized.compensation === 'pay') {
             summary.payableHours += normalized.hours;
             summary.payableByType[normalized.type] += normalized.hours;
-            summary.pay += calculateRecordPay(normalized, config);
+            summary.pay += getRecordPay(normalized, config);
+            summary.estimatedPay += calculateRecordPay(normalized, config);
+            if (normalized.actualPay !== null) summary.actualPayCount += 1;
         }
     }
     summary.hours = Math.round(summary.hours * 100) / 100;
     summary.payableHours = Math.round(summary.payableHours * 100) / 100;
     summary.pay = Math.round(summary.pay * 100) / 100;
+    summary.estimatedPay = Math.round(summary.estimatedPay * 100) / 100;
     for (const key of OVERTIME_TYPES) {
         summary.byType[key] = Math.round(summary.byType[key] * 100) / 100;
         summary.payableByType[key] = Math.round(summary.payableByType[key] * 100) / 100;

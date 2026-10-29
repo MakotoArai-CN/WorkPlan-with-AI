@@ -1038,7 +1038,11 @@
         "layout_list": "List",
         "layout_calendar": "Calendar",
         "field_minutes": "Minutes",
-        "field_hours": "Hours"
+        "field_hours": "Hours",
+        "actual_pay": "Actual overtime pay",
+        "actual_pay_hint": "Leave blank to use estimate",
+        "use_estimate": "Use estimate",
+        "export_actual_pay": "Actual overtime pay"
     },
     "leave": {
         "title": "Leave records",
@@ -1216,7 +1220,24 @@
         "hourly_rate": "Hourly rate",
         "smart_estimate": "Smart estimate",
         "smart_hint": "Current + 3-cycle blend: overtime {overtime} · leave {leave}",
-        "salary_growth": "Salary growth"
+        "salary_growth": "Salary growth",
+        "slip_title": "Salary slip",
+        "slip_desc": "Enter components, social insurance, deductions and net pay",
+        "gross_pay": "Gross pay",
+        "social_insurance": "Social insurance",
+        "net_pay": "Net pay",
+        "deductions": "Deductions",
+        "net_auto_hint": "Leave blank to calculate:",
+        "note": "Note",
+        "slip_note_placeholder": "e.g. September salary",
+        "slip_hint": "Salary slips record what was actually paid. Overtime can be entered directly or estimated from overtime records; net pay may differ from gross due to social insurance and other deductions.",
+        "annual_income": "Annual income",
+        "annual_net": "Annual net",
+        "annual_overtime": "Annual overtime",
+        "monthly_average": "Monthly average",
+        "months_recorded": "Months recorded",
+        "salary_slip": "Salary slip",
+        "add_slip": "Add salary slip"
     },
     "date_picker": {
         "placeholder": "Select date",
@@ -1263,6 +1284,12 @@
         "no_selected": "Select at least one row",
         "invalid_date": "Choose a valid date",
         "invalid_amount": "Enter an actual amount greater than 0",
-        "backfill_saved": "Salary backfill saved"
+        "backfill_saved": "Salary backfill saved",
+        "annual_summary": "Annual income",
+        "components": "Components",
+        "gross": "Gross",
+        "net": "Net",
+        "monthly_records": "Monthly salary records",
+        "slip_entry": "Add salary slip"
     }
 }
