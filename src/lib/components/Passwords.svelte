@@ -686,11 +686,14 @@ let confirmNewMasterPassword = "";
     }
 
     function togglePasswordVisibility(id, encryptedPassword) {
-        if (!showPasswordValue[id]) {
+        if (showPasswordValue[id]) {
+            showPasswordValue[id] = false;
+            delete decryptedCache[id];
+        } else {
             getDecryptedPassword(id, encryptedPassword);
+            showPasswordValue[id] = true;
         }
-        showPasswordValue[id] = !showPasswordValue[id];
-        showPasswordValue = showPasswordValue;
+        showPasswordValue = { ...showPasswordValue };
     }
 
     function copyToClipboard(text) {
