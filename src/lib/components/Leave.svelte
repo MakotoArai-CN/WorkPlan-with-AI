@@ -501,14 +501,14 @@
                 <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
                     {#each yearMonths as item}
                         <button on:click={() => selectMonth(item.month)}
-                            class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-left hover:border-rose-200 hover:shadow-md transition dark:bg-slate-800 dark:border-slate-700">
+                            class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-left hover:border-orange-200 hover:shadow-md transition dark:bg-slate-800 dark:border-slate-700">
                             <div class="flex items-center justify-between">
                                 <div class="font-bold text-slate-700 dark:text-slate-200">
                                     {new Date(cursorYear, item.month - 1, 1).toLocaleDateString(localeCode, { month: 'long' })}
                                 </div>
                                 <i class="ph ph-caret-right text-slate-300"></i>
                             </div>
-                            <div class="text-2xl font-black text-rose-600 mt-3">{formatLeave(item.summary)}</div>
+                            <div class="text-2xl font-black text-orange-600 mt-3">{formatLeave(item.summary)}</div>
                             <div class="text-[10px] text-slate-500 mt-1">{$_('leave.paid_days')}: {item.summary.paidDays}</div>
                         </button>
                     {/each}
@@ -516,7 +516,7 @@
             {:else}
                 {@const visibleRecords = viewMode === 'day' ? dayRecords : monthRecords}
                 <WorklogDetailCard
-                    title={viewMode === 'day' ? $_('leave.day_detail') : $_('leave.month_detail')}
+                    title={viewMode === 'day' ? $_('overtime.day_detail') : $_('overtime.month_detail')}
                     summary={formatLeave(viewMode === 'day' ? daySummary : monthSummary)}
                     rows={visibleRecords.map(makeLeaveRow)}
                     showLayout={viewMode === 'month'}

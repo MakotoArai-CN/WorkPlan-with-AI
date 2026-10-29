@@ -1058,7 +1058,8 @@
     "formula_learned": "智能校准时薪 {rate}（基于 {samples} 个月实际）",
     "formula_multiplier": "约为标准时薪的 {value} 倍",
     "formula_learned_short": "智能校准 · {samples} 个月",
-    "formula_standard_short": "标准公式时薪"
+    "formula_standard_short": "标准公式时薪",
+    "day_detail": "日明细"
   },
   "leave": {
     "title": "请假记录",
