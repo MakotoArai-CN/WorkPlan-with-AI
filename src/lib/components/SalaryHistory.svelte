@@ -51,12 +51,22 @@
     let salaryOnly = true;
     let selected = {};
     let importMessage = '';
+    let selectedYear = String(new Date().getFullYear());
 
     $: actuals = (Array.isArray(config.salaryActuals) ? config.salaryActuals : [])
         .slice()
         .sort((a, b) => String(b.periodEnd).localeCompare(String(a.periodEnd)));
-    $: growth = getSalaryGrowth(actuals);
-    $: annual = getAnnualIncome(config, overtimeRecords, new Date().getFullYear());
+    $: availableYears = [...new Set(actuals.map(item => String(item.paydayDate || item.periodEnd || '').slice(0, 4)).filter(year => /^\d{4}$/.test(year)))]
+        .sort((a, b) => b.localeCompare(a));
+    $: if (availableYears.length && !availableYears.includes(selectedYear)) {
+        selectedYear = availableYears.includes(String(new Date().getFullYear()))
+            ? String(new Date().getFullYear())
+            : availableYears[0];
+    }
+    $: yearOptions = availableYears.map(year => ({ value: year, label: year }));
+    $: yearActuals = actuals.filter(item => String(item.paydayDate || item.periodEnd || '').startsWith(selectedYear));
+    $: growth = getSalaryGrowth(yearActuals);
+    $: annual = getAnnualIncome(config, overtimeRecords, selectedYear);
     $: previewRows = transactions.filter(item => !salaryOnly || isSalaryDescription(item.description));
     $: selectedCount = previewRows.filter(item => selected[item.key]).length;
     $: allSelected = previewRows.length > 0 && selectedCount === previewRows.length;
@@ -255,7 +265,19 @@
             <div class="flex-1 overflow-y-auto p-5 space-y-4">
                 {#if tab === 'history'}
                     <div>
-                        <div class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2">{$_('salary_history.annual_summary')} · {annual.year}</div>
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <div class="text-sm font-bold text-slate-700 dark:text-slate-200">{$_('salary_history.annual_summary')}</div>
+                            {#if availableYears.length > 1}
+                                <select bind:value={selectedYear}
+                                    class="h-8 shrink-0 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-xs font-bold text-slate-600 dark:text-slate-300">
+                                    {#each availableYears as year}
+                                        <option value={year}>{year}</option>
+                                    {/each}
+                                </select>
+                            {:else}
+                                <div class="text-xs font-bold text-slate-400">{annual.year}</div>
+                            {/if}
+                        </div>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                             <div class="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-3">
                                 <div class="text-[10px] text-emerald-700 dark:text-emerald-300">{$_('payroll.annual_net')}</div>
@@ -329,9 +351,9 @@
                         <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200">
                             {$_('salary_history.records')}
                         </div>
-                        {#if actuals.length}
+                        {#if yearActuals.length}
                             <div class="divide-y divide-slate-50 dark:divide-slate-700/60">
-                                {#each actuals as item}
+                                {#each yearActuals as item}
                                     {@const change = growth.rows.find(row => row.id === item.id)}
                                     <div class="px-4 py-3 flex items-center gap-3">
                                         <div class="flex-1 min-w-0">
