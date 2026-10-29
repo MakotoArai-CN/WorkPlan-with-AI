@@ -1270,8 +1270,8 @@
     "source_bank": "Bank statement",
     "source_manual": "Manual entry",
     "bank_title": "Import a bank salary statement",
-    "bank_desc": "Supports CSV statements from ICBC, ABC, CMB, CCB, BOC and others. Pick a file, map columns, and import only the selected salary rows.",
-    "bank_file": "Statement file (CSV / TXT / XLSX)",
+    "bank_desc": "ICBC and other statements are supported. For PDF, enter the file password on the right first.",
+    "bank_file": "Statement file (CSV / Excel / PDF)",
     "encoding": "Encoding",
     "columns": "columns",
     "bank_preset": "Bank preset",
@@ -1297,6 +1297,13 @@
     "gross": "Gross",
     "net": "Net",
     "monthly_records": "Monthly salary records",
-    "slip_entry": "Add salary slip"
+    "slip_entry": "Add salary slip",
+    "pdf_password": "PDF password (PDF only)",
+    "pdf_password_hint": "Bank file password",
+    "pdf_password_required": "Enter the PDF password first",
+    "pdf_password_wrong": "Wrong PDF password",
+    "pdf_parse_failed": "Could not parse this PDF. Use an ICBC transaction statement.",
+    "pdf_empty": "No transactions found in this PDF",
+    "pdf_parsing": "Parsing PDF, large statements may take a few seconds…"
   }
 }

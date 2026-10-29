@@ -1,6 +1,6 @@
 {
   "name": "workplan",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "",
   "type": "module",
   "scripts": {
@@ -49,6 +49,7 @@
     "marked-highlight": "^2.2.4",
     "marked-katex-extension": "^5.1.13",
     "mermaid": "^11.17.2",
+    "pdfjs-dist": "^6.4.299",
     "postcss": "^8.5.32",
     "recharts": "^3.10.1",
     "svelte-i18n": "^4.0.1",

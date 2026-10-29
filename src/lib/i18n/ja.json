@@ -1270,8 +1270,8 @@
     "source_bank": "銀行明細",
     "source_manual": "手動入力",
     "bank_title": "銀行の給与明細をインポート",
-    "bank_desc": "工商・農業・招商・建設・中国銀行などの CSV 明細に対応。ファイルと列を選び、チェックした給与行だけを取り込みます。",
-    "bank_file": "明細ファイル（CSV / TXT / XLSX）",
+    "bank_desc": "工商銀行などの明細に対応。PDF は右側にファイルのパスワードを入力してください。",
+    "bank_file": "明細ファイル（CSV / Excel / PDF）",
     "encoding": "文字コード",
     "columns": "列",
     "bank_preset": "銀行プリセット",
@@ -1297,6 +1297,13 @@
     "gross": "総支給",
     "net": "手取り",
     "monthly_records": "月別給与記録",
-    "slip_entry": "給与明細を追加"
+    "slip_entry": "給与明細を追加",
+    "pdf_password": "PDF パスワード（PDF のみ）",
+    "pdf_password_hint": "銀行ファイルのパスワード",
+    "pdf_password_required": "先に PDF パスワードを入力してください",
+    "pdf_password_wrong": "PDF パスワードが違います",
+    "pdf_parse_failed": "PDF を解析できません。工商銀行の取引明細 PDF を選択してください。",
+    "pdf_empty": "PDF 内に取引が見つかりません",
+    "pdf_parsing": "PDF を解析中です。大きな明細は数秒かかります…"
   }
 }

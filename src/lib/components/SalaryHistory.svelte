@@ -15,6 +15,7 @@
         suggestMapping
     } from '../utils/bank-import.js';
     import { formatLocalDate } from '../utils/datetime.js';
+    import { parsePdfBankStatement } from '../utils/pdf-import.js';
 
     export let show = false;
     export let config = {};
@@ -33,6 +34,8 @@
     let slipActual = null;
 
     let fileName = '';
+    let pdfPassword = '';
+    let parsingPdf = false;
     let encoding = 'utf-8';
     let headers = [];
     let rawRows = [];
@@ -130,10 +133,33 @@
         fileName = file.name;
         error = '';
         importMessage = '';
+        parsingPdf = false;
         try {
             const buffer = await file.arrayBuffer();
             let parsed;
-            if (/\.xlsx$/i.test(file.name)) {
+            if (/\.pdf$/i.test(file.name)) {
+                parsingPdf = true;
+                if (!pdfPassword.trim()) {
+                    error = $_('salary_history.pdf_password_required');
+                    parsingPdf = false;
+                    return;
+                }
+                try {
+                    parsed = await parsePdfBankStatement(file, pdfPassword);
+                } catch (pdfError) {
+                    console.error('PDF import failed:', pdfError);
+                    error = pdfError?.message === 'PDF_PASSWORD_REQUIRED'
+                        ? $_('salary_history.pdf_password_wrong')
+                        : $_('salary_history.pdf_parse_failed');
+                    parsingPdf = false;
+                    return;
+                }
+                if (!parsed.rows.length) {
+                    error = $_('salary_history.pdf_empty');
+                    parsingPdf = false;
+                    return;
+                }
+            } else if (/\.xlsx$/i.test(file.name)) {
                 const ExcelJS = (await import('exceljs')).default;
                 const workbook = new ExcelJS.Workbook();
                 await workbook.xlsx.load(buffer);
@@ -160,6 +186,8 @@
             rebuildTransactions();
         } catch (e) {
             error = e.message || String(e);
+        } finally {
+            parsingPdf = false;
         }
     }
 
@@ -350,17 +378,30 @@
                             <div class="text-sm font-bold text-slate-700 dark:text-slate-200">{$_('salary_history.bank_title')}</div>
                             <div class="text-[10px] text-slate-500 mt-0.5">{$_('salary_history.bank_desc')}</div>
                         </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
                             <label class="flex flex-col gap-1 md:col-span-2">
                                 <span class="text-[10px] font-bold text-slate-500">{$_('salary_history.bank_file')}</span>
-                                <input type="file" accept=".csv,.txt,.xlsx" on:change={handleFile}
+                                <input type="file" accept=".csv,.txt,.xlsx,.pdf" on:change={handleFile}
                                     class="block w-full text-xs text-slate-500 file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 file:text-xs file:font-bold" />
+                            </label>
+                            <label class="flex flex-col gap-1">
+                                <span class="text-[10px] font-bold text-slate-500">{$_('salary_history.pdf_password')}</span>
+                                <input type="password" bind:value={pdfPassword} autocomplete="off"
+                                    placeholder={$_('salary_history.pdf_password_hint')}
+                                    class="h-9 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 text-xs text-slate-700 dark:text-slate-200" />
                             </label>
                             <label class="flex flex-col gap-1">
                                 <span class="text-[10px] font-bold text-slate-500">{$_('salary_history.encoding')}</span>
                                 <SelectMenu bind:value={encoding} options={encodingOptions} className="w-full" />
                             </label>
                         </div>
+
+                        {#if parsingPdf}
+                            <div class="flex items-center gap-2 rounded-lg bg-orange-50 dark:bg-orange-900/20 px-3 py-2 text-[11px] font-bold text-orange-700 dark:text-orange-300">
+                                <i class="ph ph-spinner-gap animate-spin"></i>
+                                {$_('salary_history.pdf_parsing')}
+                            </div>
+                        {/if}
 
                         {#if fileName}
                             <div class="text-[10px] text-slate-500 break-all">{fileName} · {headers.length} {$_('salary_history.columns')}</div>
