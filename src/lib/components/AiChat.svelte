@@ -2023,12 +2023,12 @@
                                 </div>
                             {:else if msg.type === "error"}
                                 <div
-                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-tl-none"
+                                    class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-tl-none min-w-0 max-w-full break-words [overflow-wrap:anywhere]"
                                 >
-                                    <div class="flex flex-col gap-2">
-                                        <div class="flex items-center gap-2">
-                                            <i class="ph-fill ph-warning-circle"></i>
-                                            <span>{$_("ai.retry")}: {msg.content}</span>
+                                    <div class="flex min-w-0 flex-col gap-2">
+                                        <div class="flex min-w-0 items-start gap-2">
+                                            <i class="ph-fill ph-warning-circle shrink-0 mt-0.5"></i>
+                                            <span class="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{$_("ai.retry")}: {msg.content}</span>
                                         </div>
                                         <button
                                             on:click={() => handleRetry(index)}
