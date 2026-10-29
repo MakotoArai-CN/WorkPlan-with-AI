@@ -1,3 +1,5 @@
+import { getLocalDatabaseKeys, replaceLocalDatabaseKeys } from './local-db.js';
+
 const BACKUP_FORMAT = 'workplan-secure-backup';
 const BACKUP_DATA_FORMAT = 'workplan-backup-data';
 const BACKUP_VERSION = 1;
@@ -45,10 +47,10 @@ export function collectLocalBackupPayload() {
         throw new Error('当前环境不支持本地备份');
     }
     const keys = {};
-    for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        if (!key || !key.startsWith(BACKUP_PREFIX) || EXCLUDED_KEYS.has(key)) continue;
-        const value = localStorage.getItem(key);
+    // In desktop memory mode the browser's localStorage only contains a small
+    // marker; the real notes/tasks/passwords live in the local DB memory map.
+    for (const [key, value] of Object.entries(getLocalDatabaseKeys())) {
+        if (!key.startsWith(BACKUP_PREFIX) || EXCLUDED_KEYS.has(key)) continue;
         if (typeof value === 'string') keys[key] = value;
     }
     return {
@@ -76,17 +78,10 @@ export function validateBackupData(payload) {
     return keys;
 }
 
-export function applyLocalBackupPayload(payload) {
+export async function applyLocalBackupPayload(payload) {
     const keys = validateBackupData(payload);
     if (typeof localStorage === 'undefined') throw new Error('当前环境不支持本地恢复');
-    const existing = [];
-    for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        if (key && key.startsWith(BACKUP_PREFIX)) existing.push(key);
-    }
-    for (const key of existing) localStorage.removeItem(key);
-    for (const [key, value] of Object.entries(keys)) localStorage.setItem(key, value);
-    return Object.keys(keys).length;
+    return replaceLocalDatabaseKeys(keys);
 }
 
 export async function createEncryptedBackup(payload, password) {

@@ -30,7 +30,8 @@ mock.module('@tauri-apps/api/core', () => ({
 }));
 mock.module('../src/lib/utils/runtime.js', () => ({ isTauriRuntime: true, isAndroidRuntime: () => false }));
 
-const { initLocalDatabase } = await import('../src/lib/utils/local-db.js');
+const { initLocalDatabase, installLocalDatabaseMirror } = await import('../src/lib/utils/local-db.js');
+const { collectLocalBackupPayload } = await import('../src/lib/utils/backup-package.js');
 
 beforeEach(() => {
     localStorage.clear();
@@ -107,5 +108,21 @@ describe('home-directory local database', () => {
         const result = await initLocalDatabase();
         expect(result.reloaded).toBe(false);
         expect(localStorage.getItem('planpro_access_key')).toBe('local-newer');
+    });
+
+    test('memory mode backup includes notes that are no longer in WebView storage', async () => {
+        localStorage.clear();
+        sessionStorage.clear();
+        dbContent = null;
+        writes = [];
+        localStorage.setItem('planpro_access_key', 'memory-backup');
+        localStorage.setItem('planpro_notes', JSON.stringify([{ id: 'n1', title: '内存笔记', content: 'secret' }]));
+        const migrated = await initLocalDatabase();
+        expect(migrated.migrated).toBe(true);
+        await installLocalDatabaseMirror();
+        expect(localStorage.getItem('planpro_notes')).toBeNull();
+        const payload = collectLocalBackupPayload();
+        expect(payload.keys.planpro_notes).toContain('内存笔记');
+        expect(payload.keys.planpro_access_key).toBe('memory-backup');
     });
 });
