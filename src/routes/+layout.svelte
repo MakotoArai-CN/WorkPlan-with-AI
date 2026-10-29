@@ -16,6 +16,8 @@
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
+    import BackupModal from '$lib/components/BackupModal.svelte';
+    import { backupModal, closeBackupModal } from '$lib/stores/backup-modal.js';
     import { get } from 'svelte/store';
     import { setupI18n } from '$lib/i18n/index.js';
     import { _, isLoading } from 'svelte-i18n';
@@ -167,6 +169,7 @@
         </div>
     {/if}
     <slot />
+    <BackupModal show={$backupModal.show} mode={$backupModal.mode} onClose={closeBackupModal} />
 {/if}
 
 <style>
