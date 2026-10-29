@@ -4,6 +4,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAGIC: &[u8; 5] = b"WPDB1";
@@ -12,6 +13,7 @@ const SAVED_AT_KEY: &[u8] = b"saved_at";
 // Binds the local database to this application. The file is compressed with
 // zstd and encrypted with AES-256-GCM; copying it to another app is useless.
 const APP_DB_SECRET: &[u8] = b"WorkPlan::LocalDatabase::sled::AES-GCM::v1";
+static DB: OnceLock<sled::Db> = OnceLock::new();
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,9 +73,14 @@ fn timestamp() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-fn open_db() -> Result<sled::Db, String> {
+fn open_db() -> Result<&'static sled::Db, String> {
+    if let Some(db) = DB.get() {
+        return Ok(db);
+    }
     ensure_dirs()?;
-    sled::open(db_dir()?).map_err(|e| format!("打开本地嵌入式数据库失败: {e}"))
+    let db = sled::open(db_dir()?).map_err(|e| format!("打开本地嵌入式数据库失败: {e}"))?;
+    let _ = DB.set(db);
+    DB.get().ok_or_else(|| "打开本地嵌入式数据库失败".to_string())
 }
 
 fn cipher() -> Result<Aes256Gcm, String> {
