@@ -17,7 +17,6 @@
     import { formatLocalDate } from '../utils/datetime.js';
     import {
         calibrateOvertimeRate,
-        getHourlyRate,
         getMonthSummary,
         getMonthlyOvertimeActual,
         getOvertimeBaseSalary,
@@ -97,8 +96,8 @@
     }
     $: overtimeBase = getOvertimeBaseSalary(config);
     $: standardHourlyRate = getStandardHourlyRate(config);
-    $: hourlyRate = getHourlyRate(config);
     $: calibration = getOvertimeCalibration(overtimeRecords, config);
+    $: hourlyRate = calibration.effectiveRate;
     $: formulaBreakdown = (() => {
         const byType = monthSummary.payableByType || { weekday: 0, weekend: 0, holiday: 0 };
         const items = [

@@ -16,6 +16,7 @@
         calculateLeaveDays,
         calculateOvertimeHours,
         filterRecordsByPeriod,
+        getEffectiveOvertimeConfig,
         getLeaveMonthSummary,
         getMonthSummary,
         getRecordPay,
@@ -44,6 +45,7 @@
     let localeCode = toIntlLocale($locale || 'zh');
 
     $: normalizedConfig = { ...DEFAULT_OVERTIME_CONFIG, ...(config || {}) };
+    $: effectiveConfig = getEffectiveOvertimeConfig($taskStore.overtimeRecords || [], normalizedConfig);
     $: overtimeRecords = $taskStore.overtimeRecords || [];
     $: leaveRecords = $taskStore.leaveRecords || [];
     $: monthSummary = activeTab === 'overtime'
@@ -56,7 +58,14 @@
     $: overtimeByDay = groupRecordsByDay(overtimeRecords, cursorYear, cursorMonth);
     $: leaveByDay = buildLeaveByDay(leaveRecords, cursorYear, cursorMonth);
     $: calendarDays = calendarCells.map(day => buildCalendarDay(day));
-    $: yearMonths = Array.from({ length: 12 }, (_, index) => buildYearMonth(index + 1));
+    $: yearMonths = (cursorYear, overtimeRecords, leaveRecords, normalizedConfig, Array.from({ length: 12 }, (_, index) => buildYearMonth(index + 1)));
+    $: yearTotals = yearMonths.reduce((total, item) => ({
+        hours: total.hours + (Number(item.overtime.hours) || 0),
+        pay: total.pay + (Number(item.overtime.pay) || 0),
+        leaveDays: total.leaveDays + (Number(item.leave.days) || 0),
+        paidDays: total.paidDays + (Number(item.leave.paidDays) || 0),
+        salary: total.salary + (Number(item.salary) || 0)
+    }), { hours: 0, pay: 0, leaveDays: 0, paidDays: 0, salary: 0 });
 
     function money(value) {
         return new Intl.NumberFormat(localeCode === 'zh' ? 'zh-CN' : localeCode, {
@@ -88,7 +97,7 @@
                 detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
                 note: record.note || '',
                 metric: hours(record.hours),
-                amount: money(getRecordPay(record, normalizedConfig)),
+                amount: money(getRecordPay(record, effectiveConfig)),
                 amountClass: 'text-orange-600'
             }));
     }
@@ -181,6 +190,14 @@
         cursorMonth = date.getMonth() + 1;
     }
 
+    function shiftCursor(delta) {
+        if (viewMode === 'year') {
+            cursorYear += delta;
+            return;
+        }
+        shiftMonth(delta);
+    }
+
     function goToday() {
         const now = new Date();
         cursorYear = now.getFullYear();
@@ -269,59 +286,59 @@
     $: summaryText = activeTab === 'overtime'
         ? `${$_('overtime.total_hours')}: ${hours(monthSummary.hours)} · ${$_('overtime.total_pay')}: ${money(monthSummary.pay)}`
         : `${$_('leave.month_leave')}: ${monthSummary.days} ${$_('leave.unit_day')} · ${$_('leave.paid_days')}: ${monthSummary.paidDays}`;
+    $: yearSummaryText = activeTab === 'overtime'
+        ? `${$_('overtime.total_hours')}: ${hours(yearTotals.hours)} · ${$_('overtime.total_pay')}: ${money(yearTotals.pay)}`
+        : `${$_('leave.month_leave')}: ${yearTotals.leaveDays} ${$_('leave.unit_day')} · ${$_('leave.paid_days')}: ${yearTotals.paidDays}`;
 </script>
 
 <div class="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pb-24 pt-2">
     <div class="flex items-center justify-between gap-2 mb-3">
         <div class="flex items-center gap-1">
-            <button on:click={() => shiftMonth(-1)} class="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 flex items-center justify-center" aria-label={$_('overtime.previous')}>
+            <button on:click={() => shiftCursor(-1)} class="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 flex items-center justify-center" aria-label={$_('overtime.previous')}>
                 <i class="ph-bold ph-caret-left"></i>
             </button>
-            <button on:click={() => shiftMonth(1)} class="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 flex items-center justify-center" aria-label={$_('overtime.next')}>
+            <button on:click={() => shiftCursor(1)} class="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 flex items-center justify-center" aria-label={$_('overtime.next')}>
                 <i class="ph-bold ph-caret-right"></i>
             </button>
             <div class="ml-2 text-sm font-bold text-slate-700 dark:text-slate-200">
                 {viewMode === 'year' ? `${cursorYear}${$_('overtime.view_year')}` : new Date(cursorYear, cursorMonth - 1, 1).toLocaleDateString(localeCode, { year: 'numeric', month: 'long' })}
             </div>
         </div>
-        <div class="flex items-center gap-2 text-xs text-slate-500">
-            <span>{summaryText}</span>
-            <button on:click={goToday} class="h-8 px-3 rounded-lg bg-white border border-slate-200 text-[11px] font-bold">{$_('overtime.today')}</button>
-        </div>
+        <button on:click={goToday} class="h-8 px-3 rounded-lg bg-white border border-slate-200 text-[11px] font-bold">{$_('overtime.today')}</button>
     </div>
 
-    {#if viewMode === 'year'}
-        <div class="flex justify-end mb-2">
-            <SegmentedControl bind:value={viewMode} options={viewOptions} />
-        </div>
-        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-            {#each yearMonths as item}
-                <button on:click={() => { cursorMonth = item.month; viewMode = 'month'; }}
-                    class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-left hover:border-orange-200 hover:shadow-md transition dark:bg-slate-800 dark:border-slate-700">
-                    <div class="flex items-center justify-between">
-                        <div class="font-bold text-slate-700 dark:text-slate-200">{new Date(cursorYear, item.month - 1, 1).toLocaleDateString(localeCode, { month: 'long' })}</div>
-                        <i class="ph ph-caret-right text-slate-300"></i>
-                    </div>
-                    <div class="mt-3 space-y-1 text-[11px]">
-                        <div class="flex justify-between"><span class="text-slate-400">{$_('worklog.kind_overtime')}</span><b>{hours(item.overtime.hours)} · {money(item.overtime.pay)}</b></div>
-                        <div class="flex justify-between"><span class="text-slate-400">{$_('worklog.kind_leave')}</span><b class="text-rose-500">{item.leave.days} {$_('leave.unit_day')}</b></div>
-                        <div class="flex justify-between"><span class="text-slate-400">{$_('payroll.net_pay')}</span><b class={item.salary > 0 ? 'text-emerald-600' : 'text-slate-400'}>{item.salary > 0 ? money(item.salary) : $_('payroll.not_recorded')}</b></div>
-                    </div>
-                </button>
-            {/each}
-        </div>
-    {:else}
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
-            <div class="px-4 py-3 min-h-[54px] border-b border-slate-50 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap">
-                <div class="font-bold text-sm text-slate-700 dark:text-slate-200">{$_('overtime.month_detail')}</div>
-                <div class="flex items-center gap-3">
-                    <div class="text-[11px] text-slate-500">{summaryText}</div>
-                    <SegmentedControl bind:value={viewMode} options={viewOptions} className="scale-95 origin-right" />
-                </div>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
+        <div class="px-4 py-3 min-h-[54px] border-b border-slate-50 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap">
+            <div class="font-bold text-sm text-slate-700 dark:text-slate-200">
+                {viewMode === 'year' ? $_('overtime.year_detail') : $_('overtime.month_detail')}
             </div>
-            <WorklogCalendar days={calendarDays} onSelectDay={(day) => { cursorDay = day; }} />
+            <div class="flex items-center gap-3">
+                <div class="text-[11px] text-slate-500">{viewMode === 'year' ? yearSummaryText : summaryText}</div>
+                <SegmentedControl bind:value={viewMode} options={viewOptions} className="scale-95 origin-right" />
+            </div>
         </div>
-    {/if}
+
+        {#if viewMode === 'year'}
+            <div class="p-3 md:p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
+                {#each yearMonths as item}
+                    <button on:click={() => { cursorMonth = item.month; viewMode = 'month'; }}
+                        class="bg-slate-50/70 rounded-lg border border-slate-100 p-3 text-left hover:border-orange-200 hover:bg-white transition dark:bg-slate-900/30 dark:border-slate-700">
+                        <div class="flex items-center justify-between">
+                            <div class="font-bold text-slate-700 dark:text-slate-200">{new Date(cursorYear, item.month - 1, 1).toLocaleDateString(localeCode, { month: 'long' })}</div>
+                            <i class="ph ph-caret-right text-slate-300"></i>
+                        </div>
+                        <div class="mt-2 space-y-0.5 text-[11px]">
+                            <div class="flex justify-between"><span class="text-slate-400">{$_('worklog.kind_overtime')}</span><b>{hours(item.overtime.hours)} · {money(item.overtime.pay)}</b></div>
+                            <div class="flex justify-between"><span class="text-slate-400">{$_('worklog.kind_leave')}</span><b class="text-rose-500">{item.leave.days} {$_('leave.unit_day')}</b></div>
+                            <div class="flex justify-between"><span class="text-slate-400">{$_('payroll.net_pay')}</span><b class={item.salary > 0 ? 'text-emerald-600' : 'text-slate-400'}>{item.salary > 0 ? money(item.salary) : $_('payroll.not_recorded')}</b></div>
+                        </div>
+                    </button>
+                {/each}
+            </div>
+        {:else}
+            <WorklogCalendar days={calendarDays} onSelectDay={(day) => { cursorDay = day; }} />
+        {/if}
+    </div>
 </div>
 
 <AnimatedModal bind:show={showForm} onClose={closeForm} zIndex={50} panelClass="max-w-lg">
