@@ -20,12 +20,6 @@
         return 180;
     }
 
-    function dateMotionDuration() {
-        if (typeof document !== 'undefined' && document.documentElement.classList.contains('reduce-animations')) return 0;
-        if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return 0;
-        return 220;
-    }
-
     $: dateInfo = (() => {
         const date = parseLocalDate($viewDate);
         const localeCode = toIntlLocale($locale || 'zh');
