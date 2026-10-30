@@ -10,6 +10,7 @@
     import SegmentedControl from './SegmentedControl.svelte';
     import SelectMenu from './SelectMenu.svelte';
     import WorklogDetailCard from './WorklogDetailCard.svelte';
+    import WorklogCalendar from './WorklogCalendar.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
@@ -91,6 +92,19 @@
         }
         return map;
     })();
+    $: leaveCalendarDays = calendarCells.map(day => {
+        if (!day) return null;
+        const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayLeave = leaveByDay.get(dayKey) || [];
+        const daySummary = summarizeLeaveRecords(dayLeave, config, { year: cursorYear, month: cursorMonth, day });
+        return {
+            day,
+            primary: dayLeave.length ? formatLeave(daySummary) : '',
+            secondary: dayLeave.length ? dayLeave.map(record => $_(`leave.type_${record.type}`)).slice(0, 2).join(' / ') : '',
+            dots: dayLeave.map(record => record.type === 'annual' ? 'bg-rose-500' : record.type === 'sick' ? 'bg-sky-400' : 'bg-orange-400')
+        };
+    });
+
     $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
         month: index + 1,
         summary: getLeaveMonthSummary(leaveRecords, cursorYear, index + 1, config)
@@ -105,9 +119,8 @@
         { value: false, label: $_('leave.unpaid') }
     ];
     $: viewOptions = [
-        { value: 'year', label: $_('leave.view_year') },
         { value: 'month', label: $_('leave.view_month') },
-        { value: 'day', label: $_('leave.view_day') }
+        { value: 'year', label: $_('leave.view_year') }
     ];
     $: cursorLabel = (() => {
         if (viewMode === 'year') {
@@ -487,14 +500,14 @@
                 <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
                     {#each yearMonths as item}
                         <button on:click={() => selectMonth(item.month)}
-                            class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-left hover:border-rose-200 hover:shadow-md transition dark:bg-slate-800 dark:border-slate-700">
+                            class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-left hover:border-orange-200 hover:shadow-md transition dark:bg-slate-800 dark:border-slate-700">
                             <div class="flex items-center justify-between">
                                 <div class="font-bold text-slate-700 dark:text-slate-200">
                                     {new Date(cursorYear, item.month - 1, 1).toLocaleDateString(localeCode, { month: 'long' })}
                                 </div>
                                 <i class="ph ph-caret-right text-slate-300"></i>
                             </div>
-                            <div class="text-2xl font-black text-rose-600 mt-3">{formatLeave(item.summary)}</div>
+                            <div class="text-2xl font-black text-orange-600 mt-3">{formatLeave(item.summary)}</div>
                             <div class="text-[10px] text-slate-500 mt-1">{$_('leave.paid_days')}: {item.summary.paidDays}</div>
                         </button>
                     {/each}
@@ -502,7 +515,7 @@
             {:else}
                 {@const visibleRecords = viewMode === 'day' ? dayRecords : monthRecords}
                 <WorklogDetailCard
-                    title={viewMode === 'day' ? $_('leave.day_detail') : $_('leave.month_detail')}
+                    title={viewMode === 'day' ? $_('overtime.day_detail') : $_('overtime.month_detail')}
                     summary={formatLeave(viewMode === 'day' ? daySummary : monthSummary)}
                     rows={visibleRecords.map(makeLeaveRow)}
                     showLayout={viewMode === 'month'}
@@ -516,40 +529,8 @@
                     editLabel={$_('leave.edit_record')}
                     deleteLabel={$_('leave.delete')}
                 >
-                    <div slot="calendar" class="p-3">
-                        <div class="grid grid-cols-7 gap-1 mb-1">
-                            {#each ['一', '二', '三', '四', '五', '六', '日'] as label}
-                                <div class="h-7 flex items-center justify-center text-[10px] font-bold text-slate-400">{label}</div>
-                            {/each}
-                        </div>
-                        <div class="grid grid-cols-7 gap-1">
-                            {#each calendarCells as day}
-                                {#if day}
-                                    {@const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
-                                    {@const dayLeave = leaveByDay.get(dayKey) || []}
-                                    {@const dayLeaveSummary = summarizeLeaveRecords(dayLeave, config, { year: cursorYear, month: cursorMonth, day })}
-                                    <button on:click={() => selectDay(day)}
-                                        class={`min-h-20 md:min-h-24 rounded-lg border p-1.5 text-left transition
-                                            ${dayLeave.length
-                                                ? 'border-rose-200 bg-rose-50/70 dark:border-rose-800 dark:bg-rose-900/20'
-                                                : 'border-slate-100 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-900/20 hover:border-rose-200'}`}>
-                                        <div class="text-[11px] font-black ${dayLeave.length ? 'text-rose-600' : 'text-slate-400'}">{day}</div>
-                                        {#if dayLeave.length}
-                                            <div class="mt-1 text-[9px] font-bold text-slate-600 dark:text-slate-300">{formatLeave(dayLeaveSummary)}</div>
-                                            <div class="mt-1 flex flex-wrap gap-0.5">
-                                                {#each dayLeave.slice(0, 3) as record}
-                                                    <span class="w-1.5 h-1.5 rounded-full ${record.type === 'annual' ? 'bg-rose-500' : record.type === 'sick' ? 'bg-sky-400' : 'bg-orange-400'}"></span>
-                                                {/each}
-                                            </div>
-                                        {:else}
-                                            <div class="mt-2 text-[9px] text-slate-300 dark:text-slate-600">{$_('leave.empty')}</div>
-                                        {/if}
-                                    </button>
-                                {:else}
-                                    <div></div>
-                                {/if}
-                            {/each}
-                        </div>
+                    <div slot="calendar">
+                        <WorklogCalendar days={leaveCalendarDays} onSelectDay={selectDay} />
                     </div>
                 </WorklogDetailCard>
             {/if}

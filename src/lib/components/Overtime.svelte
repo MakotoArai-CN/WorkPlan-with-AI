@@ -14,6 +14,7 @@
     import SelectMenu from './SelectMenu.svelte';
     import WorklogRecordRow from './WorklogRecordRow.svelte';
     import WorklogDetailCard from './WorklogDetailCard.svelte';
+    import WorklogCalendar from './WorklogCalendar.svelte';
     import { _, locale } from 'svelte-i18n';
     import { toIntlLocale } from '../i18n/index.js';
     import { formatLocalDate } from '../utils/datetime.js';
@@ -25,6 +26,8 @@
         estimateOvertime,
         filterRecordsByPeriod,
         getMonthSummary,
+        getMonthlyOvertimeActual,
+        getLeaveMonthSummary,
         getYearSummary,
         groupRecordsByDay,
         inferOvertimeType,
@@ -57,14 +60,11 @@
     let cursorYear = now.getFullYear();
     let cursorMonth = now.getMonth() + 1;
     let cursorDay = now.getDate();
-
     let form = createEmptyForm();
-
     $: config = { ...DEFAULT_OVERTIME_CONFIG, ...($settingsStore.overtimeConfig || {}) };
-    $: records = ($taskStore.overtimeRecords || []).map(normalizeOvertimeRecord);
     $: localeCode = toIntlLocale($locale || 'zh');
     $: todayValue = formatLocalDate(new Date());
-    $: estimate = estimateOvertime(records, new Date(), config);
+    $: records = $taskStore.overtimeRecords || [];
     $: monthSummary = getMonthSummary(records, cursorYear, cursorMonth, config);
     $: yearSummary = getYearSummary(records, cursorYear, config);
     $: selectedDayRecords = filterRecordsByPeriod(records, {
@@ -76,6 +76,7 @@
     $: monthDays = Array.from({ length: new Date(cursorYear, cursorMonth, 0).getDate() }, (_, index) => index + 1);
     $: firstWeekday = (new Date(cursorYear, cursorMonth - 1, 1).getDay() + 6) % 7;
     $: calendarCells = [...Array.from({ length: firstWeekday }, () => null), ...monthDays];
+    $: leaveRecords = $taskStore.leaveRecords || [];
     $: monthRows = records
         .filter(record => record.date?.startsWith(`${cursorYear}-${String(cursorMonth).padStart(2, '0')}`))
         .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
@@ -86,16 +87,25 @@
             badge: $_('overtime.type_' + record.type),
             badgeClass: TYPE_STYLES[record.type] || TYPE_STYLES.weekday,
             title: `${record.start} - ${record.end}`,
-            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
+            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))} · ${record.actualPay !== null && record.actualPay !== undefined ? $_('overtime.actual_label') : $_('overtime.estimated_label')}`,
             note: record.note || '',
             metric: hours(record.hours),
             amount: money(getRecordPay(record, config)),
             amountClass: 'text-orange-600'
         }));
-    $: yearMonths = Array.from({ length: 12 }, (_, index) => ({
-        month: index + 1,
-        summary: getMonthSummary(records, cursorYear, index + 1, config)
-    }));
+    $: yearMonths = Array.from({ length: 12 }, (_, index) => {
+        const month = index + 1;
+        const monthKey = `${cursorYear}-${String(month).padStart(2, '0')}`;
+        const salary = (config.salaryActuals || [])
+            .filter(item => String(item.paydayDate || item.periodEnd || '').startsWith(monthKey))
+            .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        return {
+            month,
+            summary: getMonthSummary(records, cursorYear, month, config),
+            leave: getLeaveMonthSummary(leaveRecords, cursorYear, month, config),
+            salary
+        };
+    });
     $: overtimeTypeOptions = [
         { value: 'weekday', label: $_('overtime.type_weekday') },
         { value: 'weekend', label: $_('overtime.type_weekend') },
@@ -107,9 +117,8 @@
         { value: 'none', label: $_('overtime.comp_none') }
     ];
     $: viewOptions = [
-        { value: 'year', label: $_('overtime.view_year') },
         { value: 'month', label: $_('overtime.view_month') },
-        { value: 'day', label: $_('overtime.view_day') }
+        { value: 'year', label: $_('overtime.view_year') }
     ];
     $: detailOptions = [
         { value: 'list', label: $_('overtime.layout_list'), icon: 'ph-list-bullets' },
@@ -149,7 +158,7 @@
             badge: $_('overtime.type_' + record.type),
             badgeClass: TYPE_STYLES[record.type] || TYPE_STYLES.weekday,
             title: `${record.start} - ${record.end}`,
-            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
+            detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))} · ${record.actualPay !== null && record.actualPay !== undefined ? $_('overtime.actual_label') : $_('overtime.estimated_label')}`,
             note: record.note || '',
             metric: hours(record.hours),
             amount: money(getRecordPay(record, config)),
@@ -432,6 +441,11 @@
                     <div class="text-[10px] md:text-xs text-slate-500">
                         {viewMode === 'year' ? $_('overtime.year_total') : $_('overtime.month_total')}: <span class="font-bold text-slate-700 dark:text-slate-200">{hours(viewMode === 'year' ? yearSummary.hours : monthSummary.hours)}</span>                        <span class="mx-1 text-slate-300">·</span>
                         <span class="font-bold text-orange-600">{money(viewMode === 'year' ? yearSummary.pay : monthSummary.pay)}</span>
+                        {#if viewMode !== 'year'}
+                            <span class={`ml-1 rounded px-1 py-0.5 text-[9px] font-bold ${monthSummary.actualOverride ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
+                                {monthSummary.actualOverride ? $_('overtime.actual_label') : $_('overtime.estimated_label')}
+                            </span>
+                        {/if}
                     </div>
                     <button on:click={goToday}
                         class="h-8 px-3 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-500 hover:text-orange-600 dark:bg-slate-800 dark:border-slate-700">
@@ -451,8 +465,22 @@
                                 </div>
                                 <i class="ph ph-caret-right text-slate-300"></i>
                             </div>
-                            <div class="text-2xl font-black text-orange-600 mt-3">{hours(item.summary.hours)}</div>
-                            <div class="text-[10px] text-slate-500 mt-1">{money(item.summary.pay)}</div>
+                            <div class="mt-3 space-y-1">
+                                <div class="flex items-center justify-between text-[10px]">
+                                    <span class="text-slate-400">{$_('worklog.kind_overtime')}</span>
+                                    <span class="font-bold text-slate-700 dark:text-slate-200">{hours(item.summary.hours)} · {money(item.summary.pay)}</span>
+                                </div>
+                                <div class="flex items-center justify-between text-[10px]">
+                                    <span class="text-slate-400">{$_('worklog.kind_leave')}</span>
+                                    <span class="font-bold text-rose-500">{item.leave.days} {$_('leave.unit_day')}</span>
+                                </div>
+                                <div class="flex items-center justify-between text-[10px]">
+                                    <span class="text-slate-400">{$_('payroll.net_pay')}</span>
+                                    <span class={`font-bold ${item.salary > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                        {item.salary > 0 ? money(item.salary) : $_('payroll.not_recorded')}
+                                    </span>
+                                </div>
+                            </div>
                         </button>
                     {/each}
                 </div>
@@ -472,43 +500,9 @@
                     editLabel={$_('overtime.edit_record')}
                     deleteLabel={$_('overtime.delete')}
                 >
-                    <div slot="calendar" class="p-3">
-                            <div class="grid grid-cols-7 gap-1 mb-1">
-                                {#each ['一', '二', '三', '四', '五', '六', '日'] as label}
-                                    <div class="h-7 flex items-center justify-center text-[10px] font-bold text-slate-400">{label}</div>
-                                {/each}
-                            </div>
-                            <div class="grid grid-cols-7 gap-1">
-                                {#each calendarCells as day}
-                                    {#if day}
-                                        {@const dayKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
-                                        {@const dayRecords = monthRecordsByDay.get(dayKey) || []}
-                                        {@const dayHours = dayRecords.reduce((sum, record) => sum + record.hours, 0)}
-                                        {@const dayPay = dayRecords.reduce((sum, record) => sum + calculateRecordPay(record, config), 0)}
-                                        <button on:click={() => selectDay(day)}
-                                            class={`min-h-20 md:min-h-24 rounded-lg border p-1.5 text-left transition
-                                                ${dayRecords.length
-                                                    ? 'border-orange-200 bg-orange-50/70 dark:border-orange-800 dark:bg-orange-900/20'
-                                                    : 'border-slate-100 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-900/20 hover:border-orange-200'}`}>
-                                            <div class="text-[11px] font-black ${dayRecords.length ? 'text-orange-600' : 'text-slate-400'}">{day}</div>
-                                            {#if dayRecords.length}
-                                                <div class="mt-1 text-[9px] font-bold text-slate-600 dark:text-slate-300">{hours(dayHours)}</div>
-                                                <div class="text-[9px] text-orange-600 truncate">{money(dayPay)}</div>
-                                                <div class="mt-1 flex flex-wrap gap-0.5">
-                                                    {#each dayRecords.slice(0, 3) as record}
-                                                        <span class="w-1.5 h-1.5 rounded-full ${record.type === 'holiday' ? 'bg-rose-500' : record.type === 'weekend' ? 'bg-orange-400' : 'bg-indigo-400'}"></span>
-                                                    {/each}
-                                                </div>
-                                            {:else}
-                                                <div class="mt-2 text-[9px] text-slate-300 dark:text-slate-600">{$_('overtime.no_records')}</div>
-                                            {/if}
-                                        </button>
-                                    {:else}
-                                        <div></div>
-                                    {/if}
-                                {/each}
-                            </div>
-                        </div>
+                    <div slot="calendar">
+                        <WorklogCalendar days={calendarDays} onSelectDay={selectDay} />
+                    </div>
                 </WorklogDetailCard>
             {:else}
                 <WorklogDetailCard

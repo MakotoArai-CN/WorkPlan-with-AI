@@ -136,6 +136,15 @@
         <div class="xl:w-72 shrink-0 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 p-3">
             <div class="text-[10px] font-bold text-slate-400 uppercase">{$_('payroll.last_cycle_actual')}</div>
             <div class="text-[10px] text-slate-500 mt-1">{formatCycle(previous)} → {previous.paydayDate}</div>
+            {#if payroll.actual}
+                <div class="mt-2 flex items-baseline gap-2">
+                    <span class="text-[9px] text-slate-400">{$_('payroll.net_pay')}</span>
+                    <b class="text-lg font-black text-emerald-600">{money(payroll.actual.amount)}</b>
+                    {#if payroll.actual.overtimePay > 0}
+                        <span class="text-[9px] text-orange-600">{$_('payroll.overtime_pay')} {money(payroll.actual.overtimePay)}</span>
+                    {/if}
+                </div>
+            {/if}
             <div class="mt-2 flex items-center gap-2">
                 <input type="number" min="0" step="100" bind:value={actualInput} on:change={saveActual}
                     placeholder={$_('payroll.actual_placeholder')}

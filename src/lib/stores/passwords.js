@@ -115,9 +115,12 @@ function createPasswordsStore() {
             category: entry.category || '默认',
             notes: entry.notes || ''
         };
-        const password = String(entry.password || '').startsWith('v4:')
-            ? entry.password
-            : encryptVaultPayload(entry.password || '', vaultEntryKey);
+        const rawPassword = String(entry.password || '');
+        // Legacy v3 values are already ciphertext. Never wrap them again; the
+        // background migrator replaces them with v4 entries.
+        const password = rawPassword.startsWith('v4:') || rawPassword.startsWith('v3:')
+            ? rawPassword
+            : encryptVaultPayload(rawPassword, vaultEntryKey);
         return {
             id: entry.id,
             meta: encryptVaultEntryFields(meta, vaultEntryKey),
@@ -139,32 +142,70 @@ function createPasswordsStore() {
         return decrypt(value, vaultSecret);
     }
 
+    let vaultMigrationRunning = false;
+
+    async function migrateLegacyVaultEntries() {
+        if (vaultMigrationRunning || !vaultSecret || !vaultEntryKey) return;
+        vaultMigrationRunning = true;
+        let migratedAny = false;
+        try {
+            const initial = get({ subscribe });
+            const legacyIds = initial.passwords
+                .filter(entry => {
+                    const value = String(entry.password || '');
+                    return value && !value.startsWith('v4:');
+                })
+                .map(entry => entry.id);
+            for (let offset = 0; offset < legacyIds.length; offset += 12) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+                if (!vaultEntryKey) break;
+                const batch = new Set(legacyIds.slice(offset, offset + 12));
+                let changed = false;
+                const current = get({ subscribe });
+                const migrated = current.passwords.map(entry => {
+                    if (!batch.has(entry.id)) return entry;
+                    const value = String(entry.password || '');
+                    if (!value || value.startsWith('v4:')) return entry;
+                    const plain = decrypt(value, vaultSecret);
+                    if (plain === null) return entry;
+                    changed = true;
+                    return { ...entry, password: encryptVaultPayload(plain, vaultEntryKey) };
+                });
+                if (changed) {
+                    const next = { ...current, passwords: migrated };
+                    update(() => next);
+                    migratedAny = true;
+                }
+            }
+            if (migratedAny) {
+                saveImmediate(get({ subscribe }));
+            }
+        } finally {
+            vaultMigrationRunning = false;
+        }
+    }
+
+    function scheduleVaultMigration() {
+        setTimeout(() => { void migrateLegacyVaultEntries(); }, 80);
+    }
+
     async function hydrateVaultEntries() {
         if (!vaultSecret || !vaultEntryKey) return;
         const state = get({ subscribe });
-        let changed = false;
         const hydrated = state.passwords.map(entry => {
             let next = { ...entry };
             if (entry.meta) {
                 const meta = decryptVaultEntryFields(entry.meta, vaultEntryKey);
                 if (meta) next = { ...next, ...meta };
                 delete next.meta;
-            } else {
-                changed = true;
             }
-            const password = String(next.password || '');
-            if (password && !password.startsWith('v4:')) {
-                const plain = decrypt(password, vaultSecret);
-                if (plain !== null) {
-                    next.password = encryptVaultPayload(plain, vaultEntryKey);
-                    changed = true;
-                }
-            }
+            // Do NOT re-encrypt every legacy entry here. Each old entry needs
+            // a 10k PBKDF2 pass; doing that inside unlock() freezes the UI when
+            // the vault contains hundreds/thousands of passwords.
             return next;
         });
         const nextState = { ...state, passwords: hydrated };
         update(() => nextState);
-        if (changed) saveImmediate(nextState);
         migrationDone = true;
     }
 
@@ -309,6 +350,7 @@ function createPasswordsStore() {
         await hydrateVaultEntries();
         update(s => ({ ...s, isUnlocked: true }));
         saveSession(result.masterPassword);
+        scheduleVaultMigration();
         return { success: true };
     }
 
@@ -348,6 +390,7 @@ function createPasswordsStore() {
                 }
                 await hydrateVaultEntries();
                 update(s => ({ ...s, isUnlocked: true }));
+                scheduleVaultMigration();
                 return true;
             }
 
@@ -395,6 +438,7 @@ function createPasswordsStore() {
             }
 
             saveSession(password);
+            scheduleVaultMigration();
             return true;
         },
         lock: () => {
@@ -576,6 +620,22 @@ function createPasswordsStore() {
             saveSettings({ categories });
             return { ...s, categories };
         }),
+        suspendForAccountSwitch: () => {
+            if (saveTimer) {
+                clearTimeout(saveTimer);
+                saveTimer = null;
+            }
+            clearActiveSecrets();
+            sessionToken = null;
+            migrationDone = false;
+            update(s => ({
+                ...s,
+                passwords: [],
+                isUnlocked: false,
+                masterPasswordHash: null,
+                initialized: false
+            }));
+        },
         clearAll: () => {
             clearActiveSecrets();
             sessionToken = null;

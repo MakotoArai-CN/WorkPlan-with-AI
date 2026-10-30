@@ -4,6 +4,7 @@ import { formatLocalDate, formatLocalDateTime, parseLocalDate } from '../utils/d
 import { buildScheduledInstances, normalizeRepeatDays } from '../utils/schedule.js';
 import { normalizeLeaveRecord, normalizeOvertimeRecord } from '../utils/overtime.js';
 import { mergeSyncState, normalizeSyncPayload } from '../utils/task-sync.js';
+import { clearAccountScopedData, restoreAccountData, stashCurrentAccount } from '../utils/account-scope.js';
 
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const DEFAULT_SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
@@ -715,6 +716,12 @@ function createTaskStore() {
         update,
         login: (key) => {
             if (typeof window === 'undefined') return;
+            const previousKey = localStorage.getItem('planpro_access_key');
+            if (previousKey && previousKey !== key) {
+                stashCurrentAccount(previousKey);
+                clearAccountScopedData();
+            }
+            if (previousKey !== key) restoreAccountData(key);
             localStorage.setItem('planpro_access_key', key);
             // Never show another account's cached tasks.
             try {
@@ -743,6 +750,11 @@ function createTaskStore() {
         },
         logout: () => {
             if (typeof window === 'undefined') return;
+            const previousKey = localStorage.getItem('planpro_access_key');
+            if (previousKey) {
+                stashCurrentAccount(previousKey);
+                clearAccountScopedData();
+            }
             localStorage.removeItem('planpro_access_key');
             clearLocalCache();
             localCloudSnapshotStr = '';

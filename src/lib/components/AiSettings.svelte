@@ -21,7 +21,7 @@
     import { connectorConfig } from "../stores/connector.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { onMount, tick } from "svelte";
-    import { fly } from "svelte/transition";
+    import { fly, fade } from "svelte/transition";
     import { _ } from 'svelte-i18n';
     import AnimatedModal from './AnimatedModal.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
@@ -453,11 +453,12 @@
                     indicatorClass="bg-rose-50 shadow-sm" />
             </div>
 
-            <div bind:this={contentScrollEl}
-                class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6"
-            >
+            <div class="relative h-[min(60vh,520px)] min-h-[380px] shrink-0 overflow-hidden">
                 {#key activeTab}
-<div class="tab-panel" in:fly={{ x: tabDirection * 22, duration: 240, opacity: 0.2 }}>
+<div bind:this={contentScrollEl}
+     class="tab-panel absolute inset-0 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6"
+     in:fly={{ x: tabDirection * 18, duration: 260, opacity: 0.15 }}
+     out:fade={{ duration: 120 }}>
                 {#if activeTab === "basic"}
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
                         <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -490,14 +491,8 @@
                             {#each $aiConfig.connectionProfiles || [] as profile}
                                 <button
                                     on:click={() => handleConnectionProfileChange(profile.id)}
-                                    class="px-3 py-2 rounded-xl text-sm font-bold border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm active:scale-95"
-                                    class:bg-rose-600={profile.id === $aiConfig.activeProfileId}
-                                    class:text-white={profile.id === $aiConfig.activeProfileId}
-                                    class:border-rose-600={profile.id === $aiConfig.activeProfileId}
-                                    class:bg-white={profile.id !== $aiConfig.activeProfileId}
-                                    class:text-slate-600={profile.id !== $aiConfig.activeProfileId}
-                                    class:border-slate-200={profile.id !== $aiConfig.activeProfileId}
-                                    class:shadow-sm={profile.id === $aiConfig.activeProfileId}
+                                    class="connection-profile-btn px-3 py-2 rounded-xl text-sm font-bold border active:scale-95"
+                                    class:connection-active={profile.id === $aiConfig.activeProfileId}
                                 >
                                     {profile.name}
                                 </button>
@@ -887,6 +882,35 @@
     .tab-panel {
         min-height: 1px;
         will-change: transform, opacity;
+    }
+
+    .connection-profile-btn {
+        background: #ffffff;
+        color: #475569;
+        border-color: #e2e8f0;
+        transition:
+            background-color 0.24s ease,
+            color 0.24s ease,
+            border-color 0.24s ease,
+            box-shadow 0.24s ease,
+            transform 0.18s ease;
+    }
+    .connection-profile-btn:hover {
+        background: #fff1f2;
+        border-color: #fecdd3;
+        color: #be123c;
+        transform: translateY(-1px);
+    }
+    .connection-profile-btn.connection-active {
+        background: #e11d48;
+        border-color: #e11d48;
+        color: #ffffff;
+        box-shadow: 0 4px 12px -4px rgba(225, 29, 72, 0.45);
+    }
+    .connection-profile-btn.connection-active:hover {
+        background: #be123c;
+        border-color: #be123c;
+        color: #ffffff;
     }
 
     :global(.ai-settings-panel button) {

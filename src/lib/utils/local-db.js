@@ -254,6 +254,16 @@ export async function replaceLocalDatabaseKeys(keys = {}) {
     return allowed.length;
 }
 
+export async function flushLocalDatabase() {
+    if (!isTauriRuntime) return null;
+    try {
+        return await saveSnapshot();
+    } catch (error) {
+        console.warn('[LocalDB] flush failed:', error);
+        return null;
+    }
+}
+
 export async function localDatabaseInfo() {
     if (!isTauriRuntime) return null;
     return invoke('local_db_info');
