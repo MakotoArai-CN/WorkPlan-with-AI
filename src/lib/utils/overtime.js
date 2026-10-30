@@ -407,7 +407,8 @@ export function getMonthlyOvertimeActual(config = DEFAULT_OVERTIME_CONFIG, month
 
 export function getMonthSummary(records = [], year, month, config = DEFAULT_OVERTIME_CONFIG) {
     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-    const base = summarizeOvertimeRecords(filterRecordsByPeriod(records, { year, month }), config);
+    const effectiveConfig = getEffectiveOvertimeConfig(records, config);
+    const base = summarizeOvertimeRecords(filterRecordsByPeriod(records, { year, month }), effectiveConfig);
     const override = getMonthlyOvertimeActual(config, monthKey);
     if (!override) return { ...base, actualOverride: false, estimatedPay: base.pay };
     return {
