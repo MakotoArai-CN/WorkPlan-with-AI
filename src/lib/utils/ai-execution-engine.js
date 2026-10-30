@@ -3,6 +3,20 @@ import { readSelectedTextFiles } from './local-file-tools.js';
 import { generateImage } from './ai-media-generation.js';
 import { normalizePriority } from './task-vocabulary.js';
 
+// Filenames that strongly suggest credentials/secrets must never be read
+// automatically and relayed to an external AI provider, even when the path
+// sits inside an otherwise-trusted directory.
+const SENSITIVE_PATH_PATTERN = /(^|[\\/])(\.env(\..*)?|\.npmrc|\.netrc|id_rsa|id_ed25519|[^\\/]*\.pem|[^\\/]*\.pfx|[^\\/]*\.key|credentials(\.json)?|secrets?\.ya?ml)$/i;
+
+// Last-resort redaction so secret-looking content is never forwarded to the
+// AI model even if a file slips past the filename check above.
+function redactSecrets(text = '') {
+    return String(text)
+        .replace(/-----BEGIN [^-]+PRIVATE KEY-----[\s\S]+?-----END [^-]+PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
+        .replace(/\b(?:sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b/g, '[REDACTED]')
+        .replace(/((?:api|secret|access)[-_]?(?:key|token)|password)\s*[:=]\s*\S+/gi, '$1=[REDACTED]');
+}
+
 let _cancelledPlans = new Set();
 
 export function cancelPlan(planId) {
@@ -166,17 +180,22 @@ async function executeStep(step, previousResults, config, userMessage) {
         case 'file_read': {
             const paths = step.params.paths || [];
             if (paths.length === 0) throw new Error('缺少文件路径');
-            // These paths come from the model, not the user, so they are only ever
-            // read within the workspace or an explicitly trusted directory. The
-            // backend enforces this; passing the list keeps the error messages useful.
+            // These paths come from the model, not the user. Credential/secret
+            // files are never read, even if they live inside a trusted
+            // directory, and any secret-shaped content that still slips
+            // through is redacted before it can reach an external AI provider.
+            const blockedPaths = paths.filter(p => SENSITIVE_PATH_PATTERN.test(String(p)));
+            const safePaths = paths.filter(p => !SENSITIVE_PATH_PATTERN.test(String(p)));
+            if (safePaths.length === 0) throw new Error('拒绝读取：所选文件疑似凭据/密钥，已阻止发送给 AI');
             const files = await readSelectedTextFiles({
-                paths,
+                paths: safePaths,
                 maxBytes: 64000,
                 trustedDirectories: config.trustedDirectories || []
             });
             return {
                 type: 'file_read',
-                files: files.map(f => ({ name: f.name || f.path, content: f.content?.slice(0, 4000) || '' }))
+                files: files.map(f => ({ name: f.name || f.path, content: redactSecrets(f.content?.slice(0, 4000) || '') })),
+                blockedPaths
             };
         }
 
