@@ -1,7 +1,6 @@
 <script>
     import { taskStore } from '../stores/tasks.js';
     import { showConfirm, showToast } from '../stores/modal.js';
-    import WorklogDetailCard from './WorklogDetailCard.svelte';
     import WorklogCalendar from './WorklogCalendar.svelte';
     import DatePicker from './DatePicker.svelte';
     import TimeSelect from './TimeSelect.svelte';
@@ -37,7 +36,7 @@
     let cursorYear = new Date().getFullYear();
     let cursorMonth = new Date().getMonth() + 1;
     let cursorDay = new Date().getDate();
-    let layout = 'list';
+    const viewOptions = [{ value: 'month', label: '月' }, { value: 'year', label: '年' }];
     let showForm = false;
     let editingId = null;
     let saving = false;
@@ -292,6 +291,9 @@
     </div>
 
     {#if viewMode === 'year'}
+        <div class="flex justify-end mb-2">
+            <SegmentedControl bind:value={viewMode} options={viewOptions} />
+        </div>
         <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
             {#each yearMonths as item}
                 <button on:click={() => { cursorMonth = item.month; viewMode = 'month'; }}
@@ -309,25 +311,16 @@
             {/each}
         </div>
     {:else}
-        <WorklogDetailCard
-            title={$_('overtime.month_detail')}
-            summary={summaryText}
-            rows={monthRows}
-            bind:layout
-            showLayout
-            emptyTitle={activeTab === 'overtime' ? $_('overtime.empty') : $_('leave.empty')}
-            emptyDesc={activeTab === 'overtime' ? $_('overtime.empty_desc') : $_('leave.empty_desc')}
-            addLabel={activeTab === 'overtime' ? $_('overtime.add_record') : $_('leave.add_record')}
-            onAdd={openCreate}
-            onEdit={openEdit}
-            onDelete={deleteRecord}
-            editLabel={$_('overtime.edit_record')}
-            deleteLabel={$_('overtime.delete')}
-        >
-            <div slot="calendar">
-                <WorklogCalendar days={calendarDays} onSelectDay={(day) => { cursorDay = day; }} />
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-700 overflow-hidden">
+            <div class="px-4 py-3 min-h-[54px] border-b border-slate-50 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap">
+                <div class="font-bold text-sm text-slate-700 dark:text-slate-200">{$_('overtime.month_detail')}</div>
+                <div class="flex items-center gap-3">
+                    <div class="text-[11px] text-slate-500">{summaryText}</div>
+                    <SegmentedControl bind:value={viewMode} options={viewOptions} className="scale-95 origin-right" />
+                </div>
             </div>
-        </WorklogDetailCard>
+            <WorklogCalendar days={calendarDays} onSelectDay={(day) => { cursorDay = day; }} />
+        </div>
     {/if}
 </div>
 

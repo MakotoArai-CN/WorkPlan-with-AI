@@ -365,7 +365,8 @@
                             </div>
                             <div class="rounded-xl bg-orange-50 dark:bg-orange-900/20 p-3">
                                 <div class="text-[10px] text-orange-700 dark:text-orange-300">{$_('payroll.annual_overtime')}</div>
-                                <div class="text-base font-black text-orange-700 dark:text-orange-300 mt-1">{money(annual.totalOvertime)}</div>
+                                <div class="text-base font-black text-orange-700 dark:text-orange-300 mt-1">{money(annual.estimatedOvertime)}</div>
+                                <div class="text-[9px] text-orange-600/70 mt-0.5">{$_('overtime.actual_label')}: {money(annual.totalOvertime)}</div>
                             </div>
                             <div class="rounded-xl bg-slate-50 dark:bg-slate-900/40 p-3">
                                 <div class="text-[10px] text-slate-400">{$_('payroll.monthly_average')}</div>

@@ -72,9 +72,11 @@
                 <div class="rounded-xl bg-slate-50 dark:bg-slate-900/40 px-3 py-2">
                     <div class="text-xs text-slate-400">{$_('payroll.annual_overtime')}</div>
                     <div class="text-lg font-black text-orange-600 mt-0.5">
-                        {annual.monthsRecorded ? money(annual.totalOvertime) : '—'}
+                        {annual.monthsRecorded ? money(annual.estimatedOvertime) : '—'}
                     </div>
-                    <div class="text-[11px] text-slate-400">{$_('payroll.salary_slip')}</div>
+                    <div class="text-[11px] text-slate-400">
+                        {$_('overtime.actual_label')}: {money(annual.totalOvertime)}
+                    </div>
                 </div>
                 <div class="rounded-xl bg-slate-50 dark:bg-slate-900/40 px-3 py-2">
                     <div class="text-xs text-slate-400">{$_('payroll.current_cycle')}</div>
