@@ -8,6 +8,9 @@
     export let rows = [];
     export let layout = 'list';
     export let showLayout = false;
+    export let showView = false;
+    export let viewMode = 'month';
+    export let viewOptions = [];
     export let emptyTitle = '';
     export let emptyDesc = '';
     export let addLabel = '';
@@ -28,6 +31,9 @@
         <div class="font-bold text-sm text-slate-700 dark:text-slate-200">{title}</div>
         <div class="flex items-center gap-3">
             <div class="text-[10px] text-slate-500">{summary}</div>
+            {#if showView}
+                <SegmentedControl bind:value={viewMode} options={viewOptions} className="scale-95 origin-right" />
+            {/if}
             {#if showLayout}
                 <SegmentedControl bind:value={layout} options={layoutOptions} className="scale-95 origin-right" />
             {/if}
