@@ -16,6 +16,7 @@
         calculateLeaveDays,
         calculateOvertimeHours,
         filterRecordsByPeriod,
+        getEffectiveOvertimeConfig,
         getLeaveMonthSummary,
         getMonthSummary,
         getRecordPay,
@@ -44,6 +45,7 @@
     let localeCode = toIntlLocale($locale || 'zh');
 
     $: normalizedConfig = { ...DEFAULT_OVERTIME_CONFIG, ...(config || {}) };
+    $: effectiveConfig = getEffectiveOvertimeConfig($taskStore.overtimeRecords || [], normalizedConfig);
     $: overtimeRecords = $taskStore.overtimeRecords || [];
     $: leaveRecords = $taskStore.leaveRecords || [];
     $: monthSummary = activeTab === 'overtime'
@@ -95,7 +97,7 @@
                 detail: `${hours(record.hours)} · ${$_('overtime.comp_' + (record.compensation || 'pay'))}`,
                 note: record.note || '',
                 metric: hours(record.hours),
-                amount: money(getRecordPay(record, normalizedConfig)),
+                amount: money(getRecordPay(record, effectiveConfig)),
                 amountClass: 'text-orange-600'
             }));
     }
