@@ -6,6 +6,7 @@ import {
     calibrateOvertimeRate,
     getHourlyRate,
     getOvertimeCalibration,
+    getEffectiveOvertimeConfig,
     getMonthSummary,
     getRecordPay,
     getYearSummary,
@@ -148,6 +149,18 @@ describe('smart overtime rate calibration', () => {
         expect(getHourlyRate(applied)).toBe(10.02);
         const calibration = getOvertimeCalibration(records, applied);
         expect(calibration.impliedMultiplier).toBe(0.51);
+    });
+
+    test('recalibrates when later records are imported', () => {
+        const expanded = [
+            ...records,
+            { id: 'd2', date: '2026-09-29', start: '18:00', end: '21:30', hours: 3.5, type: 'weekday', compensation: 'pay' }
+        ];
+        const stored = { ...withActual, overtimeLearnedRate: 10.02, overtimeCalibrationSamples: 1 };
+        const effective = getEffectiveOvertimeConfig(expanded, stored);
+        expect(effective.overtimeLearnedRate).toBe(8.04);
+        expect(getOvertimeCalibration(expanded, stored).learnedRate).toBe(8.04);
+        expect(getMonthSummary(expanded, 2026, 9, stored).estimatedPay).toBe(213.06);
     });
 
     test('learns from more months instead of only the first one', () => {

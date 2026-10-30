@@ -11,6 +11,7 @@ import {
     getFixedSalaryTotal,
     getOvertimeBaseSalary,
     getHourlyRate,
+    getOvertimeCalibration,
     getYearSummary,
     isValidDate,
     normalizeLeaveRecord,
@@ -191,7 +192,7 @@ export function getPayrollEstimate(records = [], leaveRecords = [], referenceDat
         actualDifference: actual ? Math.round((actual.amount - previous.estimated) * 100) / 100 : 0,
         fixedTotal: current.fixed,
         overtimeBase: getOvertimeBaseSalary(normalized),
-        hourlyRate: Math.round(getHourlyRate(normalized) * 100) / 100,
+        hourlyRate: Math.round(getOvertimeCalibration(records, normalized).effectiveRate * 100) / 100,
         components: normalized.salaryComponents,
         payday: normalized.payday
     };
