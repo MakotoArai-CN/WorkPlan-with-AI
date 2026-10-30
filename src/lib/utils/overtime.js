@@ -228,6 +228,23 @@ export function getHourlyRate(config = DEFAULT_OVERTIME_CONFIG) {
 }
 
 /**
+ * Recompute the effective rate from the current records instead of trusting a
+ * stored rate that may predate newly imported overtime. This keeps historical
+ * monthly estimates consistent after records change.
+ */
+export function getEffectiveOvertimeConfig(records = [], config = DEFAULT_OVERTIME_CONFIG) {
+    const normalized = normalizeOvertimeConfig(config);
+    if (!normalized.overtimeAutoCalibrate || !(normalized.overtimeLearnedRate > 0)) return normalized;
+    const calibrated = calibrateOvertimeRate(records, normalized);
+    if (!(calibrated.rate > 0)) return normalized;
+    return {
+        ...normalized,
+        overtimeLearnedRate: calibrated.rate,
+        overtimeCalibrationSamples: calibrated.samples
+    };
+}
+
+/**
  * Learn an effective overtime hourly rate from months that have an actual
  * amount. This is intentionally based on weighted payable hours, so a month
  * with 8h weekend + 3.5h weekday contributes 21.25h, not 11.5h.
@@ -266,13 +283,18 @@ export function calibrateOvertimeRate(records = [], config = DEFAULT_OVERTIME_CO
 export function getOvertimeCalibration(records = [], config = DEFAULT_OVERTIME_CONFIG) {
     const normalized = normalizeOvertimeConfig(config);
     const standard = getStandardHourlyRate(normalized);
-    const learned = normalized.overtimeAutoCalibrate ? normalized.overtimeLearnedRate : 0;
+    const recalibrated = normalized.overtimeAutoCalibrate
+        ? calibrateOvertimeRate(records, normalized)
+        : null;
+    const learned = recalibrated?.rate > 0
+        ? recalibrated.rate
+        : (normalized.overtimeAutoCalibrate ? normalized.overtimeLearnedRate : 0);
     return {
         standardRate: Math.round(standard * 100) / 100,
         effectiveRate: Math.round((learned > 0 ? learned : standard) * 100) / 100,
         learnedRate: Math.round(learned * 100) / 100,
         impliedMultiplier: standard > 0 && learned > 0 ? Math.round((learned / standard) * 100) / 100 : 1,
-        samples: normalized.overtimeCalibrationSamples || 0,
+        samples: recalibrated?.samples || normalized.overtimeCalibrationSamples || 0,
         auto: normalized.overtimeAutoCalibrate
     };
 }
@@ -332,6 +354,7 @@ export function getYearKey(date) {
 }
 
 export function summarizeOvertimeRecords(records = [], config = DEFAULT_OVERTIME_CONFIG) {
+    const effectiveConfig = getEffectiveOvertimeConfig(records, config);
     const summary = {
         hours: 0,
         payableHours: 0,
@@ -351,8 +374,8 @@ export function summarizeOvertimeRecords(records = [], config = DEFAULT_OVERTIME
         if (normalized.compensation === 'pay') {
             summary.payableHours += normalized.hours;
             summary.payableByType[normalized.type] += normalized.hours;
-            summary.pay += getRecordPay(normalized, config);
-            summary.estimatedPay += calculateRecordPay(normalized, config);
+            summary.pay += getRecordPay(normalized, effectiveConfig);
+            summary.estimatedPay += calculateRecordPay(normalized, effectiveConfig);
             if (normalized.actualPay !== null) summary.actualPayCount += 1;
         }
     }
@@ -384,7 +407,8 @@ export function getMonthlyOvertimeActual(config = DEFAULT_OVERTIME_CONFIG, month
 
 export function getMonthSummary(records = [], year, month, config = DEFAULT_OVERTIME_CONFIG) {
     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-    const base = summarizeOvertimeRecords(filterRecordsByPeriod(records, { year, month }), config);
+    const effectiveConfig = getEffectiveOvertimeConfig(records, config);
+    const base = summarizeOvertimeRecords(filterRecordsByPeriod(records, { year, month }), effectiveConfig);
     const override = getMonthlyOvertimeActual(config, monthKey);
     if (!override) return { ...base, actualOverride: false, estimatedPay: base.pay };
     return {
