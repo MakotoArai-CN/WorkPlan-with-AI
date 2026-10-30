@@ -1059,7 +1059,8 @@
     "formula_multiplier": "about {value}× the standard rate",
     "formula_learned_short": "Learned · {samples} mo",
     "formula_standard_short": "Standard formula rate",
-    "day_detail": "Day detail"
+    "day_detail": "Day detail",
+    "year_detail": "Year detail"
   },
   "leave": {
     "title": "Leave records",
