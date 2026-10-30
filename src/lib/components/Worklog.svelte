@@ -86,14 +86,8 @@
 
     <WorklogSummaryCards {activeTab} {config} {overtimeRecords} {leaveRecords} />
 
-    <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <div class="flex justify-end px-4 md:px-6 pt-2 shrink-0">
-            <SegmentedControl bind:value={viewMode} options={viewOptions}
-                className="compact [&_button]:px-3 [&_button]:py-1 [&_button]:text-[11px]" />
-        </div>
-        <div class="flex-1 min-h-0 overflow-hidden">
-            <WorklogBoard bind:this={boardRef} {activeTab} {config} bind:viewMode />
-        </div>
+    <div class="flex-1 min-h-0 overflow-hidden">
+        <WorklogBoard bind:this={boardRef} {activeTab} {config} bind:viewMode />
     </div>
 </div>
 
