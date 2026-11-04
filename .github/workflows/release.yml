@@ -60,7 +60,7 @@ jobs:
 
   build-windows:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     strategy:
@@ -188,7 +188,7 @@ jobs:
 
   build-windows-webview2:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
@@ -334,7 +334,7 @@ jobs:
   # 离线版本
   build-windows-webview2-offlineInstaller:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
@@ -479,7 +479,7 @@ jobs:
 
   build-linux:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -542,7 +542,7 @@ jobs:
 
   build-macos:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -609,7 +609,7 @@ jobs:
 
   build-android:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -844,7 +844,7 @@ jobs:
 
   release:
     needs: [get-version, build-windows, build-windows-webview2, build-windows-webview2-offlineInstaller, build-linux, build-macos, build-android]
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
