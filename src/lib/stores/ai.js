@@ -26,6 +26,7 @@ import {
 } from '../utils/web-search.js';
 import {
     isExplicitWebSearchRequest,
+    looksLikeGeneralChatIntent,
     mentionsUrlOrDomain,
     shouldSkipWebSearchForTaskText
 } from '../utils/intent-heuristics.js';
@@ -1473,26 +1474,29 @@ function detectSubtaskOperation(text) {
 function looksLikeProjectIntent(text = '') {
     const lowerText = String(text).toLowerCase();
     const hasProjectKeyword = PROJECT_CHAT_KEYWORDS.some(keyword => lowerText.includes(keyword));
+    const hasTaskQueryHint = /(今天|今日|明天|后天|本周|这周|下周|本月|这个月|我的|所有|全部|哪些|有什么|进度|状态|列出|查询|查看)/i.test(text);
     const hasActionKeyword = DELETE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
         UPDATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
         QUERY_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
         SUBTASK_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
         ['新增', '添加', '创建', '新建', '整理', '汇总', '总结', '复盘', '统计', 'report'].some(keyword => lowerText.includes(keyword));
     const hasAnalysisKeyword = PROJECT_ANALYSIS_KEYWORDS.some(keyword => lowerText.includes(keyword));
-    return (hasProjectKeyword && hasActionKeyword) ||
+    return (hasProjectKeyword && (hasActionKeyword || hasTaskQueryHint)) ||
         looksLikeNaturalTaskIntent(text) ||
         (hasAnalysisKeyword && (hasProjectKeyword || TIME_REFERENCE_REGEX.test(text)));
 }
 
 function looksLikeNaturalTaskIntent(text = '') {
     const lowerText = String(text).toLowerCase();
-    const hasTimeHint = TIME_REFERENCE_REGEX.test(text);
-    const hasActionHint = NATURAL_TASK_ACTION_KEYWORDS.some(keyword => lowerText.includes(keyword));
-    const hasImperativeHint = /(帮我|请帮我|记一下|安排一下|提醒我|创建一个|新建一个|add|create|schedule|remind)/i.test(text);
-    const hasEventLikePattern = /(会议|开会|跟进|提交|汇报|提醒|面试|复盘|付款|报销|review|meeting|call|sync)/i.test(text);
-
-    return (hasTimeHint && (hasActionHint || hasImperativeHint || hasEventLikePattern)) ||
-        (hasImperativeHint && hasEventLikePattern);
+    const hasTaskNoun = /(任务|待办|看板|模板|定时|子任务|清单|todo|task|kanban|template|checklist)/i.test(text);
+    const hasCreateVerb = /(安排|提醒|记得|创建|新建|新增|添加|记录|补录|规划|拆分|分解|整理)/i.test(text);
+    const hasImperative = /(帮我|请帮我|麻烦|记得|提醒我|帮我记|帮我安排)/i.test(text);
+    const hasEvent = /(会议|开会|跟进|提交|汇报|面试|复盘|付款|报销|review|meeting|call|sync)/i.test(text);
+    // A bare event/time sentence such as "今天开会好累" is conversation, not
+    // a task command. Only route it when it names a task or contains an
+    // explicit create/remind/plan verb.
+    return (hasTaskNoun && (hasCreateVerb || hasImperative)) ||
+        (hasEvent && hasCreateVerb);
 }
 
 function detectAssistantSourceFromText(text = '', fallbackSource = 'tasks') {
@@ -1578,6 +1582,14 @@ function detectOperationType(text) {
     const isRetroactiveLog = isRetroactiveLogIntent(text);
     if (isRetroactiveLog) {
         return 'create';
+    }
+    const hasTaskNoun = /任务|待办|清单|看板|todo|task|kanban/i.test(text);
+    const hasTaskQueryHint = /(今天|今日|明天|后天|本周|这周|下周|本月|这个月|我的|所有|全部|哪些|有什么|有什么任务|完成情况|进度|状态|列出|查询|查看)/i.test(text);
+    const hasMutationIntent = DELETE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        UPDATE_KEYWORDS.some(keyword => lowerText.includes(keyword.toLowerCase())) ||
+        /(修改|更改|删除|删掉|去掉|移除|完成|标记|更新|调整)/i.test(text);
+    if (!hasCreateIntent && hasTaskNoun && hasTaskQueryHint && !hasMutationIntent) {
+        return 'query';
     }
     if (!hasCreateIntent && looksLikeTaskAnalysisRequest(text)) {
         return 'query';
@@ -1840,17 +1852,37 @@ function getTaskScopeForContext(tasks = [], timeScope = getDefaultTaskTimeScope(
     return scope;
 }
 
-function filterTasksByTimeScope(tasks, timeScope) {
+function isTodayTimeScope(timeScope, dateInfo) {
+    if (!timeScope?.explicit || !timeScope.mentionedDate) return false;
+    if (timeScope.rangeType !== 'day' && timeScope.rangeType !== 'month_to_current') return false;
+    return startOfDay(timeScope.mentionedDate).getTime() === startOfDay(dateInfo.today).getTime();
+}
+
+function isActiveTask(task = {}) {
+    return !task.status || task.status === 'todo' || task.status === 'doing';
+}
+
+export function filterTasksByTimeScope(tasks, timeScope, options = {}) {
     if (!tasks || tasks.length === 0) return [];
     return tasks.filter(task => {
         const taskDate = getTaskDateOnly(task);
         if (!taskDate) {
-            return !timeScope.explicit;
+            if (!timeScope.explicit) return true;
+            // A dateless backlog item is still actionable today.
+            return options.includeOverdueActive === true && isActiveTask(task);
         }
         if (timeScope.startDate && timeScope.endDate) {
-            return taskDate >= timeScope.startDate && taskDate <= timeScope.endDate;
+            if (taskDate >= timeScope.startDate && taskDate <= timeScope.endDate) return true;
+        } else {
+            return true;
         }
-        return true;
+        // "今天的任务" means today's work plus unfinished older work and
+        // anything currently in progress. It must not hide overdue tasks just
+        // because they were created in a previous month.
+        if (options.includeOverdueActive && isActiveTask(task) && taskDate < timeScope.startDate) {
+            return true;
+        }
+        return false;
     });
 }
 
@@ -1862,8 +1894,10 @@ function getTimeScopedItems(assistantContext, timeScope, dateInfo, options = {})
         dateInfo,
         options
     );
+    const includeOverdueActive = options.includeOverdueActive === true
+        && isTodayTimeScope(timeScope, dateInfo);
     return assistantContext.source === 'tasks'
-        ? filterTasksByTimeScope(items, effectiveScope)
+        ? filterTasksByTimeScope(items, effectiveScope, { includeOverdueActive })
         : items;
 }
 
@@ -2058,12 +2092,15 @@ async function buildAiChatAssistantPayload(text = '') {
 
 function shouldUseAssistantToolsInChat(text = '') {
     const context = get(aiChatContext);
-    if (context?.scope && CHAT_ASSISTANT_CONTEXT_SCOPES.has(context.scope)) {
+    // Only explicitly specialized panels should force the tool router. The
+    // dashboard/project scope used by the normal AI chat must still classify
+    // the message, otherwise "今天开会好累" becomes a task-create command.
+    if (context?.scope === 'templates' || context?.scope === 'scheduled' || context?.scope === 'notes') {
         return true;
     }
-    return looksLikeFileIntent(text) ||
-        looksLikeWebSearchIntent(text) ||
-        looksLikeProjectIntent(text);
+    if (looksLikeFileIntent(text)) return true;
+    if (looksLikeGeneralChatIntent(text)) return false;
+    return looksLikeWebSearchIntent(text) || looksLikeProjectIntent(text);
 }
 
 function extractQuotedSegment(text = '') {
@@ -2667,7 +2704,10 @@ async function buildContextualAssistantResponse(userText, assistantContext, conf
         ? getTaskCandidatesForAI(
             userText,
             assistantContext.items || [],
-            getTimeScopedItems(assistantContext, timeScope, dateInfo, { mode: 'ai_context' }),
+            getTimeScopedItems(assistantContext, timeScope, dateInfo, {
+                mode: 'ai_context',
+                includeOverdueActive: operationType === 'query' || looksLikeTaskAnalysisRequest(userText)
+            }),
             operationType,
             timeScope
         )
@@ -4083,7 +4123,11 @@ function shouldForceProjectTool(userText = '') {
     const text = String(userText || '');
     if (!text.trim()) return false;
     if (/搜索|联网|网页|链接|最新新闻|实时/.test(text)) return false;
-    return /查询|查看|列出|有哪些|有什么|哪些|任务|待办|安排/.test(text);
+    // Only force the project tool when the message actually names a project
+    // entity. Generic "有什么/查看/列出" wording is common in normal chat and
+    // used to force unrelated questions into the task tool.
+    if (/任务|待办|看板|模板|定时|子任务|加班|请假|笔记/.test(text)) return true;
+    return /(创建|新增|添加|新建|安排|提醒|完成|删除|修改|更新|标记|查询|列出|查看)[^。！？\n]{0,12}(任务|待办|看板|模板|定时|子任务|笔记)/.test(text);
 }
 
 async function tryResolveWithNativeTools(userText, assistantContext, config, intentHint, progress, allowLocalFiles = true, options = {}) {
@@ -4350,10 +4394,11 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     const operationType = detectOperationType(text);
     const dateInfo = getDateInfo();
     const timeScope = detectTimeScope(text, dateInfo);
-    const relevantTasks = getTimeScopedItems(assistantContext, timeScope, dateInfo);
+    const includeOverdueActive = operationType === 'query' || looksLikeTaskAnalysisRequest(text);
+    const relevantTasks = getTimeScopedItems(assistantContext, timeScope, dateInfo, { includeOverdueActive });
     const needsExpandedTaskContext = operationType === 'query' || looksLikeTaskAnalysisRequest(text);
     const aiRelevantTasks = needsExpandedTaskContext
-        ? getTimeScopedItems(assistantContext, timeScope, dateInfo, { mode: 'ai_context' })
+        ? getTimeScopedItems(assistantContext, timeScope, dateInfo, { mode: 'ai_context', includeOverdueActive })
         : relevantTasks;
     const aiTaskCandidates = assistantContext.source === 'tasks'
         ? getTaskCandidatesForAI(text, scopedItems, aiRelevantTasks, operationType, timeScope)
@@ -4370,10 +4415,17 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
         assistantContext.scope === 'project' ||
         assistantContext.source === 'templates' ||
         assistantContext.source === 'scheduled';
-    // operationType==='create' 已涵盖：显式新建、补录已完成、计划语气新工作、多动词工作清单、无动作关键词。
-    const shouldHandleAsCreate = isExplicitCreate ||
-        (allowImplicitCreate && operationType === 'create');
+    // operationType defaults to create, so it is not enough on its own. Require
+    // a task noun/event signal (or an explicit log/reminder phrase) before the
+    // implicit-create branch can capture a normal chat message.
+    const hasTaskNoun = /(任务|待办|看板|模板|定时|子任务|清单|todo|task|kanban|template|checklist)/i.test(text);
+    const looksLikeTaskCreate = isExplicitCreate && (hasTaskNoun || looksLikeNaturalTaskIntent(text));
+    const shouldHandleAsCreate = looksLikeTaskCreate ||
+        isRetroactiveLogIntent(text) ||
+        looksLikeNaturalTaskIntent(text) ||
+        (hasTaskNoun && (looksLikePlannedWorkCreate(text) || countDistinctActionVerbs(text) >= 2));
     const shouldUseInternalCreate = assistantContext.mode !== 'note' &&
+        allowImplicitCreate &&
         shouldHandleAsCreate;
 
     const { callAI } = await import('../utils/ai-providers.js');
@@ -4423,6 +4475,9 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     }
 
     progress('classifying');
+    if (looksLikeGeneralChatIntent(text) && !hasFileIntent && !hasWebIntent && !hasProjectIntent) {
+        return { __useStreamingChat: true };
+    }
     const localTaskLookupResult = assistantContext.source === 'tasks'
         ? tryResolveLocalTaskLookup(text, scopedItems, relevantTasks, operationType, timeScope)
         : null;
@@ -6147,7 +6202,10 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         let intentHint = null;
 
         if (aiChatToolsEnabled) {
-            if (shouldUseAssistantToolsInChat(effectiveText)) {
+            if (looksLikeGeneralChatIntent(effectiveText)) {
+                // Clear conversation: never ask a task classifier to reinterpret it.
+                useToolRouter = false;
+            } else if (shouldUseAssistantToolsInChat(effectiveText)) {
                 useToolRouter = true;
                 updateToolProgress('classifying');
             } else {

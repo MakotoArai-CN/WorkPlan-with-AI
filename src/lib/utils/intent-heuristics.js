@@ -135,6 +135,28 @@ export function looksLikeTaskAuthoringIntent(text = '') {
     return TASK_NOUN_PATTERN.test(value) && TASK_AUTHORING_VERB_PATTERN.test(value);
 }
 
+// Project/action vocabulary. If none of this appears, a message is safe to
+// treat as general conversation instead of forcing the task tool router.
+const TASK_INTENT_SIGNAL_PATTERN = /(任务|待办|看板|模板|定时|日程|子任务|清单|笔记|加班|请假|安排|提醒|创建|新建|新增|添加|补录|记录|完成|删除|修改|更新|标记|查询|查看|列出|总结|汇总|复盘|统计|报告|todo|task|kanban|template|schedule|checklist)/i;
+
+/**
+ * Normal chat such as "今天开会好累" or "帮我写一首诗" must not enter the
+ * project tool router. Keep this separate from web/file detection, which is
+ * handled by their own specialized routers.
+ */
+export function looksLikeGeneralChatIntent(text = '') {
+    const value = String(text || '').trim();
+    if (!value) return false;
+    if (mentionsUrlOrDomain(value)) return false;
+    if (TASK_INTENT_SIGNAL_PATTERN.test(value)) return false;
+    if (looksLikeWebSearchIntent(value)) return false;
+    // File requests are routed by the local-file skill, not general chat.
+    if (/(文件|目录|文件夹|路径|读取|写入|保存到|扫描|read\s+file|write\s+file|search\s+files?|\.(md|txt|json|csv|pdf|docx?|xlsx?|pptx?|png|jpe?g)\b)/i.test(value)) {
+        return false;
+    }
+    return true;
+}
+
 /**
  * Web search must not hijack task generation. Explicit online lookups
  * (a URL, "联网搜索", weather/news/price queries) still take precedence.
