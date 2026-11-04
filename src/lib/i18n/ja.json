@@ -826,7 +826,17 @@
     "local_addr": "APIアドレス",
     "local_addr_custom": "（カスタム可能）",
     "default_daily_prompt": "現在時刻：{{time}}\n以下のタスクリストに基づいて{{type}}を作成してください。\n【タスクリスト】\n{{tasks}}\n【要件】\n1. 簡潔でプロフェッショナルな日報を作成\n2. 含む：業務概要、完了項目、進行中項目、ハイライト/課題\n3. Markdown形式を使用\n4. 簡潔で要点を押さえた内容",
-    "default_weekly_prompt": "現在時刻：{{time}}\n以下のタスクリストに基づいて{{type}}を作成してください。\n【タスクリスト】\n{{tasks}}\n【要件】\n1. 簡潔でプロフェッショナルな週報を作成\n2. 含む：今週の概要、完了項目、進行中項目、来週の計画、課題と提案\n3. Markdown形式を使用\n4. 簡潔で要点を押さえた内容"
+    "default_weekly_prompt": "現在時刻：{{time}}\n以下のタスクリストに基づいて{{type}}を作成してください。\n【タスクリスト】\n{{tasks}}\n【要件】\n1. 簡潔でプロフェッショナルな週報を作成\n2. 含む：今週の概要、完了項目、進行中項目、来週の計画、課題と提案\n3. Markdown形式を使用\n4. 簡潔で要点を押さえた内容",
+    "fingerprint_title": "リクエスト指紋",
+    "fingerprint_hint": "クライアントのヘッダーだけを変更します。認証情報は追加しません。許可されたエンドポイントでのみ使用してください。",
+    "fingerprint_default": "デフォルト（偽装なし）",
+    "fingerprint_claude": "Claude Code",
+    "fingerprint_codex": "Codex CLI",
+    "fingerprint_opencode": "OpenCode",
+    "fingerprint_custom": "カスタム",
+    "custom_headers_title": "カスタムリクエストヘッダー",
+    "custom_headers_hint": "1 行に Header: value。チャットとモデル一覧のリクエストに付与され、同名の指紋ヘッダーを上書きします。",
+    "invalid_headers": "リクエストヘッダーの形式が正しくありません"
   },
   "more": {
     "subtitle": "モジュールを選択",
