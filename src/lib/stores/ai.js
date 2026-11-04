@@ -1,6 +1,7 @@
 import { writable, get, derived } from 'svelte/store';
 import { isG4FProvider, normalizeG4FProviderId } from '../utils/g4f-client.js';
 import { pruneProviderConfigs } from '../utils/ai-config.js';
+import { resolveRequestHeaders } from '../utils/ai-request-fingerprint.js';
 import {
     looksLikeFileIntent,
     searchLocalFiles,
@@ -113,6 +114,7 @@ function getDefaultAiConfigState() {
         temperature: 0.7,
         maxTokens: 4096,
         customHeaders: {},
+        requestFingerprint: 'default',
         dailyReportPrompt: '',
         weeklyReportPrompt: '',
         providerConfigs: {},
@@ -435,6 +437,7 @@ function aiConfigComparable(state = {}) {
         temperature: state.temperature ?? '',
         maxTokens: state.maxTokens ?? '',
         customHeaders: state.customHeaders || {},
+        requestFingerprint: state.requestFingerprint || 'default',
         dailyReportPrompt: state.dailyReportPrompt || '',
         weeklyReportPrompt: state.weeklyReportPrompt || '',
         providerConfigs: state.providerConfigs || {},
@@ -753,6 +756,7 @@ export function loadAiConfig() {
                 temperature: parsed.temperature ?? 0.7,
                 maxTokens: parsed.maxTokens ?? 4096,
                 customHeaders: parsed.customHeaders || {},
+                requestFingerprint: parsed.requestFingerprint || 'default',
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || ''
             };
@@ -828,6 +832,7 @@ export function saveAiConfig() {
         temperature: nextState.temperature,
         maxTokens: nextState.maxTokens,
         customHeaders: nextState.customHeaders,
+        requestFingerprint: nextState.requestFingerprint || 'default',
         dailyReportPrompt: nextState.dailyReportPrompt,
         weeklyReportPrompt: nextState.weeklyReportPrompt,
         connectionProfiles: nextState.connectionProfiles
@@ -1198,7 +1203,7 @@ export async function loadModelsForProvider(providerId, apiKey = '', customEndpo
     const loadPromise = (async () => {
         try {
             const { fetchProviderModels } = await import('../utils/ai-providers.js');
-            const models = await fetchProviderModels(providerId, apiKey, customEndpoint);
+            const models = await fetchProviderModels(providerId, apiKey, customEndpoint, resolveRequestHeaders(get(aiConfig)));
             providerModels.update(cache => ({
                 ...cache,
                 [providerId]: models
@@ -1238,6 +1243,7 @@ export function getEffectiveConfig() {
         temperature: config.temperature,
         maxTokens: config.maxTokens,
         customHeaders: config.customHeaders,
+        requestFingerprint: config.requestFingerprint || 'default',
         dailyReportPrompt: config.dailyReportPrompt,
         weeklyReportPrompt: config.weeklyReportPrompt
     };

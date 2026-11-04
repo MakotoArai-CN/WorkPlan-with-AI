@@ -7,6 +7,7 @@ import {
     streamChatWithG4F
 } from './g4f-client.js';
 import { isTauriRuntime } from './runtime.js';
+import { resolveRequestHeaders } from './ai-request-fingerprint.js';
 
 const PROVIDER_CONFIGS = {
     openai: {
@@ -499,7 +500,7 @@ async function getBaiduAccessToken(apiKey, secretKey) {
     return data.access_token;
 }
 
-export async function fetchProviderModels(providerId, apiKey = '', customEndpoint = '') {
+export async function fetchProviderModels(providerId, apiKey = '', customEndpoint = '', requestHeaders = {}) {
     const cacheKey = `${providerId}_${customEndpoint || 'default'}_${apiKey ? 'auth' : 'noauth'}`;
     if (modelCache[cacheKey] && modelCache[cacheKey].expireTime > Date.now()) {
         return modelCache[cacheKey].models;
@@ -517,7 +518,7 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
     }
 
     if (providerId === 'custom') {
-        return await fetchCustomProviderModels(customEndpoint, apiKey);
+        return await fetchCustomProviderModels(customEndpoint, apiKey, requestHeaders);
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
@@ -540,13 +541,14 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
 
     try {
         const headers = { 'Accept': 'application/json' };
+        if (provider.headers) {
+            Object.assign(headers, provider.headers);
+        }
+        Object.assign(headers, requestHeaders);
         if (apiKey && provider.authType === 'bearer') {
             headers['Authorization'] = 'Bearer ' + apiKey;
         } else if (apiKey && provider.authType === 'x-api-key') {
             headers['x-api-key'] = apiKey;
-        }
-        if (provider.headers) {
-            Object.assign(headers, provider.headers);
         }
         let endpoint = modelsEndpoint;
         if (provider.authType === 'query_key' && apiKey) {
@@ -611,7 +613,7 @@ function deriveCustomModelsEndpoint(customEndpoint) {
     return url.toString();
 }
 
-export async function fetchCustomProviderModels(customEndpoint, apiKey = '') {
+export async function fetchCustomProviderModels(customEndpoint, apiKey = '', requestHeaders = {}) {
     const modelsUrl = deriveCustomModelsEndpoint(customEndpoint);
     if (!modelsUrl) return [];
 
@@ -622,6 +624,7 @@ export async function fetchCustomProviderModels(customEndpoint, apiKey = '') {
 
     try {
         const headers = { 'Accept': 'application/json' };
+        Object.assign(headers, requestHeaders);
         if (apiKey) {
             headers['Authorization'] = 'Bearer ' + apiKey;
         }
@@ -993,9 +996,7 @@ export async function callAI(config, userMessage, systemPrompt) {
     if (provider.headers) {
         Object.assign(headers, provider.headers);
     }
-    if (config.customHeaders) {
-        Object.assign(headers, config.customHeaders);
-    }
+    Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
@@ -1069,9 +1070,7 @@ export async function callAIWithMessagesAndTools(config, messages, tools = [], o
     if (provider.headers) {
         Object.assign(headers, provider.headers);
     }
-    if (config.customHeaders) {
-        Object.assign(headers, config.customHeaders);
-    }
+    Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
@@ -1149,9 +1148,7 @@ export async function callAIWithMessages(config, messages) {
     if (provider.headers) {
         Object.assign(headers, provider.headers);
     }
-    if (config.customHeaders) {
-        Object.assign(headers, config.customHeaders);
-    }
+    Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
@@ -1231,9 +1228,7 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
     if (provider.headers) {
         Object.assign(headers, provider.headers);
     }
-    if (config.customHeaders) {
-        Object.assign(headers, config.customHeaders);
-    }
+    Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
         const accessToken = await getBaiduAccessToken(apiKey, secretKey);
