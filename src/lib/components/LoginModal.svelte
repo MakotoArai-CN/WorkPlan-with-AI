@@ -163,10 +163,9 @@
 
     function generateKey() {
         const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-        let suffix = '';
-        for (let i = 0; i < 9; i++) {
-            suffix += chars[Math.floor(Math.random() * chars.length)];
-        }
+        const bytes = new Uint8Array(24);
+        crypto.getRandomValues(bytes);
+        const suffix = Array.from(bytes, byte => chars[byte % chars.length]).join('');
         inputKey = 'user_' + suffix;
         validationError = '';
     }

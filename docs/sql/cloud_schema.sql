@@ -234,15 +234,11 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Row Level Security (optional, Supabase)
+-- Row Level Security (REQUIRED for Supabase)
 -- ---------------------------------------------------------------------------
--- The app authenticates with a per-user access key, not Supabase Auth. If you
--- expose these tables through the anon key, enable RLS and map the access key to
--- an authenticated JWT. Example for a JWT claim `workplan_key`:
+-- Public tables without RLS can be read and written by anyone holding the
+-- public anon key. Run docs/sql/rls_security.sql after this schema, then verify
+-- that every table reports rowsecurity = true.
 --
--- alter table workplan_tasks enable row level security;
--- create policy workplan_tasks_owner on workplan_tasks
---   using (user_key = current_setting('request.jwt.claims', true)::json->>'workplan_key')
---   with check (user_key = current_setting('request.jwt.claims', true)::json->>'workplan_key');
---
--- Repeat for every table. Never expose the service-role key to the client.
+-- The client sends its per-account access key as `x-workplan-key`; the RLS
+-- policies compare it with user_key. Never expose the service_role key.

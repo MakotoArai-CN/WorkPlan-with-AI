@@ -5,7 +5,24 @@ export const DATABASE_SETUP_SQL = `CREATE TABLE IF NOT EXISTS planpro_data (
     updated_at BIGINT
 );
 
-CREATE INDEX IF NOT EXISTS idx_planpro_user_key ON planpro_data(user_key);`;
+CREATE INDEX IF NOT EXISTS idx_planpro_user_key ON planpro_data(user_key);
+
+-- Required when the table is exposed through Supabase/PostgREST with the
+-- public anon key. The client sends its account key in x-workplan-key.
+CREATE OR REPLACE FUNCTION public.workplan_request_key()
+RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT coalesce(
+        nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-workplan-key',
+        nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'workplan_key'
+    );
+$$;
+
+ALTER TABLE planpro_data ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS workplan_owner ON planpro_data;
+CREATE POLICY workplan_owner ON planpro_data
+    FOR ALL TO public
+    USING (user_key = public.workplan_request_key())
+    WITH CHECK (user_key = public.workplan_request_key());`;
 
 export const DATABASE_PROVIDER_CATALOG = [
     {
