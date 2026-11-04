@@ -60,7 +60,7 @@ jobs:
 
   build-windows:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     strategy:
@@ -109,12 +109,55 @@ jobs:
       - name: Install NSIS
         shell: powershell
         run: |
-          choco install nsis -y --no-progress
-          $nsisPath = Join-Path ${env:ProgramFiles(x86)} "NSIS"
-          $makensis = Join-Path $nsisPath "makensis.exe"
-          if (!(Test-Path $makensis)) {
-            throw "NSIS installation failed: makensis.exe not found."
+          $ErrorActionPreference = 'Stop'
+
+          function Find-Nsis {
+            $candidates = @(
+              (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
+              (Join-Path $env:ProgramFiles "NSIS\makensis.exe")
+            )
+            if ($env:ChocolateyInstall) {
+              $candidates += (Join-Path $env:ChocolateyInstall "bin\makensis.exe")
+            }
+            foreach ($candidate in $candidates) {
+              if ($candidate -and (Test-Path $candidate)) { return $candidate }
+            }
+            $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if ($command) { return $command.Source }
+            return $null
           }
+
+          $makensis = Find-Nsis
+          if (-not $makensis) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Write-Host "Installing NSIS via Chocolatey (attempt $attempt/3)..."
+                choco install nsis -y --no-progress --force
+              } catch {
+                Write-Warning "Chocolatey attempt $attempt failed: $($_.Exception.Message)"
+              }
+              Start-Sleep -Seconds (10 * $attempt)
+              $makensis = Find-Nsis
+              if ($makensis) { break }
+            }
+          }
+
+          if (-not $makensis) {
+            try {
+              Write-Host "Falling back to winget for NSIS..."
+              winget install --id NSIS.NSIS -e --silent --accept-package-agreements --accept-source-agreements
+              Start-Sleep -Seconds 5
+              $makensis = Find-Nsis
+            } catch {
+              Write-Warning "winget NSIS install failed: $($_.Exception.Message)"
+            }
+          }
+
+          if (-not $makensis) {
+            throw "NSIS installation failed: makensis.exe not found after Chocolatey and winget retries."
+          }
+
+          $nsisPath = Split-Path -Parent $makensis
           $nsisPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & $makensis /VERSION
 
@@ -145,7 +188,7 @@ jobs:
 
   build-windows-webview2:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
@@ -178,12 +221,55 @@ jobs:
       - name: Install NSIS
         shell: powershell
         run: |
-          choco install nsis -y --no-progress
-          $nsisPath = Join-Path ${env:ProgramFiles(x86)} "NSIS"
-          $makensis = Join-Path $nsisPath "makensis.exe"
-          if (!(Test-Path $makensis)) {
-            throw "NSIS installation failed: makensis.exe not found."
+          $ErrorActionPreference = 'Stop'
+
+          function Find-Nsis {
+            $candidates = @(
+              (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
+              (Join-Path $env:ProgramFiles "NSIS\makensis.exe")
+            )
+            if ($env:ChocolateyInstall) {
+              $candidates += (Join-Path $env:ChocolateyInstall "bin\makensis.exe")
+            }
+            foreach ($candidate in $candidates) {
+              if ($candidate -and (Test-Path $candidate)) { return $candidate }
+            }
+            $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if ($command) { return $command.Source }
+            return $null
           }
+
+          $makensis = Find-Nsis
+          if (-not $makensis) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Write-Host "Installing NSIS via Chocolatey (attempt $attempt/3)..."
+                choco install nsis -y --no-progress --force
+              } catch {
+                Write-Warning "Chocolatey attempt $attempt failed: $($_.Exception.Message)"
+              }
+              Start-Sleep -Seconds (10 * $attempt)
+              $makensis = Find-Nsis
+              if ($makensis) { break }
+            }
+          }
+
+          if (-not $makensis) {
+            try {
+              Write-Host "Falling back to winget for NSIS..."
+              winget install --id NSIS.NSIS -e --silent --accept-package-agreements --accept-source-agreements
+              Start-Sleep -Seconds 5
+              $makensis = Find-Nsis
+            } catch {
+              Write-Warning "winget NSIS install failed: $($_.Exception.Message)"
+            }
+          }
+
+          if (-not $makensis) {
+            throw "NSIS installation failed: makensis.exe not found after Chocolatey and winget retries."
+          }
+
+          $nsisPath = Split-Path -Parent $makensis
           $nsisPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & $makensis /VERSION
 
@@ -248,7 +334,7 @@ jobs:
   # 离线版本
   build-windows-webview2-offlineInstaller:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
@@ -281,12 +367,55 @@ jobs:
       - name: Install NSIS
         shell: powershell
         run: |
-          choco install nsis -y --no-progress
-          $nsisPath = Join-Path ${env:ProgramFiles(x86)} "NSIS"
-          $makensis = Join-Path $nsisPath "makensis.exe"
-          if (!(Test-Path $makensis)) {
-            throw "NSIS installation failed: makensis.exe not found."
+          $ErrorActionPreference = 'Stop'
+
+          function Find-Nsis {
+            $candidates = @(
+              (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
+              (Join-Path $env:ProgramFiles "NSIS\makensis.exe")
+            )
+            if ($env:ChocolateyInstall) {
+              $candidates += (Join-Path $env:ChocolateyInstall "bin\makensis.exe")
+            }
+            foreach ($candidate in $candidates) {
+              if ($candidate -and (Test-Path $candidate)) { return $candidate }
+            }
+            $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if ($command) { return $command.Source }
+            return $null
           }
+
+          $makensis = Find-Nsis
+          if (-not $makensis) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Write-Host "Installing NSIS via Chocolatey (attempt $attempt/3)..."
+                choco install nsis -y --no-progress --force
+              } catch {
+                Write-Warning "Chocolatey attempt $attempt failed: $($_.Exception.Message)"
+              }
+              Start-Sleep -Seconds (10 * $attempt)
+              $makensis = Find-Nsis
+              if ($makensis) { break }
+            }
+          }
+
+          if (-not $makensis) {
+            try {
+              Write-Host "Falling back to winget for NSIS..."
+              winget install --id NSIS.NSIS -e --silent --accept-package-agreements --accept-source-agreements
+              Start-Sleep -Seconds 5
+              $makensis = Find-Nsis
+            } catch {
+              Write-Warning "winget NSIS install failed: $($_.Exception.Message)"
+            }
+          }
+
+          if (-not $makensis) {
+            throw "NSIS installation failed: makensis.exe not found after Chocolatey and winget retries."
+          }
+
+          $nsisPath = Split-Path -Parent $makensis
           $nsisPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & $makensis /VERSION
 
@@ -350,7 +479,7 @@ jobs:
 
   build-linux:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -413,7 +542,7 @@ jobs:
 
   build-macos:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -480,7 +609,7 @@ jobs:
 
   build-android:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -715,7 +844,7 @@ jobs:
 
   release:
     needs: [get-version, build-windows, build-windows-webview2, build-windows-webview2-offlineInstaller, build-linux, build-macos, build-android]
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: needs.get-version.outputs.tag_exists == 'false' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -781,7 +910,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.get-version.outputs.version }}
           name: Release ${{ needs.get-version.outputs.version }}
