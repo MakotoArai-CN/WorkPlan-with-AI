@@ -776,7 +776,11 @@
     "tool_step_generating": "応答を生成中...",
     "tool_step_ai_classifying": "AIが意図を判定中...",
     "tool_step_decomposing": "実行計画を分解中...",
-    "action_cancelled": "操作がキャンセルされました。"
+    "action_cancelled": "操作がキャンセルされました。",
+    "drop_files_title": "ここにファイルをドロップ",
+    "drop_files_hint": "テキスト、画像、音声、動画を AI チャットの添付として送信できます。",
+    "dropped_files": "{count} 個のドロップファイルを追加しました",
+    "drop_files_failed": "ドロップしたファイルを追加できませんでした"
   },
   "ai_settings_page": {
     "title": "AI設定",

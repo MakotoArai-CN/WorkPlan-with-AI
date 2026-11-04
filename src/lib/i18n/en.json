@@ -776,7 +776,11 @@
     "tool_step_generating": "Generating response...",
     "tool_step_ai_classifying": "AI classifying intent...",
     "tool_step_decomposing": "Decomposing into execution plan...",
-    "action_cancelled": "Action cancelled."
+    "action_cancelled": "Action cancelled.",
+    "drop_files_title": "Drop files here",
+    "drop_files_hint": "Text, images, audio and video are attached to the AI chat.",
+    "dropped_files": "Added {count} dropped file(s)",
+    "drop_files_failed": "Failed to add dropped files"
   },
   "ai_settings_page": {
     "title": "AI Settings",
