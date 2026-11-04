@@ -292,6 +292,11 @@
     function handleFileDragLeave(event) {
         if (!eventHasFiles(event)) return;
         event.preventDefault();
+        if (event.relatedTarget === null) {
+            fileDragDepth = 0;
+            isDraggingFiles = false;
+            return;
+        }
         fileDragDepth = Math.max(0, fileDragDepth - 1);
         if (fileDragDepth === 0) isDraggingFiles = false;
     }
