@@ -79,7 +79,7 @@ function buildRestTableUrl(databaseConfig) {
     return `${restBaseUrl}/${tableName}`;
 }
 
-function buildRestHeaders(databaseConfig, prefer = '') {
+function buildRestHeaders(databaseConfig, prefer = '', accessKey = '') {
     const headers = {
         apikey: databaseConfig.apiKey,
         Authorization: `Bearer ${databaseConfig.apiKey}`,
@@ -88,6 +88,9 @@ function buildRestHeaders(databaseConfig, prefer = '') {
     };
     if (prefer) {
         headers.Prefer = prefer;
+    }
+    if (accessKey) {
+        headers['x-workplan-key'] = accessKey;
     }
     return headers;
 }
@@ -123,7 +126,7 @@ async function requestRestRecord(databaseConfig, accessKey) {
 
     const response = await fetch(url, {
         method: 'GET',
-        headers: buildRestHeaders(databaseConfig)
+        headers: buildRestHeaders(databaseConfig, '', accessKey)
     });
     const payload = await parseRestPayload(response);
     if (!response.ok) {
@@ -138,7 +141,7 @@ async function upsertRestRecord(databaseConfig, accessKey, content, updatedAt) {
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: buildRestHeaders(databaseConfig, 'resolution=merge-duplicates,return=minimal'),
+        headers: buildRestHeaders(databaseConfig, 'resolution=merge-duplicates,return=minimal', accessKey),
         body: JSON.stringify([{
             user_key: accessKey,
             content,
@@ -158,7 +161,7 @@ async function deleteRestRecord(databaseConfig, accessKey) {
 
     const response = await fetch(url, {
         method: 'DELETE',
-        headers: buildRestHeaders(databaseConfig, 'return=minimal')
+        headers: buildRestHeaders(databaseConfig, 'return=minimal', accessKey)
     });
     const payload = await parseRestPayload(response);
     if (!response.ok) {
@@ -167,13 +170,16 @@ async function deleteRestRecord(databaseConfig, accessKey) {
     return payload;
 }
 
-async function getSupabaseClient(databaseConfig) {
+async function getSupabaseClient(databaseConfig, accessKey = '') {
     if (typeof window === 'undefined') return null;
-    const cacheKey = `${databaseConfig.url}|${databaseConfig.apiKey}`;
+    const cacheKey = `${databaseConfig.url}|${databaseConfig.apiKey}|${accessKey}`;
     if (supabase && supabaseCacheKey === cacheKey) return supabase;
     const { createClient } = await import('@supabase/supabase-js');
     supabase = createClient(databaseConfig.url, databaseConfig.apiKey, {
-        auth: { persistSession: false, autoRefreshToken: false }
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: {
+            headers: accessKey ? { 'x-workplan-key': accessKey } : {}
+        }
     });
     supabaseCacheKey = cacheKey;
     return supabase;
@@ -191,12 +197,13 @@ export async function loadCloudRecord(accessKey) {
         return await requestRestRecord(databaseConfig, accessKey);
     }
 
-    const client = await getSupabaseClient(databaseConfig);
+    const client = await getSupabaseClient(databaseConfig, accessKey);
     if (!client) return null;
+    // Do not put the access key in the query string: PostgREST URLs can end up
+    // in gateway logs. RLS already restricts this select to the header's key.
     const { data, error } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
-        .select('content, updated_at')
-        .eq('user_key', accessKey)
+        .select('id, content, updated_at')
         .maybeSingle();
 
     if (error) {
@@ -217,7 +224,7 @@ export async function saveCloudRecord(accessKey, content, updatedAt) {
         return true;
     }
 
-    const client = await getSupabaseClient(databaseConfig);
+    const client = await getSupabaseClient(databaseConfig, accessKey);
     if (!client) return false;
     const { error } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
@@ -241,12 +248,20 @@ async function deleteCloudRecord(accessKey) {
         return;
     }
 
-    const client = await getSupabaseClient(databaseConfig);
+    const client = await getSupabaseClient(databaseConfig, accessKey);
     if (!client) return;
+    // Resolve the row through RLS, then delete by non-secret id. This keeps the
+    // access key out of URLs and avoids an unfiltered delete if RLS is broken.
+    const { data: row, error: lookupError } = await client
+        .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
+        .select('id')
+        .maybeSingle();
+    if (lookupError) throw lookupError;
+    if (!row?.id) return;
     const { error } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
         .delete()
-        .eq('user_key', accessKey);
+        .eq('id', row.id);
 
     if (error) {
         throw error;
