@@ -33,6 +33,11 @@
     } from "../utils/open-external.js";
     import { getConnectorBaseUrl, getConnectorWebSocketUrl, resolveConnectorTransport, getConnectorHttpChatEndpoint } from "../utils/connector-client.js";
     import { isAndroidRuntime, isWebDemo } from "../utils/runtime.js";
+    import {
+        REQUEST_FINGERPRINT_OPTIONS,
+        parseRequestHeadersText,
+        serializeRequestHeaders,
+    } from "../utils/ai-request-fingerprint.js";
 
     function t(key, opts) { return get(_)(key, opts); }
 
@@ -45,6 +50,10 @@
     let contentScrollEl;
     let tabDirection = 1;
 
+    $: fingerprintOptions = REQUEST_FINGERPRINT_OPTIONS.map(option => ({
+        value: option.value,
+        label: $_(option.labelKey)
+    }));
     $: tabOptions = [
         { value: "basic", label: $_('ai_settings_page.tab_basic') },
         { value: "advanced", label: $_('ai_settings_page.tab_advanced') },
@@ -72,6 +81,7 @@
     let modelLoadRequestId = 0;
     let modelsLoadedForKey = "";
     let isAndroid = false;
+    let customHeadersText = "";
 
     const defaultDailyPrompt = t('ai_settings_page.default_daily_prompt');
 
@@ -159,6 +169,7 @@
         try {
             await hydrateCurrentProviderConfigWithDefaults();
             if (!isCurrentInit()) return;
+            customHeadersText = serializeRequestHeaders($aiConfig.customHeaders || {});
             if (isWebDemo && $aiConfig.provider === "webhook") {
                 await switchProvider("g4f-default");
                 if (!isCurrentInit()) return;
@@ -243,6 +254,18 @@
 
     async function handleSave() {
         const t = get(_);
+        let customHeaders;
+        try {
+            customHeaders = parseRequestHeadersText(customHeadersText);
+        } catch (error) {
+            await showAlert({
+                title: t('ai_settings_page.invalid_headers'),
+                message: error.message || String(error),
+                variant: "danger",
+            });
+            return;
+        }
+        updateAiConfig({ customHeaders });
         saveAiConfig();
         settingsStore.setDailyReportPrompt(dailyPrompt);
         settingsStore.setWeeklyReportPrompt(weeklyPrompt);
@@ -767,6 +790,7 @@
                         </button>
                     </div>
                 {:else if activeTab === "advanced"}
+                    <div class="space-y-5">
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label for="ai-temperature" class="text-xs text-slate-500 mb-1 block"
@@ -801,6 +825,38 @@
                                 {$_('ai_settings_page.max_tokens')}
                             </div>
                         </div>
+                    </div>
+
+                    <div class="border-t border-slate-100 pt-4 space-y-2">
+                        <label for="ai-request-fingerprint" class="text-xs font-bold text-slate-500 uppercase">
+                            {$_('ai_settings_page.fingerprint_title')}
+                        </label>
+                        <SelectMenu
+                            id="ai-request-fingerprint"
+                            bind:value={$aiConfig.requestFingerprint}
+                            options={fingerprintOptions}
+                        />
+                        <p class="text-[10px] text-slate-400">
+                            {$_('ai_settings_page.fingerprint_hint')}
+                        </p>
+                    </div>
+
+                    <div class="space-y-2">
+                        <label for="ai-custom-headers" class="text-xs font-bold text-slate-500 uppercase">
+                            {$_('ai_settings_page.custom_headers_title')}
+                        </label>
+                        <textarea
+                            id="ai-custom-headers"
+                            bind:value={customHeadersText}
+                            rows="6"
+                            spellcheck="false"
+                            placeholder={'X-Client-Name: my-client\nX-Request-Tag: workplan'}
+                            class="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-rose-400 resize-y"
+                        ></textarea>
+                        <p class="text-[10px] text-slate-400">
+                            {$_('ai_settings_page.custom_headers_hint')}
+                        </p>
+                    </div>
                     </div>
                 {:else if activeTab === "prompts"}
                     <div class="space-y-4">

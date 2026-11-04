@@ -826,7 +826,17 @@
     "local_addr": "API Address",
     "local_addr_custom": "(Customizable)",
     "default_daily_prompt": "Current time: {{time}}\nPlease generate a {{type}} based on the following task list.\n[Task List]\n{{tasks}}\n[Requirements]\n1. Generate a concise, professional daily report\n2. Include: work overview, completed items, in-progress items, highlights/issues\n3. Use Markdown format\n4. Keep it concise and focused",
-    "default_weekly_prompt": "Current time: {{time}}\nPlease generate a {{type}} based on the following task list.\n[Task List]\n{{tasks}}\n[Requirements]\n1. Generate a concise, professional weekly report\n2. Include: week overview, completed items, in-progress items, next week plans, issues & suggestions\n3. Use Markdown format\n4. Keep it concise and focused"
+    "default_weekly_prompt": "Current time: {{time}}\nPlease generate a {{type}} based on the following task list.\n[Task List]\n{{tasks}}\n[Requirements]\n1. Generate a concise, professional weekly report\n2. Include: week overview, completed items, in-progress items, next week plans, issues & suggestions\n3. Use Markdown format\n4. Keep it concise and focused",
+    "fingerprint_title": "Request fingerprint",
+    "fingerprint_hint": "Changes client request headers only. No credentials are added; use only with endpoints you are authorized to access.",
+    "fingerprint_default": "Default (no fingerprint)",
+    "fingerprint_claude": "Claude Code",
+    "fingerprint_codex": "Codex CLI",
+    "fingerprint_opencode": "OpenCode",
+    "fingerprint_custom": "Custom",
+    "custom_headers_title": "Custom request headers",
+    "custom_headers_hint": "One Header: value per line, sent with chat and model-list requests. Overrides fingerprint defaults by name.",
+    "invalid_headers": "Invalid request headers"
   },
   "more": {
     "subtitle": "Select a module",

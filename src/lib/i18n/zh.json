@@ -826,7 +826,17 @@
     "local_addr": "API 地址",
     "local_addr_custom": "（可自定义）",
     "default_daily_prompt": "当前时间：{{time}}\n请根据以下任务列表生成一份{{type}}。\n【任务列表】\n{{tasks}}\n【要求】\n1. 生成简洁专业的日报\n2. 包含：工作概述、已完成事项、进行中事项、工作亮点/问题\n3. 使用 Markdown 格式\n4. 语言简练，突出重点",
-    "default_weekly_prompt": "当前时间：{{time}}\n请根据以下任务列表生成一份{{type}}。\n【任务列表】\n{{tasks}}\n【要求】\n1. 生成简洁专业的周报\n2. 包含：本周概述、已完成事项、进行中事项、下周计划、问题与建议\n3. 使用 Markdown 格式\n4. 语言简练，突出重点"
+    "default_weekly_prompt": "当前时间：{{time}}\n请根据以下任务列表生成一份{{type}}。\n【任务列表】\n{{tasks}}\n【要求】\n1. 生成简洁专业的周报\n2. 包含：本周概述、已完成事项、进行中事项、下周计划、问题与建议\n3. 使用 Markdown 格式\n4. 语言简练，突出重点",
+    "fingerprint_title": "请求指纹",
+    "fingerprint_hint": "仅修改客户端请求特征；不包含登录凭据，请只用于你有权访问的接口。",
+    "fingerprint_default": "默认（不伪装）",
+    "fingerprint_claude": "Claude Code",
+    "fingerprint_codex": "Codex CLI",
+    "fingerprint_opencode": "OpenCode",
+    "fingerprint_custom": "自定义",
+    "custom_headers_title": "自定义请求头",
+    "custom_headers_hint": "每行一个 Header: value，会附加到聊天和模型列表请求；同名时覆盖指纹默认值。",
+    "invalid_headers": "请求头格式错误"
   },
   "more": {
     "subtitle": "选择功能模块",
