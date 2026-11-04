@@ -154,6 +154,10 @@ export function looksLikeGeneralChatIntent(text = '') {
     if (/(文件|目录|文件夹|路径|读取|写入|保存到|扫描|read\s+file|write\s+file|search\s+files?|\.(md|txt|json|csv|pdf|docx?|xlsx?|pptx?|png|jpe?g)\b)/i.test(value)) {
         return false;
     }
+    // Image/audio generation has its own branch; do not swallow it as chat.
+    if (/(图片|图像|照片|画一|绘制|生成图|生成图片|语音|朗读|配音|\btts\b|image generation|draw me|generate an image)/i.test(value)) {
+        return false;
+    }
     return true;
 }
 
