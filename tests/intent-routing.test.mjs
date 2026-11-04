@@ -6,6 +6,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
     isExplicitWebSearchRequest,
+    looksLikeGeneralChatIntent,
     looksLikeTaskAuthoringIntent,
     looksLikeWebSearchIntent,
     mentionsUrlOrDomain,
@@ -94,5 +95,30 @@ describe('web search intent', () => {
         expect(isExplicitWebSearchRequest('生成今日任务清单')).toBe(false);
         expect(isExplicitWebSearchRequest('search the web for the latest AI news')).toBe(true);
         expect(isExplicitWebSearchRequest('generate tasks for today')).toBe(false);
+    });
+});
+
+
+describe('general chat guard', () => {
+    test('ordinary conversation does not enter the task router', () => {
+        for (const prompt of [
+            '你好，今天过得怎么样',
+            '今天开会好累',
+            '帮我写一首诗',
+            '解释一下 JavaScript 闭包',
+            '给我讲个笑话'
+        ]) {
+            expect(looksLikeGeneralChatIntent(prompt)).toBe(true);
+        }
+    });
+
+    test('task, web and file requests still use their own routers', () => {
+        expect(looksLikeGeneralChatIntent('今天的任务')).toBe(false);
+        expect(looksLikeGeneralChatIntent('帮我安排明天下午开会')).toBe(false);
+        expect(looksLikeGeneralChatIntent('今天天气怎么样')).toBe(false);
+        expect(looksLikeGeneralChatIntent('搜索一下最新的 AI 新闻')).toBe(false);
+        expect(looksLikeGeneralChatIntent('读取 D:\\notes\\plan.md')).toBe(false);
+        expect(looksLikeGeneralChatIntent('帮我画一张猫的图片')).toBe(false);
+        expect(looksLikeGeneralChatIntent('把这段文字朗读成语音')).toBe(false);
     });
 });
