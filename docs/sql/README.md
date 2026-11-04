@@ -20,7 +20,7 @@
 
 每张同步表都有 `(user_key, id)` 主键、`updated_at` 和可空的 `deleted_at`。删除使用软删除，方便离线客户端合并。同步拉取走 `(user_key, updated_at)` 索引，工时和请假另有日期索引。
 
-在 Supabase SQL Editor 里执行一次即可。如果这些表通过 anon key 暴露，记得启用文件末尾的 RLS 示例；示例按 JWT 里的 `workplan_key` 字段判断归属。
+在 Supabase SQL Editor 里执行一次即可。**Supabase 必须再执行 `rls_security.sql`**：它会给所有 public 表启用 RLS，并按请求头 `x-workplan-key`（或 JWT 的 `workplan_key`）限制到单个 `user_key`。未启用 RLS 的表会被任何持有公开 anon key 的人读写。
 
 ## 本地：`local_schema.sql`
 
