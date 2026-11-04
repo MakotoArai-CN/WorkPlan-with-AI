@@ -198,6 +198,8 @@
     }
 
     let lightboxUrl = null;
+    let isDraggingFiles = false;
+    let fileDragDepth = 0;
 
     async function handleAttachMedia() {
         if ($isAiLoading) return;
@@ -264,6 +266,65 @@
             console.error("Paste files failed:", error);
             showToast({
                 message: String(error?.message || error || "粘贴文件失败"),
+                type: "error",
+            });
+        }
+    }
+
+    function eventHasFiles(event) {
+        return Array.from(event?.dataTransfer?.types || []).includes("Files");
+    }
+
+    function handleFileDragEnter(event) {
+        if (!eventHasFiles(event)) return;
+        event.preventDefault();
+        fileDragDepth += 1;
+        isDraggingFiles = true;
+    }
+
+    function handleFileDragOver(event) {
+        if (!eventHasFiles(event)) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        isDraggingFiles = true;
+    }
+
+    function handleFileDragLeave(event) {
+        if (!eventHasFiles(event)) return;
+        event.preventDefault();
+        if (event.relatedTarget === null) {
+            fileDragDepth = 0;
+            isDraggingFiles = false;
+            return;
+        }
+        fileDragDepth = Math.max(0, fileDragDepth - 1);
+        if (fileDragDepth === 0) isDraggingFiles = false;
+    }
+
+    async function handleFileDrop(event) {
+        if (!eventHasFiles(event)) return;
+        event.preventDefault();
+        fileDragDepth = 0;
+        isDraggingFiles = false;
+        if ($isAiLoading) return;
+
+        const files = Array.from(event.dataTransfer?.files || []).filter(Boolean);
+        if (!files.length) return;
+
+        try {
+            const attached = await attachPastedFilesToAiChatComposer(files);
+            if (attached.length > 0) {
+                showToast({
+                    message: $_("ai_chat.dropped_files", { values: { count: attached.length } }),
+                    type: "success",
+                    duration: 1600,
+                });
+            }
+            syncComposerHeight();
+        } catch (error) {
+            console.error("Drop files failed:", error);
+            showToast({
+                message: String(error?.message || error || $_("ai_chat.drop_files_failed")),
                 type: "error",
             });
         }
@@ -893,7 +954,26 @@
     }
 </script>
 
-<div class="flex h-[100dvh] md:h-full overflow-hidden bg-slate-50 dark:bg-slate-900" data-ai-shell>
+<div
+    class="relative flex h-[100dvh] md:h-full overflow-hidden bg-slate-50 dark:bg-slate-900"
+    data-ai-shell
+    role="region"
+    aria-label="AI 聊天"
+    on:dragenter={handleFileDragEnter}
+    on:dragover={handleFileDragOver}
+    on:dragleave={handleFileDragLeave}
+    on:drop={handleFileDrop}
+>
+    {#if isDraggingFiles}
+        <div class="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-indigo-950/15 dark:bg-indigo-950/40 backdrop-blur-[2px]">
+            <div class="mx-4 flex max-w-md flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-indigo-400 bg-white/95 px-8 py-7 text-center shadow-2xl dark:bg-slate-800/95">
+                <i class="ph ph-file-arrow-down text-3xl text-indigo-500"></i>
+                <div class="text-sm font-bold text-slate-800 dark:text-slate-100">{$_("ai_chat.drop_files_title")}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">{$_("ai_chat.drop_files_hint")}</div>
+            </div>
+        </div>
+    {/if}
+
     {#if showSessionDrawer}
         <div
             class="md:hidden fixed inset-0 z-40 bg-slate-950/30 dark:bg-slate-950/60 backdrop-blur-sm"
