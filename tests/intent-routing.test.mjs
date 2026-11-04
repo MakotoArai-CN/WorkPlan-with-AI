@@ -118,5 +118,7 @@ describe('general chat guard', () => {
         expect(looksLikeGeneralChatIntent('今天天气怎么样')).toBe(false);
         expect(looksLikeGeneralChatIntent('搜索一下最新的 AI 新闻')).toBe(false);
         expect(looksLikeGeneralChatIntent('读取 D:\\notes\\plan.md')).toBe(false);
+        expect(looksLikeGeneralChatIntent('帮我画一张猫的图片')).toBe(false);
+        expect(looksLikeGeneralChatIntent('把这段文字朗读成语音')).toBe(false);
     });
 });
