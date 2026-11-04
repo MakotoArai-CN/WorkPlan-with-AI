@@ -776,7 +776,11 @@
     "tool_step_generating": "正在生成回复...",
     "tool_step_ai_classifying": "AI 正在判断意图...",
     "tool_step_decomposing": "正在拆解执行计划...",
-    "action_cancelled": "操作已取消。"
+    "action_cancelled": "操作已取消。",
+    "drop_files_title": "把文件拖到这里",
+    "drop_files_hint": "支持文本、图片、音频和视频，作为 AI 聊天附件发送",
+    "dropped_files": "已接收 {count} 个拖入文件",
+    "drop_files_failed": "拖入文件失败"
   },
   "ai_settings_page": {
     "title": "AI 配置",
