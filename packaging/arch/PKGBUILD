@@ -1,0 +1,31 @@
+# Maintainer: WorkPlan contributors
+pkgname=workplan-bin
+pkgver=0.5.8
+pkgrel=1
+pkgdesc="Task, overtime and leave planning with AI"
+arch=('x86_64')
+url="https://github.com/MakotoArai-CN/WorkPlan-with-AI"
+license=('AGPL-3.0')
+depends=(
+    'webkit2gtk-4.1'
+    'gtk3'
+    'librsvg'
+    'libappindicator-gtk3'
+)
+provides=('workplan')
+conflicts=('workplan')
+options=(!strip)
+source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/WorkPlan_${pkgver}_linux-x86_64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    install -Dm755 "${srcdir}/WorkPlan-linux-x86_64/workplan" "${pkgdir}/usr/bin/workplan"
+    install -Dm644 "${srcdir}/WorkPlan-linux-x86_64/workplan.desktop" "${pkgdir}/usr/share/applications/workplan.desktop"
+
+    for size in 32x32 64x64 128x128 256x256; do
+        install -Dm644 "${srcdir}/WorkPlan-linux-x86_64/icons/${size}/workplan.png" \
+            "${pkgdir}/usr/share/icons/hicolor/${size}/apps/workplan.png"
+    done
+
+    install -Dm644 "${srcdir}/WorkPlan-linux-x86_64/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

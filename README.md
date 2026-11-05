@@ -53,7 +53,7 @@ WorkPlan with AI 是一个跨平台的任务管理和计划制定工具，支持
 - 平台开发依赖：
   - Windows：WebView2（Win10+ 默认自带）
   - macOS：Xcode Command Line Tools
-  - Linux：WebKit2GTK（`webkit2gtk-4.0`）
+  - Linux：WebKit2GTK 4.1（`webkit2gtk-4.1`）
   - Android：Android SDK + NDK（参考 [Tauri 移动端文档](https://v2.tauri.app/start/prerequisites/#android)）
 
 ### 安装与运行
@@ -96,6 +96,25 @@ bun run tauri build
 ```
 
 > Windows 下如果项目路径包含中文等非 ASCII 字符，Android NDK 链接阶段可能失败，请将项目放到纯英文路径。
+
+### Arch Linux
+
+AppImage 内置了 Ubuntu 构建环境的 GTK/WebKit 运行库，在 Arch 上可能因系统库版本冲突直接崩溃。Arch 用户请使用不打包运行库的原生 tarball：
+
+```bash
+tar -xzf WorkPlan_0.5.8_linux-x86_64.tar.gz
+./WorkPlan-linux-x86_64/workplan
+```
+
+也可以从 `packaging/arch/PKGBUILD` 构建并安装：
+
+```bash
+git clone https://github.com/MakotoArai-CN/WorkPlan-with-AI.git
+cd WorkPlan-with-AI/packaging/arch
+makepkg -si
+```
+
+要求系统已安装 `webkit2gtk-4.1`、`gtk3` 和 `librsvg`。
 
 ## 使用说明
 

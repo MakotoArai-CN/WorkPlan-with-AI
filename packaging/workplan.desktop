@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=WorkPlan with AI
+Comment=Task, overtime and leave planning with AI
+Exec=workplan
+Icon=workplan
+Terminal=false
+Categories=Office;ProjectManagement;Utility;
+StartupWMClass=WorkPlan
