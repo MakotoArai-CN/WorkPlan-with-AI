@@ -1,0 +1,88 @@
+name: Linux Portable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  G4F_DEV_REPOSITORY: gpt4free/g4f.dev
+  G4F_DEV_REF: f0f09e3716a0ce108b5d1acdd0f6523a21baab90
+
+jobs:
+  build-portable:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.G4F_DEV_REPOSITORY }}
+          ref: ${{ env.G4F_DEV_REF }}
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: |
+            dist
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Read version
+        id: version
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Sync version metadata
+        run: bun run version:sync
+
+      - name: Build native Linux binary (no bundled libs)
+        run: bunx tauri build --no-bundle
+
+      - name: Create portable tarball
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          ROOT="portable/WorkPlan-linux-x86_64"
+          mkdir -p "$ROOT/icons/32x32" "$ROOT/icons/64x64" "$ROOT/icons/128x128" "$ROOT/icons/256x256"
+          cp src-tauri/target/release/workplan "$ROOT/workplan"
+          cp packaging/workplan.desktop "$ROOT/workplan.desktop"
+          cp src-tauri/icons/32x32.png "$ROOT/icons/32x32/workplan.png"
+          cp src-tauri/icons/64x64.png "$ROOT/icons/64x64/workplan.png"
+          cp src-tauri/icons/128x128.png "$ROOT/icons/128x128/workplan.png"
+          cp src-tauri/icons/128x128@2x.png "$ROOT/icons/256x256/workplan.png"
+          cp LICENSE "$ROOT/LICENSE"
+          tar -C portable -czf "WorkPlan_${VERSION}_linux-x86_64.tar.gz" "WorkPlan-linux-x86_64"
+          sha256sum "WorkPlan_${VERSION}_linux-x86_64.tar.gz" > "WorkPlan_${VERSION}_linux-x86_64.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-portable
+          path: |
+            WorkPlan_*_linux-x86_64.tar.gz
+            WorkPlan_*_linux-x86_64.tar.gz.sha256
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          files: |
+            WorkPlan_*_linux-x86_64.tar.gz
+            WorkPlan_*_linux-x86_64.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
