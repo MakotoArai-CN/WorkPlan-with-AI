@@ -135,7 +135,6 @@ WorkPlan-with-ai/
 │   └── tauri.conf.json
 ├── g4f.dev/                  # G4F 前端资源 (0.2.7)
 ├── .env.example
-├── CHANGELOG.md
 ├── README.md
 └── package.json
 ```
@@ -153,7 +152,6 @@ WorkPlan-with-ai/
 ## 致谢
 
 - [AsheQSQ/WorkPlan](https://github.com/AsheQSQ/WorkPlan) — 项目灵感来源
-- 安全说明与 Supabase RLS 部署：见 [SECURITY.md](SECURITY.md)
 - [SvelteKit](https://kit.svelte.dev/) · [Tauri](https://tauri.app/) · [Supabase](https://supabase.com/) · [Tailwind CSS](https://tailwindcss.com/) · [Phosphor Icons](https://phosphoricons.com/) ·[Linux.do](https://linux.do/)
 
 ## Todolist

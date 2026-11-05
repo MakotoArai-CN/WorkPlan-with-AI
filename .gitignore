@@ -180,3 +180,6 @@ web_modules/
 # Playwright artifacts
 .playwright-cli/
 .playwright-mcp/
+
+# Local agent memory
+.claude/
