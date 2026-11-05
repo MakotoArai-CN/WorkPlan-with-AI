@@ -86,37 +86,3 @@ jobs:
             WorkPlan_*_linux-x86_64.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-arch-package:
-    needs: build-portable
-    runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Arch build tools
-        run: |
-          pacman -Syu --noconfirm --needed base-devel git sudo
-          useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-
-      - name: Build Arch package
-        run: |
-          chown -R builder:builder .
-          cd packaging/arch
-          sudo -u builder makepkg -s --noconfirm
-
-      - name: Upload Arch package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: arch-package
-          path: packaging/arch/*.pkg.tar.zst
-
-      - name: Upload Arch package to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.build-portable.outputs.version }}
-          files: packaging/arch/*.pkg.tar.zst
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
