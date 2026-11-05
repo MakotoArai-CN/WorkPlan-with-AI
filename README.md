@@ -106,7 +106,13 @@ tar -xzf WorkPlan_0.5.8_linux-x86_64.tar.gz
 ./WorkPlan-linux-x86_64/workplan
 ```
 
-也可以从 `packaging/arch/PKGBUILD` 构建并安装：
+也可以直接安装 Release 里的 Arch 包：
+
+```bash
+sudo pacman -U workplan-bin-0.5.8-1-x86_64.pkg.tar.zst
+```
+
+或者从 `packaging/arch/PKGBUILD` 本地构建：
 
 ```bash
 git clone https://github.com/MakotoArai-CN/WorkPlan-with-AI.git
