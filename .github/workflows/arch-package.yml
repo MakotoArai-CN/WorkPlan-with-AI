@@ -30,6 +30,15 @@ jobs:
           cd packaging/arch
           sudo -u builder makepkg -s --noconfirm
 
+      - name: Verify package dependencies
+        run: |
+          pacman -U --noconfirm packaging/arch/*.pkg.tar.zst
+          missing=$(ldd /usr/bin/workplan | grep 'not found' || true)
+          if [ -n "$missing" ]; then
+            echo "$missing"
+            exit 1
+          fi
+
       - name: Upload Arch package artifact
         uses: actions/upload-artifact@v4
         with:
