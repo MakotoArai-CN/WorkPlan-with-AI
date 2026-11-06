@@ -20,9 +20,19 @@ jobs:
 
       - name: Install Arch build tools
         run: |
-          pacman -Syu --noconfirm --needed base-devel git sudo
+          pacman -Syu --noconfirm --needed base-devel git sudo curl
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+      - name: Sync PKGBUILD to the published release asset
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/WorkPlan_${version}_linux-x86_64.tar.gz"
+          sum="$(curl -fsSL "${url}.sha256" | awk '{print $1}')"
+          test -n "$sum"
+          echo "pinning PKGBUILD to ${version} (${sum})"
+          sed -i "s/^pkgver=.*/pkgver=${version}/" packaging/arch/PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${sum}')/" packaging/arch/PKGBUILD
 
       - name: Build Arch package
         run: |
