@@ -1,6 +1,6 @@
 # Maintainer: WorkPlan contributors
 pkgname=workplan-bin
-pkgver=0.5.11
+pkgver=0.5.10
 pkgrel=1
 pkgdesc="Task, overtime and leave planning with AI"
 arch=('x86_64')
