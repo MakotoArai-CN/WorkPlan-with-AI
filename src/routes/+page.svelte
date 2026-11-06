@@ -304,6 +304,8 @@
         <Sidebar />
 
         <main class="flex-1 flex flex-col relative bg-slate-100 min-w-0 border-r border-slate-200 pb-14 md:pb-0">
+            {#key $currentView}
+            <svelte:boundary>
             {#if $currentView === 'dashboard'}
                 <Dashboard {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'aichat'}
@@ -325,6 +327,21 @@
             {:else if $currentView === 'more'}
                 <MoreMenu />
             {/if}
+            {#snippet failed(error)}
+                <div class="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
+                    <i class="ph-fill ph-warning-circle text-3xl text-amber-500"></i>
+                    <div class="text-sm font-bold text-slate-700 dark:text-slate-200">{$_('common.error') || 'Error'}</div>
+                    <div class="max-w-lg break-words text-xs text-slate-500 dark:text-slate-400">{String(error?.message || error)}</div>
+                    <button
+                        on:click={() => currentView.set('dashboard')}
+                        class="px-4 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold hover:bg-slate-700 transition"
+                    >
+                        {$_('nav.dashboard')}
+                    </button>
+                </div>
+            {/snippet}
+            </svelte:boundary>
+            {/key}
         </main>
 
         {#if DESKTOP_DETAIL_VIEWS.has($currentView)}
