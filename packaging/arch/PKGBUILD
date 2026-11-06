@@ -1,6 +1,6 @@
 # Maintainer: WorkPlan contributors
 pkgname=workplan-bin
-pkgver=0.5.9
+pkgver=0.5.10
 pkgrel=1
 pkgdesc="Task, overtime and leave planning with AI"
 arch=('x86_64')
@@ -16,7 +16,7 @@ provides=('workplan')
 conflicts=('workplan')
 options=(!strip)
 source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/WorkPlan_${pkgver}_linux-x86_64.tar.gz")
-sha256sums=('bdc410d70e5a3391f27943a65387c70da76a9d11b6bbb83fc017ac583dde9e4d')
+sha256sums=('cfa0e1bc463c1426e52450271094b05665850328165953f19dc6ca36bb112452')
 
 package() {
     install -Dm755 "${srcdir}/WorkPlan-linux-x86_64/workplan" "${pkgdir}/usr/bin/workplan"
