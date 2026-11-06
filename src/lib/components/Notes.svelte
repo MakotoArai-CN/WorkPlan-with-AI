@@ -1,4 +1,5 @@
 <script>
+    import { matchesSearchQuery } from '../utils/search-text.js';
     import SelectMenu from './SelectMenu.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import { notesStore, activeNote, notesList, noteCategories } from "../stores/notes.js";
@@ -385,10 +386,11 @@
         });
     }
 
+    // Imported notes can miss title/content, so never call toLowerCase on the
+    // raw field: a thrown render error froze the previous view in place.
     $: filteredNotes = $notesList.filter((note) => {
-        const matchesSearch =
-            note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            note.content.toLowerCase().includes(searchQuery.toLowerCase());
+        if (!note || typeof note !== 'object') return false;
+        const matchesSearch = matchesSearchQuery([note.title, note.content], searchQuery);
         const matchesCategory =
             selectedCategory === $_('notes.category_all') || note.category === selectedCategory;
         return matchesSearch && matchesCategory;

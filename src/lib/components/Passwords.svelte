@@ -11,6 +11,7 @@
     import { currentView } from "../stores/tasks.js";
     import { showConfirm, showAlert, showToast } from "../stores/modal.js";
     import { generatePassword } from "../utils/crypto.js";
+    import { filterPasswordEntries } from "../utils/passwords-search.js";
     import {
         isDeviceBindingSupported,
         validatePinFormat,
@@ -1203,14 +1204,12 @@ async function handleChangeMasterPassword() {
 
     $: if (categoryListEl && (selectedCategory || $passwordCategories.length)) tick().then(measureCategoryPill);
     $: categoryOptions = $passwordCategories.map(category => ({ value: category, label: category }));
-    $: filteredPasswords = $passwordsList.filter((p) => {
-        const matchesSearch =
-            p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            p.url.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesCategory =
-            selectedCategory === "__ALL__" || p.category === selectedCategory;
-        return matchesSearch && matchesCategory;
+    // Entries can arrive without title/username/url (encrypted `meta` is only
+    // merged after unlock, and older exports may omit fields). Filtering must
+    // never throw here: a render error used to freeze the whole app.
+    $: filteredPasswords = filterPasswordEntries($passwordsList, {
+        query: searchQuery,
+        category: selectedCategory,
     });
 
     $: displayedPasswords = filteredPasswords.slice(0, displayCount);
