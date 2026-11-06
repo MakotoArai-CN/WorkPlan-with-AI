@@ -30,7 +30,7 @@ mock.module('@tauri-apps/api/core', () => ({
 }));
 mock.module('../src/lib/utils/runtime.js', () => ({ isTauriRuntime: true, isAndroidRuntime: () => false }));
 
-const { initLocalDatabase, installLocalDatabaseMirror } = await import('../src/lib/utils/local-db.js');
+const { initLocalDatabase, installLocalDatabaseMirror, flushLocalDatabase } = await import('../src/lib/utils/local-db.js');
 const { collectLocalBackupPayload } = await import('../src/lib/utils/backup-package.js');
 
 beforeEach(() => {
@@ -108,6 +108,52 @@ describe('home-directory local database', () => {
         const result = await initLocalDatabase();
         expect(result.reloaded).toBe(false);
         expect(localStorage.getItem('planpro_access_key')).toBe('local-newer');
+    });
+
+    test('logged-out snapshot without an access key does not reload on every boot', async () => {
+        // Reproduces the logout loop: the database keeps settings but no access
+        // key, so the WebView copy never becomes a "working copy" again.
+        localStorage.clear();
+        sessionStorage.clear();
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 111,
+            keys: {
+                planpro_system_settings: '{"theme":"dark"}',
+                'planpro_account_stash::old': '{"version":1,"keys":{}}'
+            }
+        });
+        const first = await initLocalDatabase();
+        expect(first.reloaded).toBe(true);
+        // The reloaded app re-reads the same snapshot; it must not loop.
+        const second = await initLocalDatabase();
+        expect(second.reloaded).toBe(false);
+        expect(second.applied).toBe(0);
+    });
+
+    test('an already-applied snapshot reports zero changes even without a session flag', async () => {
+        localStorage.clear();
+        sessionStorage.clear();
+        localStorage.setItem('planpro_system_settings', '{"theme":"dark"}');
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 222,
+            keys: { planpro_system_settings: '{"theme":"dark"}' }
+        });
+        const result = await initLocalDatabase();
+        expect(result.reloaded).toBe(false);
+        expect(result.applied).toBe(0);
+    });
+
+    test('flushing persists a fresh access key instead of waiting for the debounce', async () => {
+        // Mirrors the login flow: write the key, flush, then reload.
+        localStorage.setItem('planpro_access_key', 'fresh-login');
+        const before = writes.length;
+        await flushLocalDatabase();
+        expect(writes.length).toBe(before + 1);
+        expect(writes.at(-1).keys.planpro_access_key).toBe('fresh-login');
     });
 
     test('memory mode backup includes notes that are no longer in WebView storage', async () => {

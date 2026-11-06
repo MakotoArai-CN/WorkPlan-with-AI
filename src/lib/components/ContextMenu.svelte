@@ -5,6 +5,7 @@
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { openExternalUrl } from '../utils/open-external.js';
+    import { flushLocalDatabase } from '../utils/local-db.js';
     const dispatch = createEventDispatcher();
     let visible = false;
     let x = 0;
@@ -81,6 +82,7 @@
         await new Promise(resolve => setTimeout(resolve, 10));
         switch (id) {
             case 'refresh':
+                await flushLocalDatabase();
                 window.location.reload();
                 break;
             case 'copy':
