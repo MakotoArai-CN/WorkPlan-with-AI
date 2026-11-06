@@ -361,7 +361,6 @@
     "theme_forest": "Forest",
     "theme_sunset": "Sunset",
     "theme_rose": "Rose",
-    "theme_graphite": "Graphite",
     "editor": "Editor",
     "markdown_editor": "Markdown Editor",
     "editor_desc": "Choose the editor for notes",
@@ -516,7 +515,8 @@
     "sync_worklog_hint": "Unlock the vault first. Once enabled, the task blob no longer contains plaintext overtime/leave records; a new device restores them with the same access key and master password.",
     "sync_worklog_confirm": "Overtime and leave records will be removed from the task data and uploaded separately with an account key derived from the master password. Tasks keep syncing as before. Enable?",
     "reduce_animations": "Reduce animations",
-    "reduce_animations_desc": "Disable modal, card and dropdown animations on low-performance devices"
+    "reduce_animations_desc": "Disable modal, card and dropdown animations on low-performance devices",
+    "theme_liquidglass": "Liquid Glass"
   },
   "ai": {
     "loading": "Thinking...",

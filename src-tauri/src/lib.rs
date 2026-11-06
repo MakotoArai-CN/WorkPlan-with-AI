@@ -77,6 +77,12 @@ fn default_workspace_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Ok(data_dir) = app.path().app_data_dir() {
         candidates.push(data_dir.join("workspace"));
     }
+    // Minimal Linux installs frequently have no XDG user dirs configured, so
+    // `document_dir()` is None and the data dir may be on a read-only mount in
+    // sandboxes. $HOME/WorkPlan keeps the workspace probe alive on Arch.
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join("WorkPlan"));
+    }
     for candidate in candidates {
         if fs::create_dir_all(&candidate).is_ok() {
             return fs::canonicalize(&candidate).map_err(|e| e.to_string());
@@ -1492,8 +1498,12 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
-            if let Ok(root) = default_workspace_root(app.handle()) {
-                set_workspace_root(root);
+            match default_workspace_root(app.handle()) {
+                Ok(root) => set_workspace_root(root),
+                Err(error) => {
+                    // Better a logged failure than a silently wrong workspace.
+                    eprintln!("[workplan] workspace root unavailable: {error}");
+                }
             }
             let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;

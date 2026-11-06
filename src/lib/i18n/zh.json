@@ -361,7 +361,6 @@
     "theme_forest": "森野绿",
     "theme_sunset": "落日橙",
     "theme_rose": "莓粉晨光",
-    "theme_graphite": "石墨夜",
     "language": "语言",
     "editor": "编辑器设置",
     "markdown_editor": "Markdown 编辑器",
@@ -516,7 +515,8 @@
     "sync_worklog_hint": "需要先解锁密码库；开启后任务 blob 不再包含加班/请假明文，新设备用同一个访问密钥和主密码恢复。",
     "sync_worklog_confirm": "加班和请假记录会从任务数据中移出，单独用主密码派生的账户密钥加密上传。任务本身仍按原方式同步。确定开启吗？",
     "reduce_animations": "减少动画",
-    "reduce_animations_desc": "关闭模态框、卡片切换和下拉菜单的动画，适合低性能设备"
+    "reduce_animations_desc": "关闭模态框、卡片切换和下拉菜单的动画，适合低性能设备",
+    "theme_liquidglass": "液态玻璃"
   },
   "ai": {
     "loading": "思考中...",
