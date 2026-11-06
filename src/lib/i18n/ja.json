@@ -361,7 +361,6 @@
     "theme_forest": "フォレスト",
     "theme_sunset": "サンセット",
     "theme_rose": "ローズ",
-    "theme_graphite": "グラファイト",
     "language": "言語",
     "editor": "エディタ設定",
     "markdown_editor": "Markdownエディタ",
@@ -516,7 +515,8 @@
     "sync_worklog_hint": "先にパスワード庫を解錠してください。有効にするとタスクデータから残業・休暇の平文が除かれ、同じアクセスキーとマスターパスワードで復元できます。",
     "sync_worklog_confirm": "残業・休暇記録をタスクデータから分離し、マスターパスワードから派生したアカウントキーで暗号化してアップロードします。タスクは従来どおり同期します。有効にしますか？",
     "reduce_animations": "アニメーションを減らす",
-    "reduce_animations_desc": "低性能な端末向けにモーダル・カード・ドロップダウンのアニメーションを無効にします"
+    "reduce_animations_desc": "低性能な端末向けにモーダル・カード・ドロップダウンのアニメーションを無効にします",
+    "theme_liquidglass": "リキッドグラス"
   },
   "ai": {
     "loading": "考え中...",

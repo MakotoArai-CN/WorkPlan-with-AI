@@ -122,7 +122,36 @@ makepkg -si
 
 要求系统已安装 `webkit2gtk-4.1`、`gtk3` 和 `librsvg`。
 
-## 使用说明
+#### 字体发虚
+
+Arch 最小安装通常没有中文字体，WebKitGTK 会落到 fontconfig 的默认字体上，小字号中文就会出现发虚、发灰。安装后重启应用即可：
+
+```bash
+sudo pacman -S noto-fonts noto-fonts-cjk
+```
+
+应用本身已把字体栈改成跨平台的 `Inter / Noto Sans / Noto Sans CJK SC / Source Han Sans / WenQuanYi Micro Hei …`，并显式使用 subpixel 抗锯齿，不再强制灰度渲染。
+
+如果只在 **非整数缩放**（125%、150%）下发虚，那是 WebKitGTK 对分数缩放的限制，可以改成整数缩放：
+
+```bash
+# GNOME
+gsettings set org.gnome.mutter experimental-features "['scale-monitor-framebuffer']"
+# 或者临时按 2x 渲染，再按 0.5 缩回
+GDK_SCALE=2 GDK_DPI_SCALE=0.5 ./WorkPlan-linux-x86_64/workplan
+```
+
+#### 能力检测失败
+
+AI 聊天的「检测能力」现在会保留每一项失败原因（悬停能力标签即可看到）。Linux 上常见原因：
+
+- 没有配置模型或 API Key：`toolCall` / `nativeToolCall` 会失败
+- 服务商不接受 `tool_choice` 强制工具调用：`nativeToolCall` 失败，但内置工具路由仍可用
+- 网络或证书问题：`webSearch` 失败，错误会标成 `network`
+- 命令缺失：标成 `unsupported`
+
+工作区根目录在 Linux 上按「文档目录 → 应用数据目录 → `$HOME/WorkPlan`」回退，不再因为缺少 XDG 用户目录而落到进程 CWD。
+
 
 ### Access Key
 

@@ -9,6 +9,7 @@
         aiChatComposerAttachments,
         aiChatContext,
         aiChatCapabilities,
+        aiChatRuntimeCapabilities,
         isAiLoading,
         showAiSettings,
         sendChatMessage,
@@ -106,6 +107,7 @@
             active: $aiChatCapabilities.projectToolsAvailable,
             icon: $aiChatCapabilities.projectToolsAvailable ? "ph-check-circle" : "ph-chat-circle",
             runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.toolCallRuntimeAvailable : null,
+            detail: $aiChatRuntimeCapabilities.details?.toolCall?.message || '',
         },
         {
             id: "native-tools",
@@ -113,6 +115,7 @@
             active: $aiChatCapabilities.nativeToolCallAvailable,
             icon: $aiChatCapabilities.nativeToolCallAvailable ? "ph-function" : "ph-code",
             runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.nativeToolCallRuntimeAvailable : null,
+            detail: $aiChatRuntimeCapabilities.details?.nativeToolCall?.message || '',
         },
         {
             id: "files",
@@ -120,6 +123,7 @@
             active: $aiChatCapabilities.localFilesAvailable,
             icon: $aiChatCapabilities.localFilesAvailable ? "ph-folder-open" : "ph-folder-simple",
             runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.localFilesAvailable : null,
+            detail: $aiChatRuntimeCapabilities.details?.localFiles?.message || '',
         },
         {
             id: "search",
@@ -127,6 +131,7 @@
             active: $aiChatCapabilities.webSearchAvailable,
             icon: $aiChatCapabilities.webSearchAvailable ? "ph-globe" : "ph-globe-hemisphere-west",
             runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.webSearchAvailable : null,
+            detail: $aiChatRuntimeCapabilities.details?.webSearch?.message || '',
         },
     ];
 
@@ -1183,6 +1188,7 @@
                 </div>
                 {#each capabilityBadges as badge}
                     <div
+                        title={badge.detail || badge.label}
                         class={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border ${
                             badge.active
                                 ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"

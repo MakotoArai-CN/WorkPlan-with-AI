@@ -184,10 +184,14 @@ function getDefaultAiChatRuntimeCapabilities() {
     return {
         probed: false,
         probing: false,
+        probedAt: 0,
         localFilesRuntimeAvailable: null,
         webSearchRuntimeAvailable: null,
         toolCallRuntimeAvailable: null,
-        nativeToolCallRuntimeAvailable: null
+        nativeToolCallRuntimeAvailable: null,
+        // Per-check diagnostics. Linux builds reported a bare red badge with no
+        // reason, which made Arch-only failures impossible to triage.
+        details: {}
     };
 }
 
@@ -246,13 +250,16 @@ export async function probeAiCapabilities() {
     let webSearchOk = null;
     let toolCallOk = null;
     let nativeToolCallOk = null;
+    const details = {};
 
     try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('get_workspace_root');
         localFilesOk = true;
-    } catch {
+        details.localFiles = { ok: true, kind: 'ok', message: '' };
+    } catch (error) {
         localFilesOk = false;
+        details.localFiles = { ok: false, ...describeToolFailure(error) };
     }
 
     try {
@@ -261,6 +268,8 @@ export async function probeAiCapabilities() {
         webSearchOk = true;
     } catch (e) {
         const errMsg = String(e?.message || e || '').toLowerCase();
+        const failure = describeToolFailure(e);
+        details.webSearch = { ok: failure.kind !== 'unsupported', ...failure };
         if (errMsg.includes('not found') || errMsg.includes('not implemented') ||
             errMsg.includes('no such') || errMsg.includes('plugin')) {
             webSearchOk = false;
@@ -279,10 +288,12 @@ export async function probeAiCapabilities() {
             const { callAI } = await import('../utils/ai-providers.js');
             const probe = await callAI(config, 'respond with only the word OK', 'You are a test probe. Respond with only the word OK.');
             toolCallOk = typeof probe === 'string' && probe.length > 0;
+            details.toolCall = { ok: toolCallOk, kind: toolCallOk ? 'ok' : 'error', message: toolCallOk ? '' : '模型未返回文本' };
         }
     } catch (e) {
         console.warn('[Probe] tool call probe failed:', e?.message || e);
         toolCallOk = false;
+        details.toolCall = { ok: false, ...describeToolFailure(e) };
     }
 
     if (toolCallOk) {
@@ -291,6 +302,7 @@ export async function probeAiCapabilities() {
             const { canProviderUseNativeTools, callAIWithMessagesAndTools } = await import('../utils/ai-providers.js');
             if (!canProviderUseNativeTools(config.provider, config)) {
                 nativeToolCallOk = false;
+                details.nativeToolCall = { ok: false, kind: 'unsupported', message: '当前服务商不支持原生工具调用' };
             } else {
                 const probeTools = [{
                     type: 'function',
@@ -329,10 +341,16 @@ export async function probeAiCapabilities() {
                     }
                 );
                 nativeToolCallOk = (probe.toolCalls || []).some(call => call.name === 'workplan_probe_tool');
+                details.nativeToolCall = {
+                    ok: nativeToolCallOk,
+                    kind: nativeToolCallOk ? 'ok' : 'error',
+                    message: nativeToolCallOk ? '' : '模型没有按 tool_choice 返回工具调用'
+                };
             }
         } catch (e) {
             console.warn('[Probe] native tool call probe failed:', e?.message || e);
             nativeToolCallOk = false;
+            details.nativeToolCall = { ok: false, ...describeToolFailure(e) };
         }
     } else if (nativeToolCallOk === null) {
         nativeToolCallOk = false;
@@ -341,10 +359,12 @@ export async function probeAiCapabilities() {
     aiChatRuntimeCapabilities.set({
         probed: true,
         probing: false,
+        probedAt: Date.now(),
         localFilesRuntimeAvailable: localFilesOk,
         webSearchRuntimeAvailable: webSearchOk,
         toolCallRuntimeAvailable: toolCallOk,
-        nativeToolCallRuntimeAvailable: nativeToolCallOk
+        nativeToolCallRuntimeAvailable: nativeToolCallOk,
+        details
     });
 
     return {

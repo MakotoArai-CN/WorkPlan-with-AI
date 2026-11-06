@@ -10,7 +10,7 @@ import {
 import { isWebDemo } from '../utils/runtime.js';
 import { DEFAULT_OVERTIME_CONFIG, normalizeOvertimeConfig } from '../utils/overtime.js';
 
-const DARK_THEMES = new Set(['dark', 'graphite']);
+const DARK_THEMES = new Set(['dark', 'liquidglass']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
 const APP_VERSION = typeof __WORKPLAN_VERSION__ === 'string' ? __WORKPLAN_VERSION__ : '0.0.0';
 const AGREEMENT_VERSION = '1.1';
@@ -108,7 +108,9 @@ function getInitialSettings() {
                 appVersion: APP_VERSION,
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
-                theme: parsed.theme || 'auto',
+                theme: parsed.theme === 'graphite'
+                    ? 'liquidglass'
+                    : (parsed.theme || 'auto'),
                 markdownEditor: parsed.markdownEditor || 'vditor',
                 reduceAnimations: parsed.reduceAnimations === true,
                 databaseConfig: {
@@ -210,7 +212,7 @@ function createSettingsStore() {
                     forest: '#ecfdf5',
                     sunset: '#fff7ed',
                     rose: '#fff1f2',
-                    graphite: '#080b16'
+                    liquidglass: '#05070f'
                 };
                 metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
             }
