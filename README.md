@@ -102,14 +102,14 @@ bun run tauri build
 AppImage 内置了 Ubuntu 构建环境的 GTK/WebKit 运行库，在 Arch 上可能因系统库版本冲突直接崩溃。Arch 用户请使用不打包运行库的原生 tarball：
 
 ```bash
-tar -xzf WorkPlan_0.5.8_linux-x86_64.tar.gz
+tar -xzf WorkPlan_0.5.9_linux-x86_64.tar.gz
 ./WorkPlan-linux-x86_64/workplan
 ```
 
 也可以直接安装 Release 里的 Arch 包：
 
 ```bash
-sudo pacman -U workplan-bin-0.5.8-1-x86_64.pkg.tar.zst
+sudo pacman -U workplan-bin-0.5.9-1-x86_64.pkg.tar.zst
 ```
 
 或者从 `packaging/arch/PKGBUILD` 本地构建：
