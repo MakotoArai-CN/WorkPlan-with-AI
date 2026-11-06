@@ -938,9 +938,16 @@
         });
     }
 
+    function handleViewportResize() {
+        if (typeof window === 'undefined') return;
+        if (window.innerWidth >= 768) showSessionDrawer = false;
+    }
+
     onMount(() => {
         scrollToBottom();
         syncComposerHeight();
+        window.addEventListener('resize', handleViewportResize);
+        return () => window.removeEventListener('resize', handleViewportResize);
     });
 
     $: if ($aiChatHistory.length) scrollToBottom();
@@ -985,7 +992,7 @@
     {/if}
 
     <aside
-        class="w-[280px] bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shrink-0 h-full z-50 transition-transform duration-200 md:flex"
+        class="w-[280px] bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shrink-0 h-full z-50 transition-transform duration-200 md:flex md:static md:translate-x-0"
         class:fixed={showSessionDrawer}
         class:inset-y-0={showSessionDrawer}
         class:left-0={showSessionDrawer}
@@ -1004,6 +1011,13 @@
                 class="h-9 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5"
             >
                 <i class="ph ph-plus"></i> {$_("ai_chat.new_session")}
+            </button>
+            <button
+                on:click={() => (showSessionDrawer = false)}
+                class="ml-2 md:hidden h-9 w-9 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center justify-center"
+                aria-label={$_("common.close")}
+            >
+                <i class="ph ph-x"></i>
             </button>
         </div>
 
