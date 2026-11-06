@@ -6,7 +6,25 @@ const SNAPSHOT_VERSION = 1;
 const PREFIX = 'planpro_';
 const MARKER_KEY = 'planpro_db_saved_at';
 const HYDRATED_FLAG = 'workplan_db_hydrated_once';
+const HYDRATED_SNAPSHOT = 'workplan_db_hydrated_snapshot';
 const EXCLUDED = new Set(['planpro_passwords_session', MARKER_KEY]);
+
+function readSessionFlag(key) {
+    try {
+        return sessionStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+
+function writeSessionFlag(key, value) {
+    try {
+        sessionStorage.setItem(key, value);
+    } catch {
+        // sessionStorage may be unavailable in restricted WebViews.
+    }
+}
+
 function hasWorkingCopy(keys) {
     if (typeof keys?.planpro_access_key === 'string' && keys.planpro_access_key.trim()) {
         return true;
@@ -25,6 +43,34 @@ let timer = null;
 let installed = false;
 let memoryMode = false;
 let memoryKeys = new Map();
+// True once a readable snapshot has been loaded from disk. After that the
+// database is the source of truth and the mirror must stay active even when
+// the snapshot holds no access key (for example right after logout).
+let dbAuthoritative = false;
+// Serialize writes so an older snapshot can never land after a newer one.
+let saveChain = Promise.resolve();
+// Original Storage#setItem, kept so a failed database write can still leave a
+// WebView copy behind instead of losing the pending change.
+let originalSetItem = null;
+
+function restoreWebViewCopy() {
+    if (!originalSetItem || typeof localStorage === 'undefined') return;
+    for (const [key, value] of memoryKeys) {
+        try {
+            originalSetItem.call(localStorage, key, value);
+        } catch {
+            // Ignore quota errors; there is nothing else to try.
+        }
+    }
+}
+
+function enqueueSave(keysProvider = collectKeys) {
+    const run = saveChain
+        .catch(() => {})
+        .then(() => saveSnapshot(keysProvider()));
+    saveChain = run.catch(() => {});
+    return run;
+}
 
 function collectKeys() {
     if (memoryMode) return Object.fromEntries(memoryKeys.entries());
@@ -44,8 +90,15 @@ function applyKeys(keys) {
     const allowed = Object.entries(keys).filter(
         ([key, value]) => key.startsWith(PREFIX) && !EXCLUDED.has(key) && typeof value === 'string'
     );
-    for (const [key, value] of allowed) localStorage.setItem(key, value);
-    return allowed.length;
+    // Count only keys that actually changed. A repeat pass over an already
+    // applied snapshot must report 0, otherwise the caller reloads forever.
+    let changed = 0;
+    for (const [key, value] of allowed) {
+        if (localStorage.getItem(key) === value) continue;
+        localStorage.setItem(key, value);
+        changed += 1;
+    }
+    return changed;
 }
 
 function buildSnapshot(keys = collectKeys()) {
@@ -82,11 +135,21 @@ function scheduleMirror() {
     timer = setTimeout(async () => {
         timer = null;
         try {
-            await saveSnapshot();
+            await enqueueSave();
         } catch (error) {
             console.warn('[LocalDB] mirror save failed:', error);
         }
-    }, 700);
+    }, 250);
+}
+
+async function flushPendingMirror() {
+    if (timer) {
+        clearTimeout(timer);
+        timer = null;
+    }
+    if (!isTauriRuntime || hydrating) return null;
+    const keys = collectKeys();
+    return enqueueSave(() => keys);
 }
 
 async function activateMemoryStorage() {
@@ -99,7 +162,10 @@ async function activateMemoryStorage() {
         if (typeof value === 'string') memoryKeys.set(key, value);
     }
     memoryMode = true;
-    if (!hasWorkingCopy(Object.fromEntries(memoryKeys.entries()))) {
+    // An empty snapshot is a legitimate state (logged out). Only refuse to
+    // take over when the database could not be read and the WebView copy is
+    // itself incomplete, because then flushing would overwrite good data.
+    if (!dbAuthoritative && !hasWorkingCopy(Object.fromEntries(memoryKeys.entries()))) {
         // A stray connector/theme key without an access key or task cache is not
         // a complete working copy. Keep WebView storage and let the next launch
         // finish hydrating instead of overwriting the database with a partial map.
@@ -110,7 +176,7 @@ async function activateMemoryStorage() {
     // covers the case where localStorage was newer than the on-disk database.
     let flushed = false;
     try {
-        await saveSnapshot();
+        await enqueueSave();
         flushed = true;
     } catch (error) {
         console.warn('[LocalDB] initial memory flush failed:', error);
@@ -142,6 +208,7 @@ export async function installLocalDatabaseMirror() {
     const originalGet = Storage.prototype.getItem;
     const originalRemove = Storage.prototype.removeItem;
     const originalClear = Storage.prototype.clear;
+    originalSetItem = originalSet;
     const isLocal = (self) => self === window.localStorage;
     Storage.prototype.getItem = function (key) {
         if (isLocal(this) && String(key).startsWith(PREFIX) && !EXCLUDED.has(key)) {
@@ -173,6 +240,13 @@ export async function installLocalDatabaseMirror() {
         }
         return originalClear.call(this);
     };
+    // Best-effort flush for the last writes before the window goes away.
+    window.addEventListener('pagehide', () => {
+        void flushPendingMirror();
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') void flushPendingMirror();
+    });
 }
 
 /**
@@ -189,30 +263,43 @@ export async function initLocalDatabase() {
         const hasLocal = hasWorkingCopy(localKeys);
         const snapshot = readSnapshot(raw);
         if (!snapshot) {
+            dbAuthoritative = true;
             if (hasLocal) {
-                await saveSnapshot(localKeys);
+                await enqueueSave(() => localKeys);
                 return { supported: true, migrated: true, reloaded: false };
             }
             return { supported: true, migrated: false, reloaded: false, empty: true };
         }
 
-        // If WebView still has business data, it is the current working copy
-        // (writes are mirrored continuously). Never overwrite it merely because
-        // the database's timestamp is a few milliseconds newer.
+        dbAuthoritative = true;
         if (hasLocal) {
+            // Writes are mirrored continuously, so an existing WebView copy is
+            // the current working copy. Never overwrite it with the database.
             return { supported: true, migrated: false, reloaded: false };
         }
 
-        const applied = applyKeys(snapshot.keys);
+        const changed = applyKeys(snapshot.keys);
         localStorage.setItem(MARKER_KEY, String(Number(snapshot.savedAt) || Date.now()));
-        if (applied > 0) {
-            // Stores have not read the database yet; one reload lets them
-            // initialize from it. The next pass activates memory storage and
-            // removes this temporary WebView copy.
-            sessionStorage.setItem(HYDRATED_FLAG, '1');
-            return { supported: true, migrated: false, reloaded: true, applied };
+        if (changed === 0) {
+            return { supported: true, migrated: false, reloaded: false, applied: 0 };
         }
-        return { supported: true, migrated: false, reloaded: false, applied: 0 };
+        // Hydrate at most once per app session. Without this guard a snapshot
+        // that holds no access key (logged out, or a partial map) triggered
+        // `reload()` on every boot because the WebView copy never became a
+        // "working copy" again. Re-applying the same snapshot now reports 0
+        // changes, and this flag blocks the second reload in the same session.
+        const snapshotId = String(Number(snapshot.savedAt) || 0);
+        const alreadyHydrated = readSessionFlag(HYDRATED_FLAG) === '1';
+        const sameSnapshot = readSessionFlag(HYDRATED_SNAPSHOT) === snapshotId;
+        writeSessionFlag(HYDRATED_SNAPSHOT, snapshotId);
+        if (alreadyHydrated || sameSnapshot) {
+            return { supported: true, migrated: false, reloaded: false, applied: changed };
+        }
+        writeSessionFlag(HYDRATED_FLAG, '1');
+        // Stores have not read the database yet; one reload lets them
+        // initialize from it. The next pass activates memory storage and
+        // removes this temporary WebView copy.
+        return { supported: true, migrated: false, reloaded: true, applied: changed };
     } catch (error) {
         console.warn('[LocalDB] initialization failed:', error);
         return { supported: true, error: String(error?.message || error), migrated: false, reloaded: false };
@@ -237,7 +324,7 @@ export async function replaceLocalDatabaseKeys(keys = {}) {
         const previous = new Map(memoryKeys);
         memoryKeys = new Map(allowed);
         try {
-            await saveSnapshot();
+            await enqueueSave();
         } catch (error) {
             memoryKeys = previous;
             throw error;
@@ -257,9 +344,12 @@ export async function replaceLocalDatabaseKeys(keys = {}) {
 export async function flushLocalDatabase() {
     if (!isTauriRuntime) return null;
     try {
-        return await saveSnapshot();
+        return await flushPendingMirror();
     } catch (error) {
         console.warn('[LocalDB] flush failed:', error);
+        // Keep a WebView copy so a failed database write cannot drop the
+        // pending change; the next launch migrates it back into the database.
+        if (memoryMode) restoreWebViewCopy();
         return null;
     }
 }
@@ -271,7 +361,7 @@ export async function localDatabaseInfo() {
 
 export async function exportLocalDatabase(destination) {
     if (!isTauriRuntime) throw new Error('仅桌面版支持本地数据库备份');
-    await saveSnapshot();
+    await flushPendingMirror();
     return invoke('local_db_backup', { destination });
 }
 
@@ -282,6 +372,7 @@ export async function restoreLocalDatabase(source) {
     if (!snapshot) throw new Error('备份文件格式不正确');
     applyKeys(snapshot.keys);
     localStorage.setItem(MARKER_KEY, String(snapshot.savedAt || Date.now()));
+    await flushPendingMirror();
     return snapshot;
 }
 

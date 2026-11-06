@@ -186,6 +186,7 @@
         });
         if (confirmed) {
             await taskStore.clearAllData($taskStore.accessKey);
+            await flushLocalDatabase();
             showToast({ message: t('settings.clear_success'), type: 'success' });
             location.reload();
         }

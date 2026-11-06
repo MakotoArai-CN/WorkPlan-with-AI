@@ -1,5 +1,6 @@
 <script>
     import { taskStore } from '../stores/tasks.js';
+    import { flushLocalDatabase } from '../utils/local-db.js';
     import { showAlert } from '../stores/modal.js';
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
@@ -156,9 +157,13 @@
         loginSuccess = true;
         if (!reduced) await new Promise((resolve) => setTimeout(resolve, 320));
         taskStore.login(inputKey.trim());
+        // The mirror is debounced, so writing the access key is not enough:
+        // persist it synchronously before reloading, otherwise the reload
+        // races the debounce and the user lands back on the login screen.
+        await flushLocalDatabase();
         // Stores are module singletons; a full reload is required so notes,
         // passwords and salary data are re-read for the selected account.
-        setTimeout(() => location.reload(), 450);
+        setTimeout(() => location.reload(), 120);
     }
 
     function generateKey() {
