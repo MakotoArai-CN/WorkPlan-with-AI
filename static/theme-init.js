@@ -13,7 +13,7 @@
         }
         // graphite was retired in favour of the liquid glass theme.
         if (mode === 'graphite') mode = 'liquidglass';
-        var isDark = mode === 'dark' || mode === 'liquidglass'
+        var isDark = mode === 'dark'
             || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
         var resolved = mode === 'auto' ? (isDark ? 'dark' : 'light') : mode;
         document.documentElement.dataset.theme = resolved;
@@ -21,7 +21,7 @@
             document.documentElement.classList.add('dark');
             document.documentElement.style.colorScheme = 'dark';
             var themeColor = document.querySelector('meta[name="theme-color"]');
-            if (themeColor) themeColor.setAttribute('content', mode === 'liquidglass' ? '#05070f' : '#0f172a');
+            if (themeColor) themeColor.setAttribute('content', mode === 'liquidglass' ? '#eef4ff' : '#0f172a');
         }
     } catch (e) {}
 })();

@@ -483,7 +483,7 @@
         { id: 'forest', label: $_('settings.theme_forest'), icon: 'ph-tree-evergreen', preview: 'bg-gradient-to-br from-emerald-100 to-lime-200 border border-emerald-200', accent: 'text-emerald-600' },
         { id: 'sunset', label: $_('settings.theme_sunset'), icon: 'ph-sun-horizon', preview: 'bg-gradient-to-br from-orange-100 to-rose-200 border border-orange-200', accent: 'text-orange-500' },
         { id: 'rose', label: $_('settings.theme_rose'), icon: 'ph-flower-lotus', preview: 'bg-gradient-to-br from-rose-100 to-pink-200 border border-pink-200', accent: 'text-rose-500' },
-        { id: 'liquidglass', label: $_('settings.theme_liquidglass'), icon: 'ph-drop', preview: 'bg-[radial-gradient(circle_at_28%_22%,rgba(120,190,255,0.6),transparent_58%),radial-gradient(circle_at_72%_78%,rgba(190,130,255,0.55),transparent_60%)] bg-[#05070f] border border-[rgba(175,218,255,0.38)]', accent: 'text-sky-300' },
+        { id: 'liquidglass', label: $_('settings.theme_liquidglass'), icon: 'ph-drop', preview: 'bg-[radial-gradient(circle_at_28%_22%,#93c5fd,transparent_58%),radial-gradient(circle_at_72%_78%,#ddd6fe,transparent_60%)] bg-[#eef4ff] border border-white/80', accent: 'text-sky-500' },
     ];
 </script>
 

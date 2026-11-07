@@ -65,62 +65,67 @@
 }
 
 /*
- * Liquid Glass theme — modelled after the material model of
- * https://github.com/ybouane/liquidglass (refraction, chromatic fringing,
- * fresnel rim, specular sheen). The shader version rasterises the DOM through
- * WebGL and only works on direct children of one root, which is not viable for
- * an app shell full of forms, so the same optical layers are reproduced with
- * composited CSS: a drifting aurora backdrop, backdrop-filter glass panels,
- * inset fresnel rims and a low-opacity chromatic fringe.
+ * Liquid Glass theme — a *light* theme. Apple's liquid glass is a bright,
+ * luminous material: a vivid wallpaper blurred through frosted white panels.
+ * Treating it as a dark theme is what made it read as "just another black
+ * theme", because `.dark` turns every Tailwind `dark:bg-slate-800` on.
+ *
+ * Reference: https://github.com/ybouane/liquidglass (refraction / chromatic
+ * fringe / fresnel rim / specular). The optical stack is composited with CSS
+ * instead of a WebGL DOM raster: one shared pointer light, heavy blur, white
+ * fresnel rims and a two-tone fringe on every panel edge.
  */
 :root[data-theme="liquidglass"] {
-    --app-bg: #05070f;
-    --app-surface: rgba(20, 28, 54, 0.52);
-    --app-surface-soft: rgba(26, 36, 66, 0.42);
-    --app-surface-muted: rgba(38, 52, 92, 0.38);
-    --app-border: rgba(150, 200, 255, 0.16);
-    --app-border-strong: rgba(175, 218, 255, 0.3);
-    --app-text: #eaf2ff;
-    --app-text-soft: #c3d4f0;
-    --app-text-muted: #8fa4c8;
-    --app-text-faint: #5f7096;
+    --app-bg: #eaf1ff;
+    --app-surface: rgba(255, 255, 255, 0.56);
+    --app-surface-soft: rgba(255, 255, 255, 0.42);
+    --app-surface-muted: rgba(255, 255, 255, 0.72);
+    --app-border: rgba(255, 255, 255, 0.7);
+    --app-border-strong: rgba(255, 255, 255, 0.95);
+    --app-text: #0c1a2e;
+    --app-text-soft: #24384f;
+    --app-text-muted: #5a7391;
+    --app-text-faint: #8aa0bb;
     --app-shadow:
-        0 26px 64px rgba(2, 6, 20, 0.55),
-        0 0 1px rgba(160, 210, 255, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.16),
-        inset 0 -1px 0 rgba(80, 160, 255, 0.1);
+        0 24px 60px rgba(64, 102, 168, 0.18),
+        0 2px 8px rgba(64, 102, 168, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        inset 0 -1px 0 rgba(150, 190, 255, 0.35);
     --glass-sheen: linear-gradient(
-        140deg,
-        rgba(255, 255, 255, 0.16) 0%,
-        rgba(255, 255, 255, 0.05) 30%,
-        rgba(255, 255, 255, 0) 56%,
-        rgba(120, 190, 255, 0.08) 100%
+        150deg,
+        rgba(255, 255, 255, 0.75) 0%,
+        rgba(255, 255, 255, 0.28) 28%,
+        rgba(255, 255, 255, 0.05) 54%,
+        rgba(180, 220, 255, 0.28) 100%
     );
-    --glass-fringe:
-        inset 1px 0 0 rgba(120, 200, 255, 0.12),
-        inset -1px 0 0 rgba(220, 130, 255, 0.1);
-    --glass-blur: blur(26px) saturate(1.85) brightness(1.05);
+    --glass-blur: blur(26px) saturate(2.1) brightness(1.06);
+    --glass-pointer-x: 30%;
+    --glass-pointer-y: 10%;
 }
 
+/* Vivid wallpaper. Bright enough that the frosted panels actually refract it. */
 :root[data-theme="liquidglass"] body {
-    background-color: #05070f !important;
+    background-color: #eef4ff !important;
     background-image:
-        radial-gradient(1250px 820px at 10% -12%, rgba(86, 138, 255, 0.26), transparent 62%),
-        radial-gradient(980px 720px at 92% -4%, rgba(186, 118, 255, 0.2), transparent 64%),
-        radial-gradient(1100px 900px at 46% 112%, rgba(72, 216, 255, 0.16), transparent 66%),
-        linear-gradient(180deg, #060912 0%, #070c1a 46%, #05070f 100%);
+        radial-gradient(46vw 40vw at 10% 6%, rgba(96, 165, 250, 0.85), transparent 62%),
+        radial-gradient(42vw 38vw at 92% 2%, rgba(196, 181, 253, 0.9), transparent 64%),
+        radial-gradient(46vw 40vw at 78% 92%, rgba(125, 211, 252, 0.8), transparent 66%),
+        radial-gradient(40vw 36vw at 12% 96%, rgba(251, 207, 232, 0.85), transparent 68%),
+        radial-gradient(36vw 32vw at 50% 46%, rgba(187, 247, 208, 0.6), transparent 70%),
+        linear-gradient(180deg, #f4f8ff 0%, #e8f0ff 52%, #eef4ff 100%);
     background-attachment: fixed;
     background-repeat: no-repeat;
-    background-size: 170% 170%, 160% 160%, 180% 180%, 100% 100%;
-    animation: liquidglass-drift 32s ease-in-out infinite alternate;
+    background-size: 120% 120%, 120% 120%, 130% 130%, 130% 130%, 120% 120%, 100% 100%;
+    animation: liquidglass-drift 44s ease-in-out infinite alternate;
+    color: var(--app-text);
 }
 
 @keyframes liquidglass-drift {
     from {
-        background-position: 0% 0%, 100% 0%, 50% 100%, 0 0;
+        background-position: 0% 0%, 100% 0%, 70% 100%, 10% 90%, 50% 50%, 0 0;
     }
     to {
-        background-position: 24% 12%, 74% 16%, 38% 84%, 0 0;
+        background-position: 16% 12%, 82% 8%, 52% 78%, 0% 70%, 42% 46%, 0 0;
     }
 }
 
@@ -130,42 +135,47 @@
     }
 }
 
-:root[data-theme="liquidglass"] .bg-white,
-:root[data-theme="liquidglass"] .bg-white\/90,
-:root[data-theme="liquidglass"] .bg-white\/80,
-:root[data-theme="liquidglass"] .bg-white\/95 {
-    background: var(--glass-sheen), var(--app-surface) !important;
+/* Frosted glass on every surface that used to be a solid card. Attribute
+   selectors are needed because Tailwind emits `dark:`/`hover:` variants whose
+   specificity beats a plain class rule. */
+:root[data-theme="liquidglass"] [class*="bg-white"],
+:root[data-theme="liquidglass"] [class*="bg-slate-50"],
+:root[data-theme="liquidglass"] [class*="bg-slate-100"],
+:root[data-theme="liquidglass"] [class*="bg-slate-200"] {
+    background-color: rgba(255, 255, 255, 0.46) !important;
+    background-image:
+        radial-gradient(
+            460px circle at var(--glass-pointer-x) var(--glass-pointer-y),
+            rgba(255, 255, 255, 0.6),
+            transparent 62%
+        ),
+        var(--glass-sheen) !important;
     -webkit-backdrop-filter: var(--glass-blur);
     backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--app-border) !important;
+    border-color: rgba(255, 255, 255, 0.72) !important;
     box-shadow:
-        0 22px 48px rgba(2, 6, 20, 0.45),
-        inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        inset 0 -1px 0 rgba(90, 170, 255, 0.1),
-        var(--glass-fringe);
+        0 22px 50px rgba(64, 102, 168, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.98),
+        inset 0 -1px 0 rgba(150, 190, 255, 0.4),
+        inset 1px 0 0 rgba(170, 220, 255, 0.5),
+        inset -1px 0 0 rgba(255, 190, 235, 0.4);
 }
 
-:root[data-theme="liquidglass"] .bg-slate-50,
-:root[data-theme="liquidglass"] .bg-slate-50\/90 {
-    background: rgba(18, 26, 50, 0.5) !important;
-    -webkit-backdrop-filter: blur(18px) saturate(1.55);
-    backdrop-filter: blur(18px) saturate(1.55);
-}
-
-:root[data-theme="liquidglass"] .bg-slate-100,
-:root[data-theme="liquidglass"] .bg-slate-200 {
-    background: rgba(34, 46, 84, 0.42) !important;
-}
-
-:root[data-theme="liquidglass"] .bg-slate-800,
-:root[data-theme="liquidglass"] .bg-slate-900 {
-    background: rgba(10, 16, 34, 0.72) !important;
+/* The app shell must stay transparent, otherwise the wallpaper disappears. */
+:root[data-theme="liquidglass"] body > div [class*="bg-slate-50"].h-screen,
+:root[data-theme="liquidglass"] .bg-slate-50.h-screen {
+    background-color: transparent !important;
+    background-image: none !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
 }
 
 :root[data-theme="liquidglass"] .border-slate-200,
 :root[data-theme="liquidglass"] .border-slate-100,
-:root[data-theme="liquidglass"] .border-slate-300 {
-    border-color: var(--app-border) !important;
+:root[data-theme="liquidglass"] .border-slate-300,
+:root[data-theme="liquidglass"] [class*="border-slate-"] {
+    border-color: rgba(255, 255, 255, 0.72) !important;
 }
 
 :root[data-theme="liquidglass"] .shadow-sm,
@@ -173,36 +183,34 @@
 :root[data-theme="liquidglass"] .shadow-lg,
 :root[data-theme="liquidglass"] .shadow-xl {
     box-shadow:
-        0 18px 42px rgba(2, 6, 20, 0.42),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12),
-        var(--glass-fringe) !important;
-}
-
-:root[data-theme="liquidglass"] .rounded-2xl,
-:root[data-theme="liquidglass"] .rounded-xl {
-    background-image: var(--glass-sheen);
+        0 20px 46px rgba(64, 102, 168, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        inset 0 -1px 0 rgba(150, 190, 255, 0.35) !important;
 }
 
 :root[data-theme="liquidglass"] input,
 :root[data-theme="liquidglass"] textarea,
 :root[data-theme="liquidglass"] select {
-    background-color: rgba(12, 20, 40, 0.55) !important;
-    border-color: var(--app-border) !important;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.66) !important;
+    -webkit-backdrop-filter: blur(16px) saturate(1.6);
+    backdrop-filter: blur(16px) saturate(1.6);
+    border-color: rgba(255, 255, 255, 0.85) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    color: var(--app-text) !important;
 }
 
 :root[data-theme="liquidglass"] input:focus,
 :root[data-theme="liquidglass"] textarea:focus,
 :root[data-theme="liquidglass"] select:focus {
-    border-color: var(--app-border-strong) !important;
+    border-color: rgba(96, 165, 250, 0.7) !important;
     box-shadow:
-        0 0 0 3px rgba(120, 190, 255, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        0 0 0 3px rgba(96, 165, 250, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
 :root[data-theme="liquidglass"] ::selection {
-    background: rgba(120, 190, 255, 0.32);
-    color: #ffffff;
+    background: rgba(96, 165, 250, 0.28);
+    color: #08131f;
 }
 
 :root[data-theme="liquidglass"] ::-webkit-scrollbar {
@@ -215,14 +223,14 @@
 }
 
 :root[data-theme="liquidglass"] ::-webkit-scrollbar-thumb {
-    background: rgba(140, 190, 255, 0.22);
+    background: rgba(255, 255, 255, 0.75);
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: content-box;
 }
 
 :root[data-theme="liquidglass"] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(160, 210, 255, 0.38);
+    background: rgba(255, 255, 255, 0.95);
     background-clip: content-box;
 }
 
