@@ -1,5 +1,5 @@
 <script>
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
     import { get } from 'svelte/store';
     import { taskStore, currentView, activeTask } from '$lib/stores/tasks.js';
     import { showAiPanel, showAiSettings, clearChatHistory } from '$lib/stores/ai.js';
@@ -287,7 +287,10 @@
     }
 </script>
 
-<div class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800 safe-area-container">
+<div class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800 safe-area-container relative" data-glass-root>
+    {#if $settingsStore.theme === 'liquidglass'}
+        <img class="glass-wallpaper" src="/glass-wallpaper.svg" alt="" aria-hidden="true" />
+    {/if}
     {#if needsAgreement}
         <AgreementModal isFirstTime={true} />
     {:else if !$taskStore.accessKey}
@@ -303,7 +306,7 @@
 
         <Sidebar />
 
-        <main class="flex-1 flex flex-col relative bg-slate-100 min-w-0 border-r border-slate-200 pb-14 md:pb-0">
+        <main data-glass-role="workspace" class="flex-1 flex flex-col relative bg-slate-100 min-w-0 border-r border-slate-200 pb-14 md:pb-0">
             {#key $currentView}
             <svelte:boundary>
             {#if $currentView === 'dashboard'}

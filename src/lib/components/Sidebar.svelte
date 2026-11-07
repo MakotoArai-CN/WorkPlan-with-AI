@@ -196,6 +196,7 @@
 <svelte:window on:resize={handleNavResize} />
 
 <aside
+    data-glass-role="sidebar"
     class="hidden md:flex bg-white border-r border-slate-200 flex-col z-20 shadow-lg shrink-0 transition-[width,padding] duration-300 ease-out"
     class:w-72={!collapsed}
     class:w-24={collapsed}
