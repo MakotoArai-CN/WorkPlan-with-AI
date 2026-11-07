@@ -13,7 +13,7 @@ describe('liquid glass theme', () => {
         expect(css).not.toContain(':root[data-theme="graphite"]');
 
         const settings = read('src/lib/stores/settings.js');
-        expect(settings).toContain("new Set(['dark', 'liquidglass'])");
+        expect(settings).toContain("new Set(['dark'])");
         expect(settings).not.toContain('graphite: ');
 
         const picker = read('src/lib/components/Settings.svelte');
@@ -28,7 +28,7 @@ describe('liquid glass theme', () => {
 
         const bootstrap = read('static/theme-init.js');
         expect(bootstrap).toContain("if (mode === 'graphite') mode = 'liquidglass';");
-        expect(bootstrap).toContain("mode === 'liquidglass'");
+        expect(bootstrap).not.toContain("isDark = mode === 'dark' || mode === 'liquidglass'");
     });
 
     test('keeps the animated aurora respectful of reduced motion', () => {

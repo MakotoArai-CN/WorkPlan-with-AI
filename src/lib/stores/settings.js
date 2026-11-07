@@ -10,7 +10,7 @@ import {
 import { isWebDemo } from '../utils/runtime.js';
 import { DEFAULT_OVERTIME_CONFIG, normalizeOvertimeConfig } from '../utils/overtime.js';
 
-const DARK_THEMES = new Set(['dark', 'liquidglass']);
+const DARK_THEMES = new Set(['dark']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
 const APP_VERSION = typeof __WORKPLAN_VERSION__ === 'string' ? __WORKPLAN_VERSION__ : '0.0.0';
 const AGREEMENT_VERSION = '1.1';
@@ -212,7 +212,7 @@ function createSettingsStore() {
                     forest: '#ecfdf5',
                     sunset: '#fff7ed',
                     rose: '#fff1f2',
-                    liquidglass: '#05070f'
+                    liquidglass: '#eef4ff'
                 };
                 metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
             }
