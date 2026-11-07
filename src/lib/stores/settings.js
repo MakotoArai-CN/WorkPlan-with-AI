@@ -108,8 +108,8 @@ function getInitialSettings() {
                 appVersion: APP_VERSION,
                 dailyReportPrompt: parsed.dailyReportPrompt || '',
                 weeklyReportPrompt: parsed.weeklyReportPrompt || '',
-                theme: parsed.theme === 'graphite'
-                    ? 'liquidglass'
+                theme: ['graphite', 'liquidglass'].includes(parsed.theme)
+                    ? 'frosted'
                     : (parsed.theme || 'auto'),
                 markdownEditor: parsed.markdownEditor || 'vditor',
                 reduceAnimations: parsed.reduceAnimations === true,
@@ -212,7 +212,7 @@ function createSettingsStore() {
                     forest: '#ecfdf5',
                     sunset: '#fff7ed',
                     rose: '#fff1f2',
-                    liquidglass: '#eef4ff'
+                    frosted: '#eef4ff'
                 };
                 metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
             }

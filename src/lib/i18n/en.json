@@ -516,7 +516,7 @@
     "sync_worklog_confirm": "Overtime and leave records will be removed from the task data and uploaded separately with an account key derived from the master password. Tasks keep syncing as before. Enable?",
     "reduce_animations": "Reduce animations",
     "reduce_animations_desc": "Disable modal, card and dropdown animations on low-performance devices",
-    "theme_liquidglass": "Liquid Glass"
+    "theme_frosted": "Frosted Glass"
   },
   "ai": {
     "loading": "Thinking...",

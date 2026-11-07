@@ -288,8 +288,8 @@
 </script>
 
 <div class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800 safe-area-container relative" data-glass-root>
-    {#if $settingsStore.theme === 'liquidglass'}
-        <img class="glass-wallpaper" src="/glass-wallpaper.svg" alt="" aria-hidden="true" />
+    {#if $settingsStore.theme === 'frosted'}
+        <img class="frosted-wallpaper" src="/frosted-wallpaper.svg" alt="" aria-hidden="true" />
     {/if}
     {#if needsAgreement}
         <AgreementModal isFirstTime={true} />

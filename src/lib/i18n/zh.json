@@ -516,7 +516,7 @@
     "sync_worklog_confirm": "加班和请假记录会从任务数据中移出，单独用主密码派生的账户密钥加密上传。任务本身仍按原方式同步。确定开启吗？",
     "reduce_animations": "减少动画",
     "reduce_animations_desc": "关闭模态框、卡片切换和下拉菜单的动画，适合低性能设备",
-    "theme_liquidglass": "液态玻璃"
+    "theme_frosted": "磨砂玻璃"
   },
   "ai": {
     "loading": "思考中...",
