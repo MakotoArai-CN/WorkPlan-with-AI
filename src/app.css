@@ -65,17 +65,16 @@
 }
 
 /*
- * Liquid Glass theme — a *light* theme. Apple's liquid glass is a bright,
- * luminous material: a vivid wallpaper blurred through frosted white panels.
- * Treating it as a dark theme is what made it read as "just another black
- * theme", because `.dark` turns every Tailwind `dark:bg-slate-800` on.
+ * Frosted glass theme.
  *
- * Reference: https://github.com/ybouane/liquidglass (refraction / chromatic
- * fringe / fresnel rim / specular). The optical stack is composited with CSS
- * instead of a WebGL DOM raster: one shared pointer light, heavy blur, white
- * fresnel rims and a two-tone fringe on every panel edge.
+ * This is composited glass, not ray-marched liquid glass: frosted translucent
+ * panels over a soft wallpaper, with a fresnel rim, a two-tone chromatic edge
+ * and a pointer-following specular. The real WebGL refraction library
+ * (@ybouane/liquidglass) was evaluated and rejected for the app shell — two
+ * panels measured 1-3 fps because it re-rasterises the panel DOM every frame,
+ * so it is only a fit for static showcase surfaces.
  */
-:root[data-theme="liquidglass"] {
+:root[data-theme="frosted"] {
     --app-bg: #eaf1ff;
     --app-surface: rgba(255, 255, 255, 0.56);
     --app-surface-soft: rgba(255, 255, 255, 0.42);
@@ -99,12 +98,12 @@
         rgba(180, 220, 255, 0.28) 100%
     );
     --glass-blur: blur(34px) saturate(2.3) brightness(1.08);
-    --glass-pointer-x: 30%;
-    --glass-pointer-y: 10%;
+    --frosted-pointer-x: 30%;
+    --frosted-pointer-y: 10%;
 }
 
 /* Vivid wallpaper. Bright enough that the frosted panels actually refract it. */
-:root[data-theme="liquidglass"] body {
+:root[data-theme="frosted"] body {
     background-color: #eef4ff !important;
     background-image:
         radial-gradient(46vw 40vw at 10% 6%, rgba(96, 165, 250, 0.85), transparent 62%),
@@ -116,11 +115,11 @@
     background-attachment: fixed;
     background-repeat: no-repeat;
     background-size: 120% 120%, 120% 120%, 130% 130%, 130% 130%, 120% 120%, 100% 100%;
-    animation: liquidglass-drift 44s ease-in-out infinite alternate;
+    animation: frosted-drift 44s ease-in-out infinite alternate;
     color: var(--app-text);
 }
 
-@keyframes liquidglass-drift {
+@keyframes frosted-drift {
     from {
         background-position: 0% 0%, 100% 0%, 70% 100%, 10% 90%, 50% 50%, 0 0;
     }
@@ -130,7 +129,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    :root[data-theme="liquidglass"] body {
+    :root[data-theme="frosted"] body {
         animation: none;
     }
 }
@@ -138,14 +137,14 @@
 /* Frosted glass on every surface that used to be a solid card. Attribute
    selectors are needed because Tailwind emits `dark:`/`hover:` variants whose
    specificity beats a plain class rule. */
-:root[data-theme="liquidglass"] [class*="bg-white"],
-:root[data-theme="liquidglass"] [class*="bg-slate-50"],
-:root[data-theme="liquidglass"] [class*="bg-slate-100"],
-:root[data-theme="liquidglass"] [class*="bg-slate-200"] {
+:root[data-theme="frosted"] [class*="bg-white"],
+:root[data-theme="frosted"] [class*="bg-slate-50"],
+:root[data-theme="frosted"] [class*="bg-slate-100"],
+:root[data-theme="frosted"] [class*="bg-slate-200"] {
     background-color: rgba(255, 255, 255, 0.2) !important;
     background-image:
         radial-gradient(
-            460px circle at var(--glass-pointer-x) var(--glass-pointer-y),
+            460px circle at var(--frosted-pointer-x) var(--frosted-pointer-y),
             rgba(255, 255, 255, 0.6),
             transparent 62%
         ),
@@ -163,8 +162,8 @@
 }
 
 /* The app shell must stay transparent, otherwise the wallpaper disappears. */
-:root[data-theme="liquidglass"] body > div [class*="bg-slate-50"].h-screen,
-:root[data-theme="liquidglass"] .bg-slate-50.h-screen {
+:root[data-theme="frosted"] body > div [class*="bg-slate-50"].h-screen,
+:root[data-theme="frosted"] .bg-slate-50.h-screen {
     background-color: transparent !important;
     background-image: none !important;
     -webkit-backdrop-filter: none;
@@ -172,26 +171,26 @@
     box-shadow: none;
 }
 
-:root[data-theme="liquidglass"] .border-slate-200,
-:root[data-theme="liquidglass"] .border-slate-100,
-:root[data-theme="liquidglass"] .border-slate-300,
-:root[data-theme="liquidglass"] [class*="border-slate-"] {
+:root[data-theme="frosted"] .border-slate-200,
+:root[data-theme="frosted"] .border-slate-100,
+:root[data-theme="frosted"] .border-slate-300,
+:root[data-theme="frosted"] [class*="border-slate-"] {
     border-color: rgba(255, 255, 255, 0.72) !important;
 }
 
-:root[data-theme="liquidglass"] .shadow-sm,
-:root[data-theme="liquidglass"] .shadow-md,
-:root[data-theme="liquidglass"] .shadow-lg,
-:root[data-theme="liquidglass"] .shadow-xl {
+:root[data-theme="frosted"] .shadow-sm,
+:root[data-theme="frosted"] .shadow-md,
+:root[data-theme="frosted"] .shadow-lg,
+:root[data-theme="frosted"] .shadow-xl {
     box-shadow:
         0 20px 46px rgba(64, 102, 168, 0.16),
         inset 0 1px 0 rgba(255, 255, 255, 0.95),
         inset 0 -1px 0 rgba(150, 190, 255, 0.35) !important;
 }
 
-:root[data-theme="liquidglass"] input,
-:root[data-theme="liquidglass"] textarea,
-:root[data-theme="liquidglass"] select {
+:root[data-theme="frosted"] input,
+:root[data-theme="frosted"] textarea,
+:root[data-theme="frosted"] select {
     background-color: rgba(255, 255, 255, 0.66) !important;
     -webkit-backdrop-filter: blur(16px) saturate(1.6);
     backdrop-filter: blur(16px) saturate(1.6);
@@ -200,43 +199,43 @@
     color: var(--app-text) !important;
 }
 
-:root[data-theme="liquidglass"] input:focus,
-:root[data-theme="liquidglass"] textarea:focus,
-:root[data-theme="liquidglass"] select:focus {
+:root[data-theme="frosted"] input:focus,
+:root[data-theme="frosted"] textarea:focus,
+:root[data-theme="frosted"] select:focus {
     border-color: rgba(96, 165, 250, 0.7) !important;
     box-shadow:
         0 0 0 3px rgba(96, 165, 250, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
-:root[data-theme="liquidglass"] ::selection {
+:root[data-theme="frosted"] ::selection {
     background: rgba(96, 165, 250, 0.28);
     color: #08131f;
 }
 
-:root[data-theme="liquidglass"] ::-webkit-scrollbar {
+:root[data-theme="frosted"] ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
 }
 
-:root[data-theme="liquidglass"] ::-webkit-scrollbar-track {
+:root[data-theme="frosted"] ::-webkit-scrollbar-track {
     background: transparent;
 }
 
-:root[data-theme="liquidglass"] ::-webkit-scrollbar-thumb {
+:root[data-theme="frosted"] ::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.75);
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: content-box;
 }
 
-:root[data-theme="liquidglass"] ::-webkit-scrollbar-thumb:hover {
+:root[data-theme="frosted"] ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.95);
     background-clip: content-box;
 }
 
 /* Liquid glass wallpaper layer */
-.glass-wallpaper {
+.frosted-wallpaper {
     position: absolute;
     inset: 0;
     width: 100%;
