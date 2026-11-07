@@ -16,7 +16,7 @@ provides=('workplan')
 conflicts=('workplan')
 options=(!strip)
 source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/WorkPlan_${pkgver}_linux-x86_64.tar.gz")
-sha256sums=('cfa0e1bc463c1426e52450271094b05665850328165953f19dc6ca36bb112452')
+sha256sums=('7bde8118851c0f6846f6f4656b1a0ab72634f55bc8622eb46307243e9c7c4e8e')
 
 package() {
     install -Dm755 "${srcdir}/WorkPlan-linux-x86_64/workplan" "${pkgdir}/usr/bin/workplan"
