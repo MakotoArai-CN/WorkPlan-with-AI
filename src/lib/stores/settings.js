@@ -295,6 +295,13 @@ function createSettingsStore() {
     async function init() {
         if (typeof window === 'undefined') return;
 
+        // getInitialSettings() runs at import time, which is *before*
+        // initLocalDatabase() hydrates the database into localStorage. Without
+        // this re-read the store keeps the pre-hydration defaults: the
+        // agreement modal reappears after every reload and the first save
+        // writes those defaults back over the snapshot.
+        set(getInitialSettings());
+
         const current = get({ subscribe });
         applyTheme(current.theme, { animate: false });
 
