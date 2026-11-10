@@ -1491,7 +1491,8 @@ pub fn run() {
             local_db::local_db_info,
             local_db::local_db_backup,
             local_db::local_db_restore,
-            local_db::local_db_open_folder
+            local_db::local_db_open_folder,
+            local_db::local_db_recover
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
