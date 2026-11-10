@@ -2734,6 +2734,20 @@ async function buildContextualAssistantResponse(userText, assistantContext, conf
         : (assistantContext.items || []);
     const scopedItems = formatContextItemsForAI(contextItems, assistantContext);
     const noteContext = formatNoteContextForAI(assistantContext);
+    // Notes get a dedicated behaviour block: the generic prompt only says
+    // "answer about the current page", which left the model guessing whether to
+    // rewrite, summarise or ask for context.
+    const notesGuidance = assistantContext.scope === 'notes'
+        ? `【工作文档模式】
+- 用户正在处理一篇笔记，请以下方【当前笔记】的标题和正文作为唯一事实来源。
+- 改写 / 润色 / 扩写 / 续写 / 总结 / 提取待办 / 生成大纲时，直接给出可粘贴的 Markdown 结果，不要解释过程。
+- 保持原有结构：列表仍是列表，表格仍是表格，标题层级不跳级。
+- 不要声称已经保存或修改了笔记；需要替换时给出替换后的完整片段。
+- 笔记被锁定或内容为空时如实说明，不要编造内容。
+- 引用原文用 > 引用块，方便用户定位。
+
+`
+        : '';
     const allowActions = options.allowActions ?? true;
 
     const messages = [
@@ -2746,7 +2760,7 @@ ${allowActions
         : '当前 AI 聊天的工具调用能力已关闭。你只能基于现有上下文提供建议、解释、总结或草稿，不能声称已经执行项目修改、本地文件操作或网页搜索。'}
 回答必须准确、克制，不要捏造项目中不存在的数据。
 
-【当前页面】
+${notesGuidance}【当前页面】
 - scope: ${assistantContext.scope}
 - 标题: ${assistantContext.title || 'AI 助手'}
 - 描述: ${assistantContext.description || '无'}
