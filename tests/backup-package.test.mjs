@@ -12,8 +12,8 @@ const payload = {
     capturedAt: '2026-10-29T00:00:00.000Z',
     appVersion: '0.4.2',
     keys: {
-        planpro_tasks_local_cache: JSON.stringify({ tasks: [{ id: '1', title: '机密任务' }] }),
-        planpro_passwords: JSON.stringify([{ title: '邮箱', password: 'encrypted' }])
+        workplan_tasks_local_cache: JSON.stringify({ tasks: [{ id: '1', title: '机密任务' }] }),
+        workplan_passwords: JSON.stringify([{ title: '邮箱', password: 'encrypted' }])
     }
 };
 
@@ -25,7 +25,7 @@ describe('WorkPlan encrypted backup package', () => {
         expect(packageValue.payload).not.toContain('机密任务');
         const opened = await openEncryptedBackup(packageValue, 'correct horse battery');
         expect(opened).toEqual(payload);
-        expect(validateBackupData(opened).planpro_tasks_local_cache).toContain('机密任务');
+        expect(validateBackupData(opened).workplan_tasks_local_cache).toContain('机密任务');
     });
 
     test('rejects the wrong master password', async () => {

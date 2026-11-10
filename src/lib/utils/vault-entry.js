@@ -3,7 +3,7 @@ import CryptoJS from 'crypto-js';
 // One expensive KDF pass per unlock; per-entry encryption is fast AES-CBC/HMAC.
 // WebCrypto PBKDF2 at 600k is both stronger and faster than CryptoJS's repeated
 // 10k-per-field derivation, so viewing/copying a password stays instant.
-const META_KEY = 'planpro_vault_meta';
+const META_KEY = 'workplan_vault_meta';
 const FORMAT = 'v4';
 const ITERATIONS = 600000;
 const SALT_BYTES = 16;

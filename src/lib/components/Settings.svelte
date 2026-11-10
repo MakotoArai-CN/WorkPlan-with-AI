@@ -343,7 +343,7 @@
         };
         const result = await exportToJSON(
             state,
-            `planpro_backup_${new Date().toISOString().split('T')[0]}.json`
+            `workplan_backup_${new Date().toISOString().split('T')[0]}.json`
         );
         if (result?.cancelled) {
             showToast({ message: t('common.cancel'), type: 'info' });

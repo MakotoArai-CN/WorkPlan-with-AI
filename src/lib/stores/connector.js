@@ -7,8 +7,8 @@ import {
 } from '../utils/connector-client.js';
 import { isWebDemo } from '../utils/runtime.js';
 
-const STORAGE_KEY = 'planpro_connector_config';
-const LEGACY_STORAGE_KEY = 'planpro_openclaw_config';
+const STORAGE_KEY = 'workplan_connector_config';
+const LEGACY_STORAGE_KEY = 'workplan_openclaw_config';
 
 function loadConfig() {
     if (typeof window === 'undefined') return getDefaultConnectorConfig();
@@ -17,7 +17,7 @@ function loadConfig() {
         if (raw) {
             return { ...getDefaultConnectorConfig(), ...JSON.parse(raw) };
         }
-        // 兼容旧存档：把早期版本写入 planpro_openclaw_config 的连接配置
+        // 兼容旧存档：把早期版本写入 workplan_openclaw_config 的连接配置
         // 迁移为通用连接器配置（OpenClaw 网关协议已移除，改用 nanobot 预设）。
         const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
         if (legacy) {

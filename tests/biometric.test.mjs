@@ -156,8 +156,8 @@ describe('enabling biometric', () => {
     test('does not store the PIN in cleartext', async () => {
         await enableBiometric(PIN);
         const dump = JSON.stringify([
-            localStorage.getItem('planpro_biometric_pin'),
-            localStorage.getItem('planpro_biometric_enabled')
+            localStorage.getItem('workplan_biometric_pin'),
+            localStorage.getItem('workplan_biometric_enabled')
         ]);
         expect(dump.includes(PIN)).toBe(false);
     });

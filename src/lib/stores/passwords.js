@@ -49,10 +49,10 @@ import {
     disableBiometric
 } from '../utils/device-auth.js';
 
-const STORAGE_KEY = 'planpro_passwords';
-const MASTER_KEY = 'planpro_master_hash';
-const SESSION_KEY = 'planpro_passwords_session';
-const SETTINGS_KEY = 'planpro_passwords_settings';
+const STORAGE_KEY = 'workplan_passwords';
+const MASTER_KEY = 'workplan_master_hash';
+const SESSION_KEY = 'workplan_passwords_session';
+const SETTINGS_KEY = 'workplan_passwords_settings';
 
 function createPasswordsStore() {
     const { subscribe, set, update } = writable({
@@ -759,7 +759,7 @@ function createPasswordsStore() {
             let syncWarning = '';
             try {
                 const accessKey = typeof localStorage !== 'undefined'
-                    ? localStorage.getItem('planpro_access_key')
+                    ? localStorage.getItem('workplan_access_key')
                     : '';
                 if (accessKey) {
                     const { rewrapAccountKey } = await import('../utils/secure-sync-v2.js');

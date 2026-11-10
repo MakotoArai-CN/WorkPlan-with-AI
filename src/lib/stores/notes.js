@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 
-const STORAGE_KEY = 'planpro_notes';
+const STORAGE_KEY = 'workplan_notes';
 
 const DEFAULT_CATEGORIES = ['全部', '工作', '学习', '个人', '想法'];
 

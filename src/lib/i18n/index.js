@@ -1,7 +1,7 @@
 import { register, init, getLocaleFromNavigator, locale } from 'svelte-i18n';
 
 const SUPPORTED = ['zh', 'zh-Hant', 'en', 'ja', 'ko', 'ru'];
-const STORAGE_KEY = 'planpro_locale';
+const STORAGE_KEY = 'workplan_locale';
 
 function deepMerge(base, override) {
     if (Array.isArray(base) || Array.isArray(override)) {

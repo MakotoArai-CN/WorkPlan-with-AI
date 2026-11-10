@@ -20,9 +20,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauriRuntime, isAndroidRuntime } from './runtime.js';
 import { encrypt, decrypt } from './crypto.js';
 
-const PIN_WRAPPER_KEY = 'planpro_pin_wrapper';
-const PIN_ATTEMPTS_KEY = 'planpro_pin_attempts';
-const DEVICE_BINDING_KEY = 'planpro_device_binding';
+const PIN_WRAPPER_KEY = 'workplan_pin_wrapper';
+const PIN_ATTEMPTS_KEY = 'workplan_pin_attempts';
+const DEVICE_BINDING_KEY = 'workplan_device_binding';
 
 export const MAX_PIN_ATTEMPTS = 5;
 export const MIN_PIN_LENGTH = 4;
@@ -142,7 +142,7 @@ export function bindingKeyFromRecoveryCode(recoveryCode) {
     return normalized || null;
 }
 
-const BINDING_ENVELOPE_KEY = 'planpro_binding_envelope';
+const BINDING_ENVELOPE_KEY = 'workplan_binding_envelope';
 
 /** Wrap the binding key under the device key so normal unlock needs no typing. */
 export function storeBindingEnvelope(bindingKey, deviceKey) {
@@ -358,8 +358,8 @@ export async function verifyPin(pin) {
 // macOS, and Linux are unsupported by the plugin, so we gate on isAndroidRuntime.
 // iOS is not enabled here because this app currently builds only Android mobile.
 
-const BIOMETRIC_ENABLED_KEY = 'planpro_biometric_enabled';
-const BIOMETRIC_PIN_KEY = 'planpro_biometric_pin';
+const BIOMETRIC_ENABLED_KEY = 'workplan_biometric_enabled';
+const BIOMETRIC_PIN_KEY = 'workplan_biometric_pin';
 
 /**
  * Is biometric unlock even supported on this build?

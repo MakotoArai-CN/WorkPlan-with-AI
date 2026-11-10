@@ -3,11 +3,11 @@ import { isTauriRuntime } from './runtime.js';
 
 const SNAPSHOT_FORMAT = 'workplan-local-db';
 const SNAPSHOT_VERSION = 1;
-const PREFIX = 'planpro_';
-const MARKER_KEY = 'planpro_db_saved_at';
+const PREFIX = 'workplan_';
+const MARKER_KEY = 'workplan_db_saved_at';
 const HYDRATED_FLAG = 'workplan_db_hydrated_once';
 const HYDRATED_SNAPSHOT = 'workplan_db_hydrated_snapshot';
-const EXCLUDED = new Set(['planpro_passwords_session', MARKER_KEY]);
+const EXCLUDED = new Set(['workplan_passwords_session', MARKER_KEY]);
 
 function readSessionFlag(key) {
     try {
@@ -26,11 +26,11 @@ function writeSessionFlag(key, value) {
 }
 
 function hasWorkingCopy(keys) {
-    if (typeof keys?.planpro_access_key === 'string' && keys.planpro_access_key.trim()) {
+    if (typeof keys?.workplan_access_key === 'string' && keys.workplan_access_key.trim()) {
         return true;
     }
     try {
-        const cache = JSON.parse(keys?.planpro_tasks_local_cache || '{}');
+        const cache = JSON.parse(keys?.workplan_tasks_local_cache || '{}');
         return Array.isArray(cache.tasks) && cache.tasks.length > 0;
     } catch {
         return false;

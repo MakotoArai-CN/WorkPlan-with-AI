@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 
-const STORAGE_KEY = 'planpro_theme_mode';
+const STORAGE_KEY = 'workplan_theme_mode';
 
 function createThemeStore() {
     const { subscribe, set, update } = writable({

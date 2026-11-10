@@ -38,7 +38,7 @@
     }
 
     $: loginStyle = `--login-accent:${loginPalette.accent};--login-on-accent:${loginPalette.onAccent};--login-bg:${loginPalette.bg};--login-card:${loginPalette.card};--login-glow:${loginPalette.glow};--login-border:${loginPalette.border};`;
-    const LOGIN_TIP_KEY = 'planpro_login_tip_index';
+    const LOGIN_TIP_KEY = 'workplan_login_tip_index';
 
     const KEYBOARD_PATTERNS = [
         'qwertyuiop', 'asdfghjkl', 'zxcvbnm',

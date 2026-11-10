@@ -156,15 +156,15 @@ describe('recovery on a new device', () => {
 
     test('recovery survives losing local storage entirely', async () => {
         const { recoveryCode } = await passwordsStore.enableDeviceBinding();
-        const entries = localStorage.getItem('planpro_passwords');
-        const verifier = localStorage.getItem('planpro_master_hash');
+        const entries = localStorage.getItem('workplan_passwords');
+        const verifier = localStorage.getItem('workplan_master_hash');
 
         // Dead drive: the user restores a backup of the vault data and nothing else.
         // No binding envelope, no device-key remnants — only the saved code.
         localStorage.clear();
-        localStorage.setItem('planpro_passwords', entries);
-        localStorage.setItem('planpro_master_hash', verifier);
-        localStorage.setItem('planpro_device_binding', '1');
+        localStorage.setItem('workplan_passwords', entries);
+        localStorage.setItem('workplan_master_hash', verifier);
+        localStorage.setItem('workplan_device_binding', '1');
         currentDeviceKey = 'replacement-machine.install-new';
         clearDeviceKeyCache();
         passwordsStore.clearSessionForTest?.();

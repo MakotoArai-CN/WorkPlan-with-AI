@@ -147,11 +147,11 @@ async function notesSecret() {
     if (!deviceKey) {
         // Browser / web demo has no hardware device key. Use a random seed that
         // never leaves this origin; still device-bound, just not hardware-backed.
-        deviceKey = localStorage.getItem('planpro_notes_sync_seed');
+        deviceKey = localStorage.getItem('workplan_notes_sync_seed');
         if (!deviceKey) {
             const bytes = crypto.getRandomValues(new Uint8Array(32));
             deviceKey = base64FromBytes(bytes);
-            localStorage.setItem('planpro_notes_sync_seed', deviceKey);
+            localStorage.setItem('workplan_notes_sync_seed', deviceKey);
         }
     }
     return deriveSyncSecret('notes', getAccessKey(), deviceKey);

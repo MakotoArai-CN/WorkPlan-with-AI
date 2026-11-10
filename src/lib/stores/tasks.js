@@ -9,7 +9,7 @@ import { clearAccountScopedData, restoreAccountData, stashCurrentAccount } from 
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const DEFAULT_SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
 const DEFAULT_TABLE_NAME = import.meta.env.VITE_SUPABASE_TABLE || 'planpro_data';
-const LOCAL_CACHE_KEY = 'planpro_tasks_local_cache';
+const LOCAL_CACHE_KEY = 'workplan_tasks_local_cache';
 
 let supabase = null;
 let supabaseCacheKey = '';
@@ -30,7 +30,7 @@ function readDatabaseConfig() {
     }
 
     try {
-        const raw = localStorage.getItem('planpro_system_settings');
+        const raw = localStorage.getItem('workplan_system_settings');
         if (!raw) return fallback;
         const parsed = JSON.parse(raw);
         const savedConfig = {
@@ -309,7 +309,7 @@ function createTaskStore() {
     let worklogCloudEncrypted = false;
     if (typeof window !== 'undefined') {
         try {
-            const savedSettings = JSON.parse(localStorage.getItem('planpro_system_settings') || '{}');
+            const savedSettings = JSON.parse(localStorage.getItem('workplan_system_settings') || '{}');
             worklogCloudEncrypted = savedSettings.syncWorklog === true;
         } catch {
             worklogCloudEncrypted = false;
@@ -731,13 +731,13 @@ function createTaskStore() {
         update,
         login: (key) => {
             if (typeof window === 'undefined') return;
-            const previousKey = localStorage.getItem('planpro_access_key');
+            const previousKey = localStorage.getItem('workplan_access_key');
             if (previousKey && previousKey !== key) {
                 stashCurrentAccount(previousKey);
                 clearAccountScopedData();
             }
             if (previousKey !== key) restoreAccountData(key);
-            localStorage.setItem('planpro_access_key', key);
+            localStorage.setItem('workplan_access_key', key);
             // Never show another account's cached tasks.
             try {
                 const raw = localStorage.getItem(LOCAL_CACHE_KEY);
@@ -765,12 +765,12 @@ function createTaskStore() {
         },
         logout: () => {
             if (typeof window === 'undefined') return;
-            const previousKey = localStorage.getItem('planpro_access_key');
+            const previousKey = localStorage.getItem('workplan_access_key');
             if (previousKey) {
                 stashCurrentAccount(previousKey);
                 clearAccountScopedData();
             }
-            localStorage.removeItem('planpro_access_key');
+            localStorage.removeItem('workplan_access_key');
             clearLocalCache();
             localCloudSnapshotStr = '';
             loadState = 'idle';
@@ -783,7 +783,7 @@ function createTaskStore() {
         },
         loadFromLocal: () => {
             if (typeof window === 'undefined') return;
-            const savedKey = localStorage.getItem('planpro_access_key');
+            const savedKey = localStorage.getItem('workplan_access_key');
             if (!savedKey) return;
             const cache = readLocalCache(savedKey);
             localCloudSnapshotStr = cache?.cloudSnapshot || '';
@@ -928,7 +928,7 @@ function createTaskStore() {
                 console.error('Delete error:', e);
             }
             if (typeof window !== 'undefined') {
-                localStorage.removeItem('planpro_access_key');
+                localStorage.removeItem('workplan_access_key');
             }
             clearLocalCache();
             localCloudSnapshotStr = '';

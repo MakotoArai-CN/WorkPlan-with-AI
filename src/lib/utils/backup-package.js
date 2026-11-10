@@ -3,8 +3,8 @@ import { getLocalDatabaseKeys, replaceLocalDatabaseKeys } from './local-db.js';
 const BACKUP_FORMAT = 'workplan-secure-backup';
 const BACKUP_DATA_FORMAT = 'workplan-backup-data';
 const BACKUP_VERSION = 1;
-const BACKUP_PREFIX = 'planpro_';
-const EXCLUDED_KEYS = new Set(['planpro_passwords_session', 'planpro_login_tip_index']);
+const BACKUP_PREFIX = 'workplan_';
+const EXCLUDED_KEYS = new Set(['workplan_passwords_session', 'workplan_login_tip_index']);
 // Binds the package to this application. It is combined with the user's backup
 // password before PBKDF2, so a raw JSON dump cannot be opened by another app.
 const APPLICATION_SECRET = 'WorkPlan::LocalVault::Backup::v1';
