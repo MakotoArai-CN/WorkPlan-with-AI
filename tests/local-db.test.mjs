@@ -17,9 +17,11 @@ globalThis.window = globalThis;
 
 let dbContent = null;
 let writes = [];
+let recoverContent = null;
 mock.module('@tauri-apps/api/core', () => ({
     invoke: async (cmd, args) => {
         if (cmd === 'local_db_load') return dbContent;
+        if (cmd === 'local_db_recover') return recoverContent;
         if (cmd === 'local_db_save') {
             dbContent = args.content;
             writes.push(JSON.parse(args.content));
@@ -38,6 +40,7 @@ beforeEach(() => {
     sessionStorage.clear();
     dbContent = null;
     writes = [];
+    recoverContent = null;
 });
 
 describe('home-directory local database', () => {
@@ -154,6 +157,93 @@ describe('home-directory local database', () => {
         await flushLocalDatabase();
         expect(writes.length).toBe(before + 1);
         expect(writes.at(-1).keys.workplan_access_key).toBe('fresh-login');
+    });
+
+    test('a legacy planpro_ snapshot hydrates into workplan_ keys', async () => {
+        // Regression: after the key rename, the old snapshot was filtered out
+        // by the prefix check and the account vanished behind the login screen.
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 777,
+            keys: {
+                planpro_access_key: 'user_legacy',
+                planpro_notes: '[{"id":"n1","title":"旧笔记"}]',
+                planpro_system_settings: '{"theme":"dark"}'
+            }
+        });
+        const first = await initLocalDatabase();
+        expect(first.reloaded).toBe(true);
+        expect(localStorage.getItem('workplan_access_key')).toBe('user_legacy');
+        expect(localStorage.getItem('workplan_notes')).toContain('旧笔记');
+        expect(localStorage.getItem('planpro_access_key')).toBeNull();
+        // Next boot must not loop: the normalised keys are a working copy.
+        const second = await initLocalDatabase();
+        expect(second.reloaded).toBe(false);
+        expect(localStorage.getItem('workplan_access_key')).toBe('user_legacy');
+    });
+
+    test('new workplan_ keys win over legacy planpro_ keys in one snapshot', async () => {
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 888,
+            keys: {
+                planpro_access_key: 'old_account',
+                workplan_access_key: 'current_account'
+            }
+        });
+        await initLocalDatabase();
+        expect(localStorage.getItem('workplan_access_key')).toBe('current_account');
+    });
+
+    test('recovers the account from a backup when the live snapshot is empty', async () => {
+        // Only incidental keys survived the buggy flush.
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 999,
+            keys: {
+                workplan_login_tip_index: '3',
+                workplan_connector_config: '{}'
+            }
+        });
+        recoverContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 500,
+            keys: {
+                planpro_access_key: 'recovered_account',
+                planpro_tasks_local_cache: '{"accessKey":"recovered_account","tasks":[]}',
+                planpro_notes: '[{"id":"n2"}]'
+            }
+        });
+        const result = await initLocalDatabase();
+        expect(result.reloaded).toBe(true);
+        expect(localStorage.getItem('workplan_access_key')).toBe('recovered_account');
+        expect(localStorage.getItem('workplan_notes')).toContain('n2');
+    });
+
+    test('a deliberate logout is not overwritten by backup recovery', async () => {
+        // Logged-out snapshots still hold stashed account data, so they count
+        // as business data and must not trigger a resurrection of the account.
+        dbContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 1000,
+            keys: {
+                workplan_system_settings: '{"theme":"auto"}',
+                'workplan_account_stash::old_key': '{"version":1,"keys":{}}'
+            }
+        });
+        recoverContent = JSON.stringify({
+            format: 'workplan-local-db',
+            version: 1,
+            savedAt: 400,
+            keys: { planpro_access_key: 'should_not_come_back' }
+        });
+        await initLocalDatabase();
+        expect(localStorage.getItem('workplan_access_key')).toBeNull();
     });
 
     test('memory mode backup includes notes that are no longer in WebView storage', async () => {

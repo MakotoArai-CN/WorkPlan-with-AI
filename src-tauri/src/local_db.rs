@@ -166,12 +166,41 @@ pub fn local_db_load() -> Result<Option<String>, String> {
     Ok(None)
 }
 
+/// If a save would replace a snapshot that had an account with one that has
+/// none, keep a copy outside the rotating backup directory. This protects any
+/// user from a bad flush (a rename bug once did exactly that).
+fn protect_account_snapshot(db: &sled::Db, next: &str) -> Result<(), String> {
+    fn has_access_key(json: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+            return false;
+        };
+        value
+            .get("keys")
+            .and_then(|keys| keys.as_object())
+            .map(|keys| keys.keys().any(|key| key.ends_with("access_key")))
+            .unwrap_or(false)
+    }
+
+    let Some(blob) = db.get(SNAPSHOT_KEY).map_err(|e| e.to_string())? else {
+        return Ok(());
+    };
+    let Ok(previous) = open_json(blob.as_ref()) else {
+        return Ok(());
+    };
+    if has_access_key(&previous) && !has_access_key(next) {
+        fs::write(root_dir()?.join("account-recovery.wpb"), blob.as_ref())
+            .map_err(|e| format!("创建账号保护快照失败: {e}"))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn local_db_save(content: String) -> Result<LocalDbInfo, String> {
     if content.len() > 64 * 1024 * 1024 {
         return Err("本地数据库超过 64MB，已拒绝写入".to_string());
     }
     let db = open_db()?;
+    protect_account_snapshot(&db, &content)?;
     backup_blob(&db)?;
     let sealed = seal_json(&content)?;
     db.insert(SNAPSHOT_KEY, sealed).map_err(|e| format!("写入数据库失败: {e}"))?;
@@ -179,6 +208,61 @@ pub fn local_db_save(content: String) -> Result<LocalDbInfo, String> {
     db.flush().map_err(|e| format!("刷新数据库失败: {e}"))?;
     let _ = fs::rename(legacy_path()?, root_dir()?.join("data.legacy.json"));
     local_db_info()
+}
+
+/// Recovery for the `planpro_` → `workplan_` rename: the JS mirror briefly
+/// flushed a snapshot containing only incidental keys, hiding the account
+/// while the previous good snapshot was still in `backups/`. Prefer the stable
+/// protected copy (backups rotate), then scan backups newest-first.
+#[tauri::command]
+pub fn local_db_recover() -> Result<Option<String>, String> {
+    fn has_account(json: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+            return false;
+        };
+        value
+            .get("keys")
+            .and_then(|keys| keys.as_object())
+            .map(|keys| {
+                keys.keys().any(|key| {
+                    key.ends_with("access_key") || key.contains("account_stash")
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    let protected = root_dir()?.join("account-recovery.wpb");
+    if let Ok(blob) = fs::read(&protected) {
+        if let Ok(json) = open_json(&blob) {
+            if has_account(&json) {
+                return Ok(Some(json));
+            }
+        }
+    }
+
+    let dir = backup_dir()?;
+    let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().map(|ext| ext == "wpb").unwrap_or(false))
+        .collect();
+    files.sort_by_key(|path| {
+        std::cmp::Reverse(
+            fs::metadata(path)
+                .and_then(|meta| meta.modified())
+                .unwrap_or(UNIX_EPOCH),
+        )
+    });
+
+    for path in files {
+        let Ok(blob) = fs::read(&path) else { continue };
+        let Ok(json) = open_json(&blob) else { continue };
+        if has_account(&json) {
+            return Ok(Some(json));
+        }
+    }
+    Ok(None)
 }
 
 #[tauri::command]

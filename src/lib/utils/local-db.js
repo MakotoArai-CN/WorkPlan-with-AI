@@ -7,7 +7,47 @@ const PREFIX = 'workplan_';
 const MARKER_KEY = 'workplan_db_saved_at';
 const HYDRATED_FLAG = 'workplan_db_hydrated_once';
 const HYDRATED_SNAPSHOT = 'workplan_db_hydrated_snapshot';
+const LEGACY_PREFIX = 'planpro_';
 const EXCLUDED = new Set(['workplan_passwords_session', MARKER_KEY]);
+
+/**
+ * Older builds persisted every key under `planpro_`. A snapshot written by
+ * those builds must still hydrate into the current `workplan_` namespace;
+ * dropping the legacy keys here is what emptied the account after the rename.
+ */
+function normalizeKey(key) {
+    return key.startsWith(LEGACY_PREFIX) ? PREFIX + key.slice(LEGACY_PREFIX.length) : key;
+}
+
+function normalizeKeys(keys) {
+    const result = {};
+    const source = keys && typeof keys === 'object' ? keys : {};
+    // New keys win over legacy ones, but legacy keys fill any gap.
+    for (const [key, value] of Object.entries(source)) {
+        if (typeof value !== 'string') continue;
+        const target = normalizeKey(key);
+        if (!target.startsWith(PREFIX) || EXCLUDED.has(target)) continue;
+        if (key.startsWith(LEGACY_PREFIX) && result[target] !== undefined) continue;
+        result[target] = value;
+    }
+    return result;
+}
+
+/** Business data that must never be silently replaced by an empty snapshot. */
+function hasBusinessData(keys) {
+    const normalized = normalizeKeys(keys);
+    return Object.keys(normalized).some((key) => (
+        key === 'workplan_access_key'
+        || key.startsWith('workplan_account_stash::')
+        || key === 'workplan_notes'
+        || key === 'workplan_passwords'
+        || key === 'workplan_tasks_local_cache'
+        || key === 'workplan_ai_chat_history'
+        || key === 'workplan_ai_chat_sessions'
+        || key === 'workplan_vault_meta'
+        || key === 'workplan_master_hash'
+    ));
+}
 
 function readSessionFlag(key) {
     try {
@@ -26,11 +66,12 @@ function writeSessionFlag(key, value) {
 }
 
 function hasWorkingCopy(keys) {
-    if (typeof keys?.workplan_access_key === 'string' && keys.workplan_access_key.trim()) {
+    const normalized = normalizeKeys(keys);
+    if (typeof normalized.workplan_access_key === 'string' && normalized.workplan_access_key.trim()) {
         return true;
     }
     try {
-        const cache = JSON.parse(keys?.workplan_tasks_local_cache || '{}');
+        const cache = JSON.parse(normalized.workplan_tasks_local_cache || '{}');
         return Array.isArray(cache.tasks) && cache.tasks.length > 0;
     } catch {
         return false;
@@ -73,23 +114,23 @@ function enqueueSave(keysProvider = collectKeys) {
 }
 
 function collectKeys() {
-    if (memoryMode) return Object.fromEntries(memoryKeys.entries());
+    if (memoryMode) return normalizeKeys(Object.fromEntries(memoryKeys.entries()));
     const keys = {};
     if (typeof localStorage === 'undefined') return keys;
     for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
-        if (!key || !key.startsWith(PREFIX) || EXCLUDED.has(key)) continue;
+        if (!key || (!key.startsWith(PREFIX) && !key.startsWith(LEGACY_PREFIX))) continue;
+        const normalized = normalizeKey(key);
+        if (EXCLUDED.has(normalized)) continue;
         const value = localStorage.getItem(key);
-        if (typeof value === 'string') keys[key] = value;
+        if (typeof value === 'string') keys[normalized] = value;
     }
     return keys;
 }
 
 function applyKeys(keys) {
     if (!keys || typeof keys !== 'object') return 0;
-    const allowed = Object.entries(keys).filter(
-        ([key, value]) => key.startsWith(PREFIX) && !EXCLUDED.has(key) && typeof value === 'string'
-    );
+    const allowed = Object.entries(normalizeKeys(keys));
     // Count only keys that actually changed. A repeat pass over an already
     // applied snapshot must report 0, otherwise the caller reloads forever.
     let changed = 0;
@@ -192,7 +233,7 @@ async function activateMemoryStorage() {
     const keys = [];
     for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
-        if (key && key.startsWith(PREFIX) && !EXCLUDED.has(key)) keys.push(key);
+        if (key && (key.startsWith(PREFIX) || key.startsWith(LEGACY_PREFIX))) keys.push(key);
     }
     for (const key of keys) localStorage.removeItem(key);
     return true;
@@ -258,10 +299,25 @@ export async function initLocalDatabase() {
     if (!isTauriRuntime) return { supported: false, migrated: false, reloaded: false };
     hydrating = true;
     try {
-        const raw = await invoke('local_db_load');
+        let raw = await invoke('local_db_load');
+        let snapshot = readSnapshot(raw);
+        // A rename bug once flushed only incidental keys over a good snapshot.
+        // If the current snapshot has no business data but a backup still has
+        // an account, restore that backup instead of accepting the empty state.
+        if (!snapshot || !hasBusinessData(snapshot.keys)) {
+            try {
+                const recovered = await invoke('local_db_recover');
+                const recoveredSnapshot = readSnapshot(recovered);
+                if (recoveredSnapshot && hasBusinessData(recoveredSnapshot.keys)) {
+                    snapshot = recoveredSnapshot;
+                    raw = recovered;
+                }
+            } catch (error) {
+                console.warn('[LocalDB] backup recovery failed:', error);
+            }
+        }
         const localKeys = collectKeys();
         const hasLocal = hasWorkingCopy(localKeys);
-        const snapshot = readSnapshot(raw);
         if (!snapshot) {
             dbAuthoritative = true;
             if (hasLocal) {
