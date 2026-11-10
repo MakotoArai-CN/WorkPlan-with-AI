@@ -42,14 +42,14 @@ beforeEach(() => {
 
 describe('home-directory local database', () => {
     test('migrates existing localStorage into the database on first boot', async () => {
-        localStorage.setItem('planpro_access_key', 'abc');
-        localStorage.setItem('planpro_notes', '[]');
+        localStorage.setItem('workplan_access_key', 'abc');
+        localStorage.setItem('workplan_notes', '[]');
         const result = await initLocalDatabase();
         expect(result.migrated).toBe(true);
         expect(writes.length).toBe(1);
         expect(writes[0].format).toBe('workplan-local-db');
-        expect(writes[0].keys.planpro_access_key).toBe('abc');
-        expect(localStorage.getItem('planpro_db_saved_at')).toBeTruthy();
+        expect(writes[0].keys.workplan_access_key).toBe('abc');
+        expect(localStorage.getItem('workplan_db_saved_at')).toBeTruthy();
     });
 
     test('hydrates an empty local storage from the database and requests one reload', async () => {
@@ -57,12 +57,12 @@ describe('home-directory local database', () => {
             format: 'workplan-local-db',
             version: 1,
             savedAt: 123456,
-            keys: { planpro_access_key: 'restored', planpro_notes: '[{"id":"n1"}]' }
+            keys: { workplan_access_key: 'restored', workplan_notes: '[{"id":"n1"}]' }
         });
         const result = await initLocalDatabase();
         expect(result.reloaded).toBe(true);
-        expect(localStorage.getItem('planpro_access_key')).toBe('restored');
-        expect(localStorage.getItem('planpro_notes')).toContain('n1');
+        expect(localStorage.getItem('workplan_access_key')).toBe('restored');
+        expect(localStorage.getItem('workplan_notes')).toContain('n1');
     });
 
     test('a lone incidental key does not block database hydration', async () => {
@@ -71,15 +71,15 @@ describe('home-directory local database', () => {
             version: 1,
             savedAt: 123456,
             keys: {
-                planpro_access_key: 'from-db',
-                planpro_tasks_local_cache: '{"tasks":[{"id":"db-task"}]}'
+                workplan_access_key: 'from-db',
+                workplan_tasks_local_cache: '{"tasks":[{"id":"db-task"}]}'
             }
         });
-        localStorage.setItem('planpro_connector_config', '{"enabled":false}');
+        localStorage.setItem('workplan_connector_config', '{"enabled":false}');
         const result = await initLocalDatabase();
         expect(result.reloaded).toBe(true);
-        expect(localStorage.getItem('planpro_access_key')).toBe('from-db');
-        expect(localStorage.getItem('planpro_tasks_local_cache')).toContain('db-task');
+        expect(localStorage.getItem('workplan_access_key')).toBe('from-db');
+        expect(localStorage.getItem('workplan_tasks_local_cache')).toContain('db-task');
     });
 
     test('never overwrites a non-empty WebView working copy with a newer DB timestamp', async () => {
@@ -87,13 +87,13 @@ describe('home-directory local database', () => {
             format: 'workplan-local-db',
             version: 1,
             savedAt: 999999,
-            keys: { planpro_access_key: 'from-db' }
+            keys: { workplan_access_key: 'from-db' }
         });
-        localStorage.setItem('planpro_db_saved_at', '1');
-        localStorage.setItem('planpro_access_key', 'local-current');
+        localStorage.setItem('workplan_db_saved_at', '1');
+        localStorage.setItem('workplan_access_key', 'local-current');
         const result = await initLocalDatabase();
         expect(result.reloaded).toBe(false);
-        expect(localStorage.getItem('planpro_access_key')).toBe('local-current');
+        expect(localStorage.getItem('workplan_access_key')).toBe('local-current');
     });
 
     test('does not rehydrate repeatedly after the marker matches', async () => {
@@ -101,13 +101,13 @@ describe('home-directory local database', () => {
             format: 'workplan-local-db',
             version: 1,
             savedAt: 123456,
-            keys: { planpro_access_key: 'restored' }
+            keys: { workplan_access_key: 'restored' }
         });
-        localStorage.setItem('planpro_db_saved_at', '123456');
-        localStorage.setItem('planpro_access_key', 'local-newer');
+        localStorage.setItem('workplan_db_saved_at', '123456');
+        localStorage.setItem('workplan_access_key', 'local-newer');
         const result = await initLocalDatabase();
         expect(result.reloaded).toBe(false);
-        expect(localStorage.getItem('planpro_access_key')).toBe('local-newer');
+        expect(localStorage.getItem('workplan_access_key')).toBe('local-newer');
     });
 
     test('logged-out snapshot without an access key does not reload on every boot', async () => {
@@ -120,8 +120,8 @@ describe('home-directory local database', () => {
             version: 1,
             savedAt: 111,
             keys: {
-                planpro_system_settings: '{"theme":"dark"}',
-                'planpro_account_stash::old': '{"version":1,"keys":{}}'
+                workplan_system_settings: '{"theme":"dark"}',
+                'workplan_account_stash::old': '{"version":1,"keys":{}}'
             }
         });
         const first = await initLocalDatabase();
@@ -135,12 +135,12 @@ describe('home-directory local database', () => {
     test('an already-applied snapshot reports zero changes even without a session flag', async () => {
         localStorage.clear();
         sessionStorage.clear();
-        localStorage.setItem('planpro_system_settings', '{"theme":"dark"}');
+        localStorage.setItem('workplan_system_settings', '{"theme":"dark"}');
         dbContent = JSON.stringify({
             format: 'workplan-local-db',
             version: 1,
             savedAt: 222,
-            keys: { planpro_system_settings: '{"theme":"dark"}' }
+            keys: { workplan_system_settings: '{"theme":"dark"}' }
         });
         const result = await initLocalDatabase();
         expect(result.reloaded).toBe(false);
@@ -149,11 +149,11 @@ describe('home-directory local database', () => {
 
     test('flushing persists a fresh access key instead of waiting for the debounce', async () => {
         // Mirrors the login flow: write the key, flush, then reload.
-        localStorage.setItem('planpro_access_key', 'fresh-login');
+        localStorage.setItem('workplan_access_key', 'fresh-login');
         const before = writes.length;
         await flushLocalDatabase();
         expect(writes.length).toBe(before + 1);
-        expect(writes.at(-1).keys.planpro_access_key).toBe('fresh-login');
+        expect(writes.at(-1).keys.workplan_access_key).toBe('fresh-login');
     });
 
     test('memory mode backup includes notes that are no longer in WebView storage', async () => {
@@ -161,14 +161,14 @@ describe('home-directory local database', () => {
         sessionStorage.clear();
         dbContent = null;
         writes = [];
-        localStorage.setItem('planpro_access_key', 'memory-backup');
-        localStorage.setItem('planpro_notes', JSON.stringify([{ id: 'n1', title: '内存笔记', content: 'secret' }]));
+        localStorage.setItem('workplan_access_key', 'memory-backup');
+        localStorage.setItem('workplan_notes', JSON.stringify([{ id: 'n1', title: '内存笔记', content: 'secret' }]));
         const migrated = await initLocalDatabase();
         expect(migrated.migrated).toBe(true);
         await installLocalDatabaseMirror();
-        expect(localStorage.getItem('planpro_notes')).toBeNull();
+        expect(localStorage.getItem('workplan_notes')).toBeNull();
         const payload = collectLocalBackupPayload();
-        expect(payload.keys.planpro_notes).toContain('内存笔记');
-        expect(payload.keys.planpro_access_key).toBe('memory-backup');
+        expect(payload.keys.workplan_notes).toContain('内存笔记');
+        expect(payload.keys.workplan_access_key).toBe('memory-backup');
     });
 });

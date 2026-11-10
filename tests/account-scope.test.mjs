@@ -25,10 +25,10 @@ describe('account-scoped local data', () => {
     });
 
     test('stashes notes/passwords/worklog and clears them from the live account', () => {
-        localStorage.setItem('planpro_access_key', 'account-a');
-        localStorage.setItem('planpro_notes', '[{"id":"n1"}]');
-        localStorage.setItem('planpro_passwords', '[{"id":"p1"}]');
-        localStorage.setItem('planpro_system_settings', JSON.stringify({
+        localStorage.setItem('workplan_access_key', 'account-a');
+        localStorage.setItem('workplan_notes', '[{"id":"n1"}]');
+        localStorage.setItem('workplan_passwords', '[{"id":"p1"}]');
+        localStorage.setItem('workplan_system_settings', JSON.stringify({
             theme: 'light',
             overtimeConfig: { salaryActuals: [{ amount: 4313 }] }
         }));
@@ -36,25 +36,25 @@ describe('account-scoped local data', () => {
         stashCurrentAccount('account-a');
         clearAccountScopedData();
 
-        expect(localStorage.getItem('planpro_notes')).toBeNull();
-        expect(localStorage.getItem('planpro_passwords')).toBeNull();
-        const settings = JSON.parse(localStorage.getItem('planpro_system_settings'));
+        expect(localStorage.getItem('workplan_notes')).toBeNull();
+        expect(localStorage.getItem('workplan_passwords')).toBeNull();
+        const settings = JSON.parse(localStorage.getItem('workplan_system_settings'));
         expect(settings.theme).toBe('light');
         expect(settings.overtimeConfig).toBeUndefined();
 
         restoreAccountData('account-a');
-        expect(localStorage.getItem('planpro_notes')).toContain('n1');
-        expect(localStorage.getItem('planpro_passwords')).toContain('p1');
-        const restored = JSON.parse(localStorage.getItem('planpro_system_settings'));
+        expect(localStorage.getItem('workplan_notes')).toContain('n1');
+        expect(localStorage.getItem('workplan_passwords')).toContain('p1');
+        const restored = JSON.parse(localStorage.getItem('workplan_system_settings'));
         expect(restored.overtimeConfig.salaryActuals[0].amount).toBe(4313);
     });
 
     test('a new account with no stash starts with empty scoped data', () => {
-        localStorage.setItem('planpro_access_key', 'account-a');
-        localStorage.setItem('planpro_notes', '[{"id":"old"}]');
+        localStorage.setItem('workplan_access_key', 'account-a');
+        localStorage.setItem('workplan_notes', '[{"id":"old"}]');
         stashCurrentAccount('account-a');
         clearAccountScopedData();
         expect(restoreAccountData('account-b')).toBe(false);
-        expect(localStorage.getItem('planpro_notes')).toBeNull();
+        expect(localStorage.getItem('workplan_notes')).toBeNull();
     });
 });

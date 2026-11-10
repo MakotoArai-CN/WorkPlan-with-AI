@@ -44,7 +44,7 @@ describe('v4 vault at rest', () => {
     });
 
     test('encrypts metadata and password, never plaintext titles', async () => {
-        const raw = JSON.parse(localStorage.getItem('planpro_passwords'));
+        const raw = JSON.parse(localStorage.getItem('workplan_passwords'));
         expect(raw[0].title).toBeUndefined();
         expect(raw[0].username).toBeUndefined();
         expect(raw[0].notes).toBeUndefined();
@@ -71,8 +71,8 @@ describe('legacy vault migration', () => {
         localStorage.clear();
         sessionStorage.clear();
         passwordsStore.clearAll();
-        localStorage.setItem('planpro_master_hash', await hashPassword(MASTER));
-        localStorage.setItem('planpro_passwords', JSON.stringify([{
+        localStorage.setItem('workplan_master_hash', await hashPassword(MASTER));
+        localStorage.setItem('workplan_passwords', JSON.stringify([{
             id: 'legacy-1',
             title: 'Legacy GitHub',
             username: 'old-user',
@@ -92,7 +92,7 @@ describe('legacy vault migration', () => {
         expect(passwordsStore.decryptPassword(entry.password)).toBe('legacy-secret');
 
         await flush();
-        const raw = JSON.parse(localStorage.getItem('planpro_passwords'));
+        const raw = JSON.parse(localStorage.getItem('workplan_passwords'));
         expect(raw[0].meta.startsWith('v4:')).toBe(true);
         expect(raw[0].password.startsWith('v4:')).toBe(true);
         expect(raw[0].title).toBeUndefined();

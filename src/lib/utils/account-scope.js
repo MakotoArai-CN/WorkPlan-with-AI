@@ -1,26 +1,26 @@
-const STASH_PREFIX = 'planpro_account_stash::';
+const STASH_PREFIX = 'workplan_account_stash::';
 const SCOPED_KEYS = [
-    'planpro_notes',
-    'planpro_passwords',
-    'planpro_master_hash',
-    'planpro_passwords_settings',
-    'planpro_passwords_session',
-    'planpro_ai_chat_sessions',
-    'planpro_ai_chat_history',
-    'planpro_connector_config',
-    'planpro_tasks_local_cache'
+    'workplan_notes',
+    'workplan_passwords',
+    'workplan_master_hash',
+    'workplan_passwords_settings',
+    'workplan_passwords_session',
+    'workplan_ai_chat_sessions',
+    'workplan_ai_chat_history',
+    'workplan_connector_config',
+    'workplan_tasks_local_cache'
 ];
 
 function readSettings() {
     try {
-        return JSON.parse(localStorage.getItem('planpro_system_settings') || '{}');
+        return JSON.parse(localStorage.getItem('workplan_system_settings') || '{}');
     } catch {
         return {};
     }
 }
 
 function writeSettings(settings) {
-    localStorage.setItem('planpro_system_settings', JSON.stringify(settings));
+    localStorage.setItem('workplan_system_settings', JSON.stringify(settings));
 }
 
 /**
@@ -49,7 +49,7 @@ export function clearAccountScopedData() {
     if (typeof localStorage === 'undefined') return;
     for (const key of SCOPED_KEYS) localStorage.removeItem(key);
     try {
-        sessionStorage.removeItem('planpro_passwords_session');
+        sessionStorage.removeItem('workplan_passwords_session');
     } catch {
         // sessionStorage may be unavailable in restricted WebViews.
     }

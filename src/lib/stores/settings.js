@@ -81,7 +81,7 @@ function getInitialSettings() {
             workspaceRoot: ''
         };
     }
-    const saved = localStorage.getItem('planpro_system_settings');
+    const saved = localStorage.getItem('workplan_system_settings');
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
@@ -164,7 +164,7 @@ function createSettingsStore() {
 
     function save(state) {
         if (typeof window === 'undefined') return;
-        localStorage.setItem('planpro_system_settings', JSON.stringify({
+        localStorage.setItem('workplan_system_settings', JSON.stringify({
             enableNotification: state.enableNotification,
             enableAiSummary: state.enableAiSummary,
             enableCharts: state.enableCharts,

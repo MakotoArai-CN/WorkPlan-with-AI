@@ -36,9 +36,9 @@ import { packLocalJson, unpackLocalJson } from '../utils/local-compress.js';
 import { TASK_STATUSES, TASK_PRIORITIES, resolveStatus, resolvePriority, normalizeStatus, normalizePriority } from '../utils/task-vocabulary.js';
 import { formatLocalDateTime } from '../utils/datetime.js';
 
-const STORAGE_KEY = 'planpro_ai_config';
-const AI_CHAT_HISTORY_KEY = 'planpro_ai_chat_history';
-const AI_CHAT_SESSIONS_KEY = 'planpro_ai_chat_sessions';
+const STORAGE_KEY = 'workplan_ai_config';
+const AI_CHAT_HISTORY_KEY = 'workplan_ai_chat_history';
+const AI_CHAT_SESSIONS_KEY = 'workplan_ai_chat_sessions';
 const PROVIDER_CONFIG_FIELDS = ['apiKey', 'secretKey', 'model', 'customModel', 'customEndpoint', 'accountId'];
 const OPTIONAL_API_KEY_PROVIDERS = new Set(['ollama', 'lmstudio', 'custom']);
 const USER_CHAT_AVATARS = [

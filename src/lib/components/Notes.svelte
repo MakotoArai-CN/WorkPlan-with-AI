@@ -97,7 +97,7 @@
         isMobile = window.innerWidth < 768;
         window.addEventListener("resize", handleResize);
         document.addEventListener("keydown", handleKeydown);
-        const saved = localStorage.getItem("planpro_notes_autosave");
+        const saved = localStorage.getItem("workplan_notes_autosave");
         if (saved !== null) {
             autoSaveEnabled = saved === "true";
         }
@@ -143,7 +143,7 @@
 
     function toggleAutoSave() {
         autoSaveEnabled = !autoSaveEnabled;
-        localStorage.setItem("planpro_notes_autosave", String(autoSaveEnabled));
+        localStorage.setItem("workplan_notes_autosave", String(autoSaveEnabled));
         const t = get(_);
         showToast({
             message: autoSaveEnabled ? t('notes.auto_save_on') : t('notes.auto_save_off'),

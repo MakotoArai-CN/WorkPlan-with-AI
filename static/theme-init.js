@@ -4,7 +4,19 @@
         if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
             document.documentElement.dataset.platform = 'linux';
         }
-        var saved = localStorage.getItem('planpro_system_settings');
+        // One-time key rename: older builds used the planpro_ prefix.
+        try {
+            for (var i = 0; i < localStorage.length; i++) {
+                var oldKey = localStorage.key(i);
+                if (!oldKey || oldKey.indexOf('planpro_') !== 0) continue;
+                var newKey = 'workplan_' + oldKey.slice('planpro_'.length);
+                if (localStorage.getItem(newKey) === null) {
+                    localStorage.setItem(newKey, localStorage.getItem(oldKey));
+                }
+            }
+        } catch (e) {}
+
+        var saved = localStorage.getItem('workplan_system_settings');
         var mode = 'auto';
         if (saved) {
             try {

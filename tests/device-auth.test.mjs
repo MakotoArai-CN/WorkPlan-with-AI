@@ -282,7 +282,7 @@ describe('PIN quick-unlock', () => {
 
     test('the stored wrapper never contains the master password in clear', async () => {
         await enablePin('4827', 'super-secret-master');
-        const stored = localStorage.getItem('planpro_pin_wrapper');
+        const stored = localStorage.getItem('workplan_pin_wrapper');
         expect(stored).not.toContain('super-secret-master');
     });
 });
