@@ -799,7 +799,12 @@ async function handleChangeMasterPassword() {
         return;
     }
 
-    const result = await passwordsStore.changeMasterPassword(oldMasterPassword, newMasterPassword);
+    let result;
+    try {
+        result = await passwordsStore.changeMasterPassword(oldMasterPassword, newMasterPassword);
+    } catch (error) {
+        result = { success: false, error: String(error?.message || error || '主密码修改失败') };
+    }
 
     if (result.success) {
         showChangeMasterPasswordModal = false;
@@ -2438,7 +2443,7 @@ async function handleChangeMasterPassword() {
             </div>
             <div class="flex gap-3 mt-4">
                 <button
-                    on:click={() => (showChangeMasterPasswordModal = false)}
+                    on:click|stopPropagation={() => (showChangeMasterPasswordModal = false)}
                     class="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
                 >
                     {$_('common.back')}
