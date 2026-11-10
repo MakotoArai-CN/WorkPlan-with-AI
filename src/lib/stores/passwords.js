@@ -724,17 +724,33 @@ function createPasswordsStore() {
             const newHash = await hashPassword(newPassword);
             // Re-derive the fast entry key under the new master before writing.
             // Metadata is re-encrypted by saveImmediate().
-            resetVaultKeyCache();
-            vaultSecret = newSecret;
-            vaultEntryKey = await ensureVaultEntryKey(newSecret);
-            for (const { entry, plain } of decryptedEntries) {
-                reEncryptedPasswords.push({
-                    ...entry,
-                    password: plain === '' ? '' : encryptVaultPayload(plain, vaultEntryKey),
-                    updatedAt: now
-                });
+            // If anything below fails after the secrets were swapped, the
+            // session would keep the new master while storage still holds the
+            // old one: every later save/cancel then fails to encrypt/decrypt.
+            // Swap under a guard and roll the session back on failure.
+            try {
+                resetVaultKeyCache();
+                vaultSecret = newSecret;
+                vaultEntryKey = await ensureVaultEntryKey(newSecret);
+                for (const { entry, plain } of decryptedEntries) {
+                    reEncryptedPasswords.push({
+                        ...entry,
+                        password: plain === '' ? '' : encryptVaultPayload(plain, vaultEntryKey),
+                        updatedAt: now
+                    });
+                }
+                await setActiveSecrets(newPassword);
+            } catch (error) {
+                currentMasterPassword = oldPassword;
+                vaultSecret = oldSecret;
+                resetVaultKeyCache();
+                try {
+                    vaultEntryKey = await ensureVaultEntryKey(oldSecret);
+                } catch {
+                    // Keep whatever key is cached; the next unlock rebuilds it.
+                }
+                return { success: false, error: `主密码更新失败：${error.message || error}` };
             }
-            await setActiveSecrets(newPassword);
 
             try {
                 update(s => {
