@@ -670,6 +670,9 @@ function createPasswordsStore() {
         },
         changeMasterPassword: async (oldPassword, newPassword) => {
             const state = get({ subscribe });
+            if (!state.masterPasswordHash) {
+                return { success: false, error: '当前会话没有主密码，请先解锁密码库' };
+            }
             if (!(await verifyPassword(oldPassword, state.masterPasswordHash))) {
                 return { success: false, error: '原密码错误' };
             }

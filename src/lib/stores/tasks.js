@@ -1,3 +1,4 @@
+import { firstRow } from '../utils/cloud-row.js';
 import { writable, derived, get } from 'svelte/store';
 import { getDefaultDatabaseConfig } from '../utils/database-providers.js';
 import { formatLocalDate, formatLocalDateTime, parseLocalDate } from '../utils/datetime.js';
@@ -204,12 +205,13 @@ export async function loadCloudRecord(accessKey) {
     const { data, error } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
         .select('id, content, updated_at')
-        .maybeSingle();
+        .eq('user_key', accessKey)
+        .limit(1);
 
     if (error) {
         throw error;
     }
-    return data;
+    return firstRow(data);
 }
 
 export async function saveCloudRecord(accessKey, content, updatedAt) {
@@ -252,11 +254,13 @@ async function deleteCloudRecord(accessKey) {
     if (!client) return;
     // Resolve the row through RLS, then delete by non-secret id. This keeps the
     // access key out of URLs and avoids an unfiltered delete if RLS is broken.
-    const { data: row, error: lookupError } = await client
+    const { data: rows, error: lookupError } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
         .select('id')
-        .maybeSingle();
+        .eq('user_key', accessKey)
+        .limit(1);
     if (lookupError) throw lookupError;
+    const row = firstRow(rows);
     if (!row?.id) return;
     const { error } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
