@@ -234,6 +234,27 @@
     background-clip: content-box;
 }
 
+/* Vditor IR: the default paragraph margins (1em top + bottom) make a single
+   Enter look like two blank lines. Keep a small, consistent gap while editing
+   so one Enter reads as one line, and give empty blocks a full line height so
+   the caret does not sit on a collapsed box. */
+.vditor-ir .vditor-reset p {
+    margin: 0 0 0.35em;
+}
+
+.vditor-ir .vditor-reset p:last-child {
+    margin-bottom: 0;
+}
+
+.vditor-ir .vditor-reset p:empty,
+.vditor-ir .vditor-reset p:has(> br:only-child) {
+    min-height: 1.5em;
+}
+
+.vditor-ir .vditor-reset li > p {
+    margin-bottom: 0.2em;
+}
+
 /* Liquid glass wallpaper layer */
 .frosted-wallpaper {
     position: absolute;

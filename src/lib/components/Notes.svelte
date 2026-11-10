@@ -1,4 +1,5 @@
 <script>
+    import { isTableRowLine, tableFromRow } from '../utils/markdown-table.js';
     import { matchesSearchQuery } from '../utils/search-text.js';
     import SelectMenu from './SelectMenu.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
@@ -274,6 +275,34 @@
             },
             keydown: (e) => {
                 if (instance !== vditorInstance) return;
+                // Vditor only inserts tables from the toolbar. If the caret
+                // sits on a typed row like `| a | b |`, rewrite that markdown
+                // line into a table and let Vditor render it. Anything
+                // unexpected falls through to Vditor's own Enter handling.
+                if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+                    try {
+                        const selection = window.getSelection();
+                        const anchor = selection?.anchorNode;
+                        if (anchor) {
+                            const element = anchor.nodeType === 3 ? anchor.parentElement : anchor;
+                            const block = element?.closest?.('p, li, div');
+                            const text = (block?.textContent || '').trim();
+                            if (block && isTableRowLine(text) && vditorInstance) {
+                                const value = vditorInstance.getValue();
+                                const lines = value.split('\n');
+                                const index = lines.findIndex((line) => line.trim() === text);
+                                if (index >= 0) {
+                                    e.preventDefault();
+                                    lines.splice(index, 1, ...tableFromRow(text).split('\n'));
+                                    vditorInstance.setValue(lines.join('\n'));
+                                    return true;
+                                }
+                            }
+                        }
+                    } catch {
+                        // Keep Vditor's default behaviour on any mismatch.
+                    }
+                }
                 if (e.key === 'Tab' && aiSuggestion && !e.shiftKey) {
                     e.preventDefault();
                     if (vditorInstance) {
