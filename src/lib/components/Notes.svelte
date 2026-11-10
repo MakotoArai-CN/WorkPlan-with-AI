@@ -277,6 +277,38 @@
             },
             keydown: (e) => {
                 if (instance !== vditorInstance) return;
+                // Backspace at the start of a paragraph used to swallow the
+                // blank line above it in one press. Step into that empty line
+                // first; a second press then merges, which is what users expect.
+                if (e.key === 'Backspace' && !e.shiftKey && !e.isComposing) {
+                    try {
+                        const selection = window.getSelection();
+                        if (selection && selection.isCollapsed && selection.rangeCount > 0) {
+                            const range = selection.getRangeAt(0);
+                            const node = range.startContainer;
+                            const element = node.nodeType === 3 ? node.parentElement : node;
+                            const block = element?.closest?.('p');
+                            if (block && range.startOffset === 0) {
+                                const previous = block.previousElementSibling;
+                                const previousEmpty = previous
+                                    && previous.tagName === 'P'
+                                    && !(previous.textContent || '').trim();
+                                if (previousEmpty) {
+                                    e.preventDefault();
+                                    const caret = document.createRange();
+                                    caret.selectNodeContents(previous);
+                                    caret.collapse(false);
+                                    selection.removeAllRanges();
+                                    selection.addRange(caret);
+                                    return true;
+                                }
+                            }
+                        }
+                    } catch {
+                        // Fall through to Vditor's own backspace handling.
+                    }
+                }
+
                 // Vditor only inserts tables from the toolbar. If the caret
                 // sits on a typed row like `| a | b |`, rewrite that markdown
                 // line into a table and let Vditor render it. Anything
