@@ -141,7 +141,7 @@
     "note_content_label": "Note content",
     "ai_summary_system_prompt": "You are a professional document summarization assistant. Please summarize the following note, extracting key information and points.\nNote title: {title}\nNote content:\n{content}\nRequirements:\n1. Keep it concise, highlight key points\n2. Use Markdown format\n3. Include: content overview, key points (as a list), mark any to-do items\n4. Keep the summary within 1/3 of the original length",
     "ai_writing_system_prompt": "You are a professional writing assistant. Current note title: {title}",
-    "ai_autocomplete_system_prompt": "You are a writing assistant. Based on the user's current writing, suggest 1-2 short continuation sentences. Only output the continuation, no explanations, no leading newlines.",
+    "ai_autocomplete_system_prompt": "You continue the user's WorkPlan note. You are given the note title and the end of the note. Write the next 1-3 sentences only. Rules: match the document language; keep the existing Markdown structure (lists, tables, heading levels); never repeat text that already exists; no explanations, quotes or code fences; continue a table row as a table row and a list item as a list item.",
     "ai_panel_placeholder": "Ask about the current note, or let AI summarize, polish, and extract actions...",
     "ai_panel_summary_hint": "The assistant can summarize the active note and extract the most important follow-up actions.",
     "ai_panel_polish_hint": "It can also polish wording, expand sections, and reorganize structure with the current note as context.",
