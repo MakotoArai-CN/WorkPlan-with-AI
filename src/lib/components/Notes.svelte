@@ -1,4 +1,5 @@
 <script>
+    import { buildAutocompleteContext, normalizeSuggestion } from '../utils/notes-autocomplete.js';
     import { isTableRowLine, tableFromRow } from '../utils/markdown-table.js';
     import { matchesSearchQuery } from '../utils/search-text.js';
     import SelectMenu from './SelectMenu.svelte';
@@ -59,6 +60,7 @@
     let showCategoryPanel = false;
     let newCategoryName = '';
     let aiSuggestion = '';
+    let aiSuggestionToken = 0;
     let aiSuggestionTimer = null;
     let autoSaveEnabled = true;
     export let openDetailPanel = null;
@@ -271,7 +273,7 @@
                 }
                 if (aiSuggestionTimer) clearTimeout(aiSuggestionTimer);
                 aiSuggestion = '';
-                aiSuggestionTimer = setTimeout(() => requestAiSuggestion(value), 1500);
+                aiSuggestionTimer = setTimeout(() => requestAiSuggestion(value), 600);
             },
             keydown: (e) => {
                 if (instance !== vditorInstance) return;
@@ -782,22 +784,29 @@
         const config = getEffectiveConfig();
         const needsApiKey = providerRequiresApiKey(config.provider);
         if (needsApiKey && !config.apiKey) return;
-        const lastLines = currentText.split('\n').slice(-3).join('\n');
-        if (lastLines.trim().length < 10) return;
+        const tail = currentText.split('\n').slice(-3).join('\n');
+        if (tail.trim().length < 8) return;
+
+        const token = ++aiSuggestionToken;
         try {
             const { callAIWithMessages } = await import('../utils/ai-providers.js');
+            const context = buildAutocompleteContext({
+                title: editTitle || $activeNote?.title || '',
+                text: currentText
+            });
             const result = await callAIWithMessages(
                 config,
                 [
                     { role: 'system', content: t('notes.ai_autocomplete_system_prompt') },
-                    { role: 'user', content: lastLines }
+                    { role: 'user', content: context }
                 ]
             );
-            if (result && result.trim()) {
-                aiSuggestion = result.trim().split('\n')[0].slice(0, 100);
-            }
+            // Ignore responses that arrive after newer typing or an editor swap.
+            if (token !== aiSuggestionToken) return;
+            const suggestion = normalizeSuggestion(result || '', tail);
+            aiSuggestion = suggestion;
         } catch (e) {
-            aiSuggestion = '';
+            if (token === aiSuggestionToken) aiSuggestion = '';
         }
     }
 
