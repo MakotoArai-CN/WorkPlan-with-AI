@@ -10,7 +10,7 @@ depends=(
     'webkit2gtk-4.1'
     'gtk3'
     'librsvg'
-    'libappindicator-gtk3'
+    'libappindicator'
 )
 provides=('workplan')
 conflicts=('workplan')

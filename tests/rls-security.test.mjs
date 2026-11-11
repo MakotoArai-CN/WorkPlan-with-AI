@@ -26,6 +26,12 @@ describe('Supabase RLS hardening', () => {
         expect(sql).toContain('workplan_owner');
         expect(sql).toContain('workplan_request_key');
         expect(sql).toContain("x-workplan-key");
+        expect(sql).toContain('force row level security');
+        expect(sql).toContain('begin;');
+        expect(sql).toContain('commit;');
+        expect(sql).toContain('select policyname from pg_policies');
+        expect(sql).toContain('with check (user_key = public.workplan_request_key())');
+        expect(sql).not.toContain("->> 'workplan_key'");
         const executableSql = sql.replace(/--.*$/gm, '');
         expect(executableSql).not.toMatch(/using\s*\(\s*true\s*\)/i);
         for (const table of TABLES) {
@@ -42,15 +48,31 @@ describe('Supabase RLS hardening', () => {
 
     test('in-app setup SQL is safe by default', () => {
         const providers = read('src/lib/utils/database-providers.js');
-        expect(providers).toContain('ENABLE ROW LEVEL SECURITY');
+        expect(providers).toContain('enable row level security');
+        expect(providers).toContain('force row level security');
         expect(providers).toContain('workplan_owner');
         expect(providers).toContain('x-workplan-key');
+        expect(providers).toContain('select policyname from pg_policies');
+        expect(providers).not.toContain('FOR ALL TO public');
     });
 
-    test('client sends the RLS key header and keeps it out of Supabase URLs', () => {
+    test('client sends the RLS key header and rejects privileged keys', () => {
         const tasks = read('src/lib/stores/tasks.js');
         expect(tasks).toContain("'x-workplan-key': accessKey");
         expect(tasks).toContain("global:");
+        expect(tasks).toContain('assertPublicDatabaseKey(databaseConfig)');
         expect(tasks).not.toContain(".select('content, updated_at')\n        .eq('user_key', accessKey)");
+    });
+
+    test('deployment instructions distinguish local checks from actual owner-side remediation', () => {
+        const instructions = read('docs/SUPABASE_SECURITY.md');
+        expect(instructions).toContain('hosted database has not been modified or verified');
+        expect(instructions).toContain('previously public credentials as compromised');
+        expect(instructions).toContain('additional authenticated data');
+        const probes = read('docs/sql/verify_rls.sql');
+        expect(probes).toContain('set local role anon;');
+        expect(probes).toContain('rollback;');
+        expect(probes).toContain('Cross-key DELETE is exposed');
+        expect(probes).toContain('Changing row ownership is exposed');
     });
 });

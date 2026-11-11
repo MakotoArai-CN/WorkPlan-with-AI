@@ -2,9 +2,14 @@ name: Linux Portable
 
 on:
   workflow_dispatch:
+    inputs:
+      upload-to-release:
+        description: Attach to the existing published VERSION release
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   G4F_DEV_REPOSITORY: gpt4free/g4f.dev
@@ -52,37 +57,39 @@ jobs:
         run: bun run version:sync
 
       - name: Build native Linux binary (no bundled libs)
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_TABLE: ${{ secrets.VITE_SUPABASE_TABLE }}
         run: bunx tauri build --no-bundle
 
       - name: Create portable tarball
-        run: |
-          VERSION=$(tr -d '[:space:]' < VERSION)
-          ROOT="portable/WorkPlan-linux-x86_64"
-          mkdir -p "$ROOT/icons/32x32" "$ROOT/icons/64x64" "$ROOT/icons/128x128" "$ROOT/icons/256x256"
-          cp src-tauri/target/release/workplan "$ROOT/workplan"
-          cp packaging/workplan.desktop "$ROOT/workplan.desktop"
-          cp src-tauri/icons/32x32.png "$ROOT/icons/32x32/workplan.png"
-          cp src-tauri/icons/64x64.png "$ROOT/icons/64x64/workplan.png"
-          cp src-tauri/icons/128x128.png "$ROOT/icons/128x128/workplan.png"
-          cp src-tauri/icons/128x128@2x.png "$ROOT/icons/256x256/workplan.png"
-          cp LICENSE "$ROOT/LICENSE"
-          tar -C portable -czf "WorkPlan_${VERSION}_linux-x86_64.tar.gz" "WorkPlan-linux-x86_64"
-          sha256sum "WorkPlan_${VERSION}_linux-x86_64.tar.gz" > "WorkPlan_${VERSION}_linux-x86_64.tar.gz.sha256"
+        run: bash packaging/create-linux-portable.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-portable
           path: |
-            WorkPlan_*_linux-x86_64.tar.gz
-            WorkPlan_*_linux-x86_64.tar.gz.sha256
+            portable-assets/*.tar.gz
+            portable-assets/*.sha256
+          if-no-files-found: error
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+  attach-manual-archive:
+    if: inputs.upload-to-release == true
+    needs: build-portable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          files: |
-            WorkPlan_*_linux-x86_64.tar.gz
-            WorkPlan_*_linux-x86_64.tar.gz.sha256
+          name: linux-portable
+          path: portable-assets
+      - name: Attach to an existing release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build-portable.outputs.version }}
+        run: |
+          gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null
+          gh release upload "v${VERSION}" portable-assets/* --repo "$GITHUB_REPOSITORY"

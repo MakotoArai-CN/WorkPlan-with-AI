@@ -1,22 +1,22 @@
 import { writable, derived, get } from 'svelte/store';
+import { defaultNotePrompts } from '../utils/notes-prompts.js';
 
 const STORAGE_KEY = 'workplan_notes';
 
 const DEFAULT_CATEGORIES = ['全部', '工作', '学习', '个人', '想法'];
 
+function initialAiPrompts() {
+    let language = 'zh';
+    try { language = localStorage.getItem('workplan_locale') || globalThis.navigator?.language || language; } catch {}
+    return defaultNotePrompts(language);
+}
+
+function emptyNotesState() {
+    return { notes: [], categories: [...DEFAULT_CATEGORIES], activeNoteId: null, aiPrompts: initialAiPrompts() };
+}
+
 function createNotesStore() {
-    const { subscribe, set, update } = writable({
-        notes: [],
-        categories: DEFAULT_CATEGORIES,
-        activeNoteId: null,
-        aiPrompts: [
-            { id: '1', label: '总结', prompt: '请总结这篇笔记的主要内容和关键点' },
-            { id: '2', label: '扩写', prompt: '请根据笔记内容进行扩写，补充更多细节' },
-            { id: '3', label: '润色', prompt: '请润色并改善这篇笔记的文字表达' },
-            { id: '4', label: '提取要点', prompt: '请从笔记中提取关键要点，以列表形式呈现' },
-            { id: '5', label: '生成大纲', prompt: '请根据笔记内容生成一个结构化的大纲' }
-        ]
-    });
+    const { subscribe, set, update } = writable(emptyNotesState());
 
     function load() {
         if (typeof window === 'undefined') return;
@@ -25,21 +25,16 @@ function createNotesStore() {
             try {
                 const parsed = JSON.parse(saved);
                 set({
-                    notes: parsed.notes || [],
-                    categories: parsed.categories || DEFAULT_CATEGORIES,
+                    notes: Array.isArray(parsed.notes) ? parsed.notes : [],
+                    categories: Array.isArray(parsed.categories) ? parsed.categories : [...DEFAULT_CATEGORIES],
                     activeNoteId: null,
-                    aiPrompts: parsed.aiPrompts || [
-                        { id: '1', label: '总结', prompt: '请总结这篇笔记的主要内容和关键点' },
-                        { id: '2', label: '扩写', prompt: '请根据笔记内容进行扩写，补充更多细节' },
-                        { id: '3', label: '润色', prompt: '请润色并改善这篇笔记的文字表达' },
-                        { id: '4', label: '提取要点', prompt: '请从笔记中提取关键要点，以列表形式呈现' },
-                        { id: '5', label: '生成大纲', prompt: '请根据笔记内容生成一个结构化的大纲' }
-                    ]
+                    aiPrompts: Array.isArray(parsed.aiPrompts) ? parsed.aiPrompts : initialAiPrompts()
                 });
             } catch (e) {
                 console.error('Failed to load notes:', e);
+                set(emptyNotesState());
             }
-        }
+        } else set(emptyNotesState());
     }
 
     function createNoteId() {
@@ -82,14 +77,20 @@ function createNotesStore() {
             save(newState);
             return newState;
         }),
-        updateNote: (id, updates) => update(s => {
-            const notes = s.notes.map(n =>
-                n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n
-            );
-            const newState = { ...s, notes };
-            save(newState);
-            return newState;
-        }),
+        updateNote: (id, updates) => {
+            const previous = get({ subscribe }).notes.find(note => note.id === id);
+            // Returning the same object from a Svelte writable updater still
+            // notifies subscribers; skip the updater entirely for unchanged drafts.
+            if (!previous || !updates || !Object.keys(updates).some(key => previous[key] !== updates[key])) return;
+            update(s => {
+                const notes = s.notes.map(n =>
+                    n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n
+                );
+                const newState = { ...s, notes };
+                save(newState);
+                return newState;
+            });
+        },
         deleteNote: (id) => update(s => {
             const notes = s.notes.filter(n => n.id !== id);
             const activeNoteId = s.activeNoteId === id ? null : s.activeNoteId;

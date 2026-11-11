@@ -14,6 +14,7 @@
     import { validateMasterPassword } from "../utils/master-password-policy.js";
     import { readPendingErase } from "../utils/vault-protection.js";
     import { filterPasswordEntries } from "../utils/passwords-search.js";
+    import { MAX_PASSWORD_CATEGORY_LENGTH } from "../utils/password-categories.js";
     import {
         isDeviceBindingSupported,
         validatePinFormat,
@@ -34,10 +35,6 @@
     let showUnlockModal = false;
     let unlockBusy = false;
     let changingMaster = false;
-    let protectionEnabled = false;
-    let showProtectionModal = false;
-    let protectionMaster = "";
-    let protectionBusy = false;
     let unlockError = "";
 
     // --- Device binding / PIN / recovery ---
@@ -69,7 +66,6 @@
     let biometricSetupPin = "";
 
     function refreshSecurityState() {
-        protectionEnabled = passwordsStore.getProtection().enabled;
         deviceBindingEnabled = passwordsStore.isDeviceBindingEnabled();
         pinEnabled = passwordsStore.isPinEnabled();
         pinAttemptsRemaining = passwordsStore.getPinAttemptsRemaining();
@@ -93,6 +89,11 @@
     let showPasswordValue = {};
     let editingPassword = null;
     let showSidebar = false;
+    let showCustomCategoryModal = false;
+    let customCategoryName = "";
+    let customCategoryError = "";
+    let customCategoryTarget = "filter";
+    let customCategoryInput;
     let showExportMenu = false;
     let isMobile = false;
     let selectedPasswordIds = new Set();
@@ -572,34 +573,6 @@ let confirmNewMasterPassword = "";
         } finally { unlockBusy = false; }
     }
 
-    async function openProtectionSettings() {
-        closeExportMenu();
-        const t = getI18n(_);
-        if (!protectionEnabled && !await showConfirm({
-            title: t('passwords.protection_title'), message: t('passwords.protection_warning'),
-            variant: "danger", confirmText: t('passwords.protection_understood')
-        })) return;
-        protectionMaster = "";
-        showProtectionModal = true;
-    }
-
-    async function confirmProtection() {
-        if (protectionBusy) return;
-        protectionBusy = true;
-        try {
-            const result = await passwordsStore.setProtection(!protectionEnabled, protectionMaster);
-            if (!result.success) {
-                if (!readPendingErase()) showAlert({ message: result.error, variant: "danger" });
-                return;
-            }
-            showProtectionModal = false;
-            protectionMaster = "";
-            refreshSecurityState();
-        } catch (error) {
-            if (!readPendingErase()) showAlert({ message: error.message, variant: "danger" });
-        } finally { protectionBusy = false; }
-    }
-
     async function handleForgotPassword() {
         const t = getI18n(_);
         const confirmed = await showConfirm({
@@ -640,10 +613,39 @@ let confirmNewMasterPassword = "";
             username: "",
             password: "",
             url: "",
-            category: getI18n(_)('passwords.categories.default') || 'Default',
+            category: selectedCategory !== "__ALL__" ? selectedCategory : $passwordCategories[0],
             notes: "",
         };
         showAddModal = true;
+    }
+
+    async function openCustomCategory(target = "filter") {
+        customCategoryTarget = target;
+        customCategoryName = "";
+        customCategoryError = "";
+        showCustomCategoryModal = true;
+        await tick();
+        customCategoryInput?.focus();
+    }
+
+    function addCustomCategory() {
+        const t = getI18n(_);
+        let result;
+        try {
+            result = passwordsStore.addCategory(customCategoryName);
+        } catch {
+            customCategoryError = t('passwords.category_save_failed');
+            return;
+        }
+        if (!result.success) {
+            customCategoryError = t(`passwords.${result.error}`);
+            return;
+        }
+        if (customCategoryTarget === "new") newPassword.category = result.category;
+        else if (customCategoryTarget === "edit" && editingPassword) editingPassword.category = result.category;
+        else selectCategory(result.category);
+        showCustomCategoryModal = false;
+        showToast({ message: t('passwords.category_added'), type: "success" });
     }
 
     function addPassword() {
@@ -1457,11 +1459,6 @@ async function handleChangeMasterPassword() {
                                 {/if}
                                 <hr class="my-1 border-slate-100" />
                             {/if}
-                            <button on:click={openProtectionSettings}
-                                class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
-                                <i class="ph {protectionEnabled ? 'ph-check-square' : 'ph-square'} text-lg"></i>
-                                {$_('passwords.protection_title')}
-                            </button>
                             <button
                                 on:click={toggleRememberSession}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
@@ -1552,16 +1549,22 @@ async function handleChangeMasterPassword() {
                             data-category-button
                             data-active={selectedCategory === category}
                             on:click={() => selectCategory(category)}
-                            class="relative z-10 w-full text-left px-4 py-2.5 text-sm transition"
+                            class="relative z-10 w-full flex items-center min-w-0 text-left px-4 py-2.5 text-sm transition"
                             class:text-amber-700={selectedCategory === category}
                             class:font-bold={selectedCategory === category}
                             class:text-slate-600={selectedCategory !== category}
                             class:hover:text-amber-700={selectedCategory !== category}
                         >
-                            <i class="ph ph-folder mr-2"></i>
-                            {category}
+                            <i class="ph ph-folder mr-2 shrink-0"></i>
+                            <span class="truncate" title={category}>{category}</span>
                         </button>
                     {/each}
+                </div>
+                <div class="p-3 border-t border-slate-100">
+                    <button type="button" on:click={() => openCustomCategory("filter")}
+                        class="w-full flex items-center justify-center gap-2 rounded-lg border border-dashed border-amber-300 px-3 py-2 text-sm font-bold text-amber-700 hover:bg-amber-50 transition-colors">
+                        <i class="ph ph-folder-plus"></i> {$_('passwords.custom_category')}
+                    </button>
                 </div>
             </div>
 
@@ -1631,7 +1634,8 @@ async function handleChangeMasterPassword() {
                                                 {password.title}
                                             </h3>
                                             <span
-                                                class="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded"
+                                                class="inline-block max-w-full truncate align-middle text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded"
+                                                title={password.category}
                                                 >{password.category}</span
                                             >
                                         </div>
@@ -2198,7 +2202,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 
-<AnimatedModal show={showAddModal} onClose={() => (showAddModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
+<AnimatedModal show={showAddModal} dismissible={!showCustomCategoryModal} onClose={() => (showAddModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.new_title')}</h3>
             <div class="space-y-3">
@@ -2274,11 +2278,15 @@ async function handleChangeMasterPassword() {
                     />
                 </div>
                 <div>
-                    <label
-                        for="password-new-category"
-                        class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >{$_('passwords.label_category')}</label
-                    >
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <label for="password-new-category" class="text-xs font-bold text-slate-500 uppercase">
+                            {$_('passwords.label_category')}
+                        </label>
+                        <button type="button" on:click={() => openCustomCategory("new")}
+                            class="text-xs font-bold text-amber-700 hover:text-amber-800">
+                            <i class="ph ph-plus"></i> {$_('passwords.custom_category')}
+                        </button>
+                    </div>
                     <SelectMenu bind:value={newPassword.category} options={categoryOptions}
                         className="w-full" />
                 </div>
@@ -2313,7 +2321,7 @@ async function handleChangeMasterPassword() {
             </div>
 </AnimatedModal>
 
-<AnimatedModal show={showEditModal && !!editingPassword} onClose={() => (showEditModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
+<AnimatedModal show={showEditModal && !!editingPassword} dismissible={!showCustomCategoryModal} onClose={() => (showEditModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
         {#if editingPassword}
             <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.edit_title')}</h3>
             <div class="space-y-3">
@@ -2384,11 +2392,15 @@ async function handleChangeMasterPassword() {
                     />
                 </div>
                 <div>
-                    <label
-                        for="password-edit-category"
-                        class="text-xs font-bold text-slate-500 uppercase mb-1 block"
-                        >{$_('passwords.label_category')}</label
-                    >
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <label for="password-edit-category" class="text-xs font-bold text-slate-500 uppercase">
+                            {$_('passwords.label_category')}
+                        </label>
+                        <button type="button" on:click={() => openCustomCategory("edit")}
+                            class="text-xs font-bold text-amber-700 hover:text-amber-800">
+                            <i class="ph ph-plus"></i> {$_('passwords.custom_category')}
+                        </button>
+                    </div>
                     <SelectMenu bind:value={editingPassword.category} options={categoryOptions}
                         className="w-full" />
                 </div>
@@ -2498,21 +2510,26 @@ async function handleChangeMasterPassword() {
             </div>
 </AnimatedModal>
 
-<AnimatedModal show={showProtectionModal} dismissible={!protectionBusy} closeOnBackdrop={!protectionBusy}
-    onClose={() => { showProtectionModal = false; protectionMaster = ""; }} zIndex={65}
-    panelClass="max-w-md password-panel p-5 md:p-6">
-    <h3 class="text-xl font-bold mb-3">{$_('passwords.protection_confirm')}</h3>
-    <p class="text-sm text-red-600 mb-4">{protectionEnabled ? $_('passwords.protection_disable') : $_('passwords.protection_warning')}</p>
-    <input type="password" bind:value={protectionMaster} autocomplete="current-password"
-        aria-label={$_('passwords.old_password_label')} placeholder={$_('passwords.old_password_placeholder')}
-        class="w-full border rounded-lg px-3 py-2 mb-4" />
-    <div class="flex gap-3">
-        <button disabled={protectionBusy} on:click={() => { showProtectionModal = false; protectionMaster = ""; }}
-            class="flex-1 py-2 rounded-lg bg-slate-100">{$_('common.cancel')}</button>
-        <button disabled={protectionBusy || !protectionMaster} on:click={confirmProtection}
-            class="flex-1 py-2 rounded-lg bg-red-600 text-white">{$_('common.confirm')}</button>
+<AnimatedModal show={showCustomCategoryModal} onClose={() => (showCustomCategoryModal = false)} zIndex={65}
+    ariaLabel={$_('passwords.custom_category')} panelClass="max-w-sm password-panel p-5 md:p-6">
+    <h3 class="text-xl font-bold mb-2">{$_('passwords.custom_category')}</h3>
+    <p id="password-category-hint" class="text-sm text-slate-500 mb-4">{$_('passwords.custom_category_hint')}</p>
+    <label for="password-custom-category" class="block text-xs font-bold text-slate-500 mb-2">{$_('passwords.category_name')}</label>
+    <input id="password-custom-category" bind:this={customCategoryInput} type="text" bind:value={customCategoryName}
+        maxlength={MAX_PASSWORD_CATEGORY_LENGTH * 2} aria-describedby="password-category-hint password-category-error"
+        aria-invalid={!!customCategoryError} autocomplete="off" placeholder={$_('passwords.custom_category_placeholder')}
+        on:input={() => (customCategoryError = "")}
+        on:keydown={(event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); addCustomCategory(); } }} />
+    <p id="password-category-error" class="text-sm text-red-600 min-h-5 mt-2" aria-live="polite">{customCategoryError}</p>
+    <div class="flex gap-3 mt-4">
+        <button type="button" on:click={() => (showCustomCategoryModal = false)}
+            class="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200">{$_('common.cancel')}</button>
+        <button type="button" on:click={addCustomCategory}
+            class="flex-1 py-2.5 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700">{$_('common.add')}</button>
     </div>
 </AnimatedModal>
+
+
 
 <style>
     :global(.password-panel) {

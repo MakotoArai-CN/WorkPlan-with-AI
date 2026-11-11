@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS planpro_data (
 CREATE INDEX IF NOT EXISTS idx_planpro_user_key ON planpro_data(user_key);
 ```
 
+**安全必需步骤：** 在项目 SQL Editor 中执行 [`docs/sql/rls_security.sql`](docs/sql/rls_security.sql) 启用 RLS，再执行 [`docs/sql/verify_rls.sql`](docs/sql/verify_rls.sql) 验证账号隔离。仅建表或客户端过滤不会保护公开表；客户端只填写 publishable / anon 公钥，禁止 service_role / secret 管理密钥。已出现公开表告警时请按 [`docs/SUPABASE_SECURITY.md`](docs/SUPABASE_SECURITY.md) 处理潜在泄露与密钥轮换。
+
 启动开发：
 
 ```bash
@@ -99,28 +101,30 @@ bun run tauri build
 
 ### Arch Linux
 
-AppImage 内置了 Ubuntu 构建环境的 GTK/WebKit 运行库，在 Arch 上可能因系统库版本冲突直接崩溃。Arch 用户请使用不打包运行库的原生 tarball：
+AppImage 内置了 Ubuntu 构建环境的 GTK/WebKit 运行库，在 Arch 上可能因系统库版本冲突直接崩溃。每次正式发布会自动构建并验证 Arch x86_64 安装包，优先下载 Release 中的 `.pkg.tar.zst`：
 
 ```bash
-tar -xzf WorkPlan_0.5.10_linux-x86_64.tar.gz
+# 将 VERSION 替换为下载的版本号
+sudo pacman -U ./workplan-bin-VERSION-1-x86_64.pkg.tar.zst
+```
+
+不需要系统安装时，可使用不打包运行库的原生便携版：
+
+```bash
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 librsvg libappindicator
+tar -xzf WorkPlan_VERSION_linux-x86_64.tar.gz
 ./WorkPlan-linux-x86_64/workplan
 ```
 
-也可以直接安装 Release 里的 Arch 包：
+需要自行重建时，下载同版本 `.src.tar.gz`（含固定校验和的 PKGBUILD / .SRCINFO），以普通用户执行：
 
 ```bash
-sudo pacman -U workplan-bin-0.5.10-1-x86_64.pkg.tar.zst
-```
-
-或者从 `packaging/arch/PKGBUILD` 本地构建：
-
-```bash
-git clone https://github.com/MakotoArai-CN/WorkPlan-with-AI.git
-cd WorkPlan-with-AI/packaging/arch
+tar -xzf workplan-bin-VERSION-1.src.tar.gz
+cd workplan-bin
 makepkg -si
 ```
 
-要求系统已安装 `webkit2gtk-4.1`、`gtk3` 和 `librsvg`。
+`pacman` 会管理依赖、桌面入口和图标；不要以 root 执行 `makepkg`。下载后可用同一 Release 的 `SHA256SUMS` 校验文件完整性。当前只提供 x86_64 Arch 包，Arch 衍生发行版需要兼容的运行库。[打包和验证流程](packaging/arch/README.md)。
 
 #### 字体发虚
 

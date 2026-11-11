@@ -1,46 +1,44 @@
--- WorkPlan Supabase RLS hardening
+-- WorkPlan Supabase RLS hardening. Execute as the project database owner in
+-- SQL Editor, NOT with the public client key. Safe to rerun; no rows deleted.
+-- The legacy planpro_data table is covered even without cloud_schema.sql.
+-- Custom table names require a reviewed explicit addition to the allowlist.
 --
--- Run this AFTER docs/sql/cloud_schema.sql in the Supabase SQL Editor.
--- It enables RLS on every WorkPlan public table and replaces any existing
--- permissive policies with one owner policy per table.
---
--- Identity model:
---   The desktop client sends its per-account access key in the
---   `x-workplan-key` request header. PostgREST exposes request headers through
---   `current_setting('request.headers')`, so RLS can require
---   `user_key = x-workplan-key`.
---
---   For a future Supabase Auth integration, the same function also accepts a
---   JWT claim named `workplan_key`:
---     auth.jwt() -> 'workplan_key'
---
--- This is a bearer-secret model. Generate long random account keys and never
--- publish them. The service_role key must never be shipped to the client.
+-- Identity is a bearer capability, NOT Supabase Auth: the client supplies the
+-- complete record key in x-workplan-key. Anyone knowing a key can impersonate
+-- it. If rows/keys were public, first contain exposure, then rotate compromised
+-- account secrets with a backed-up migration. RLS cannot undo a prior leak.
+
+begin;
 
 create or replace function public.workplan_request_key()
 returns text
 language sql
 stable
+security invoker
+set search_path = pg_catalog
 as $$
-    select coalesce(
-        nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-workplan-key',
-        nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'workplan_key'
-    );
+    select case
+        when length(key) between 1 and 512 and key !~ '[[:cntrl:]]'
+        then key
+        else null
+    end
+    from (
+        select nullif(btrim(
+            nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-workplan-key'
+        ), '') as key
+    ) request_key;
 $$;
 
 comment on function public.workplan_request_key() is
-    'Per-account key supplied by WorkPlan; used only by RLS owner policies.';
-
--- Keep the helper callable by API roles. It is not a secret itself; it only
--- reads the current request context.
+    'Untrusted request bearer secret, not authenticated user identity. A leaked key must be rotated.';
 revoke all on function public.workplan_request_key() from public;
 grant execute on function public.workplan_request_key() to anon, authenticated;
 
--- Remove all old policies on WorkPlan tables. This is intentional: a single
--- leftover `using (true)` policy would keep the whole table public.
 do $$
 declare
+    target_table text;
     policy_row record;
+    sequence_name text;
     workplan_tables text[] := array[
         'planpro_data',
         'workplan_accounts',
@@ -55,80 +53,69 @@ declare
         'workplan_vault_items'
     ];
 begin
-    for policy_row in
-        select policyname, tablename
-        from pg_policies
-        where schemaname = 'public'
-          and tablename = any (workplan_tables)
-    loop
-        execute format(
-            'drop policy if exists %I on public.%I',
-            policy_row.policyname,
-            policy_row.tablename
-        );
-    end loop;
-end $$;
-
-do $$
-declare
-    table_name text;
-    workplan_tables text[] := array[
-        'planpro_data',
-        'workplan_accounts',
-        'workplan_sync_state',
-        'workplan_tasks',
-        'workplan_templates',
-        'workplan_scheduled_tasks',
-        'workplan_overtime_records',
-        'workplan_leave_records',
-        'workplan_notes',
-        'workplan_vault_meta',
-        'workplan_vault_items'
-    ];
-begin
-    foreach table_name in array workplan_tables loop
-        if to_regclass(format('public.%I', table_name)) is null then
+    foreach target_table in array workplan_tables loop
+        if to_regclass(format('public.%I', target_table)) is null then
             continue;
         end if;
+        if not exists (
+            select 1 from information_schema.columns
+            where table_schema = 'public' and table_name = target_table
+              and column_name = 'user_key'
+        ) then
+            raise exception 'WorkPlan table public.% is missing user_key; no changes committed', target_table;
+        end if;
 
-        execute format(
-            'alter table public.%I enable row level security',
-            table_name
-        );
+        -- Permissive policies combine with OR. Keeping ANY old allow-all
+        -- policy would bypass the new owner policy, so replace all of them.
+        for policy_row in
+            select policyname from pg_policies
+            where schemaname = 'public' and tablename = target_table
+        loop
+            execute format('drop policy %I on public.%I', policy_row.policyname, target_table);
+        end loop;
 
+        execute format('alter table public.%I enable row level security', target_table);
+        execute format('alter table public.%I force row level security', target_table);
+        execute format('revoke all on table public.%I from public, anon, authenticated', target_table);
+        execute format('grant select, insert, update, delete on table public.%I to anon, authenticated', target_table);
         execute format(
             'create policy workplan_owner on public.%I
-             for all
-             to anon, authenticated
+             for all to anon, authenticated
              using (user_key = public.workplan_request_key())
              with check (user_key = public.workplan_request_key())',
-            table_name
+            target_table
         );
+
+        -- BIGSERIAL legacy tables need sequence usage for insert/upsert.
+        if exists (
+            select 1 from information_schema.columns
+            where table_schema = 'public' and table_name = target_table
+              and column_name = 'id'
+        ) then
+            sequence_name := pg_get_serial_sequence(format('public.%I', target_table), 'id');
+            if sequence_name is not null then
+                execute format('revoke all on sequence %s from public, anon, authenticated', sequence_name);
+                execute format('grant usage, select on sequence %s to anon, authenticated', sequence_name);
+            end if;
+        end if;
     end loop;
 end $$;
 
--- Verification: every row here should show rowsecurity = true and one policy.
-select
-    c.relname as table_name,
-    c.relrowsecurity as rowsecurity,
-    count(p.policyname) as policy_count
+notify pgrst, 'reload schema';
+commit;
+
+-- Both rowsecurity and force_rowsecurity must be true; policy_count must be 1.
+select c.relname as table_name, c.relrowsecurity as rowsecurity,
+       c.relforcerowsecurity as force_rowsecurity, count(p.policyname) as policy_count
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
-left join pg_policies p
-    on p.schemaname = n.nspname and p.tablename = c.relname
+left join pg_policies p on p.schemaname = n.nspname and p.tablename = c.relname
 where n.nspname = 'public'
   and c.relname = any (array[
-      'planpro_data',
-      'workplan_accounts',
-      'workplan_sync_state',
-      'workplan_tasks',
-      'workplan_templates',
-      'workplan_scheduled_tasks',
-      'workplan_overtime_records',
-      'workplan_leave_records',
-      'workplan_notes',
-      'workplan_vault_meta',
-      'workplan_vault_items'
+      'planpro_data', 'workplan_accounts', 'workplan_sync_state',
+      'workplan_tasks', 'workplan_templates', 'workplan_scheduled_tasks',
+      'workplan_overtime_records', 'workplan_leave_records', 'workplan_notes',
+      'workplan_vault_meta', 'workplan_vault_items'
   ])
-group by c.relname, c.relrowsecurity
+group by c.relname, c.relrowsecurity, c.relforcerowsecurity
 order by c.relname;

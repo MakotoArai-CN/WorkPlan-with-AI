@@ -1,5 +1,5 @@
 <script>
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import '../app.css';
     import '@phosphor-icons/web/regular';
     import '@phosphor-icons/web/bold';
@@ -18,7 +18,7 @@
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
-    import { retryPendingErase, resumeProtectionErase } from '$lib/utils/vault-protection.js';
+    import { migrateLegacyProtection } from '$lib/utils/vault-protection.js';
     const loadBackupModal = () => import('$lib/components/BackupModal.svelte');
     let backupModule;
     import { backupModal, closeBackupModal } from '$lib/stores/backup-modal.js';
@@ -29,8 +29,6 @@
     let i18nReady = false;
 
     onMount(() => {
-        const retryErase = () => { void retryPendingErase().catch(error => console.warn('Protection deletion pending:', error)); };
-        window.addEventListener('online', retryErase);
         let destroyed = false;
         let unlistenNotification = () => {};
         let unlistenAutostart = () => {};
@@ -58,26 +56,33 @@
 
             try {
                 const localDb = await initLocalDatabase();
+                if (localDb.error) throw new Error(localDb.error);
                 await installLocalDatabaseMirror();
-                if (await resumeProtectionErase()) return;
+                migrateLegacyProtection();
             } catch (error) {
                 console.warn('Local database init failed:', error);
-                // Do not initialize stores if a destructive operation is unfinished.
-                if (localStorage.getItem('workplan_protection_erase') || passwordsStore.getProtection().failures > 10) return;
+                window.dispatchEvent(new Event('workplan:startup-error'));
+                return;
             }
 
-            i18nReady = true;
             // Specular highlight for the liquid glass theme (no-op elsewhere).
             uninstallGlassPointer = installGlassPointer();
             taskStore.loadFromLocal();
             reloadConnectorConfig();
-            await settingsStore.init();
+            // Hydrate preferences synchronously, but do not keep the startup
+            // screen over native permission dialogs and peripheral checks.
+            const settingsInit = settingsStore.init().catch(error => console.warn('Settings initialization failed:', error));
             loadAiConfig();
             notesStore.load();
             // Vault entries are loaded on first use, not on the startup critical path.
             initSecureSync();
-            void retryPendingErase().catch(error => console.warn('Protection deletion pending:', error));
+            if (destroyed) return;
+            i18nReady = true;
+            await tick();
+            window.dispatchEvent(new Event('workplan:ready'));
             if (isWebDemo || destroyed) return;
+            await settingsInit;
+            if (destroyed) return;
 
             const currentSettings = get(settingsStore);
             if (currentSettings.closeToQuit) {
@@ -153,11 +158,13 @@
                 if (destroyed) return;
                 taskStore.maybeHeartbeat({ idleMs: 300000, minIntervalMs: 300000 });
             }, 60000);
-        })();
+        })().catch(error => {
+            console.error('Application startup failed:', error);
+            if (!destroyed) window.dispatchEvent(new Event('workplan:startup-error'));
+        });
 
         return () => {
             destroyed = true;
-            window.removeEventListener('online', retryErase);
             unlistenNotification();
             unlistenAutostart();
             unlistenUpdate();

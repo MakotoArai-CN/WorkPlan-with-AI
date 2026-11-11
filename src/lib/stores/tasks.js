@@ -6,7 +6,8 @@ import { buildScheduledInstances, normalizeRepeatDays } from '../utils/schedule.
 import { normalizeLeaveRecord, normalizeOvertimeRecord } from '../utils/overtime.js';
 import { mergeSyncState, normalizeSyncPayload } from '../utils/task-sync.js';
 import { clearAccountScopedData, restoreAccountData, stashCurrentAccount } from '../utils/account-scope.js';
-import { cloudRecordErased, readPendingErase } from '../utils/vault-protection.js';
+import { cloudRecordErased } from '../utils/vault-protection.js';
+import { assertCloudRecordKey, assertPublicDatabaseKey } from '../utils/database-security.js';
 
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const DEFAULT_SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
@@ -82,6 +83,8 @@ function buildRestTableUrl(databaseConfig) {
 }
 
 function buildRestHeaders(databaseConfig, prefer = '', accessKey = '') {
+    assertPublicDatabaseKey(databaseConfig);
+    assertCloudRecordKey(accessKey);
     const headers = {
         apikey: databaseConfig.apiKey,
         Authorization: `Bearer ${databaseConfig.apiKey}`,
@@ -174,6 +177,8 @@ async function deleteRestRecord(databaseConfig, accessKey) {
 
 async function getSupabaseClient(databaseConfig, accessKey = '') {
     if (typeof window === 'undefined') return null;
+    assertPublicDatabaseKey(databaseConfig);
+    assertCloudRecordKey(accessKey);
     const cacheKey = `${databaseConfig.url}|${databaseConfig.apiKey}|${accessKey}`;
     if (supabase && supabaseCacheKey === cacheKey) return supabase;
     const { createClient } = await import('@supabase/supabase-js');
@@ -202,8 +207,8 @@ export async function loadCloudRecord(accessKey) {
 
     const client = await getSupabaseClient(databaseConfig, accessKey);
     if (!client) return null;
-    // Do not put the access key in the query string: PostgREST URLs can end up
-    // in gateway logs. RLS already restricts this select to the header's key.
+    // The equality filter narrows the result but is NOT authorization. The
+    // hosted database must enforce RLS using the same bearer-secret header.
     const { data, error } = await client
         .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
         .select('id, content, updated_at')
@@ -222,7 +227,7 @@ export async function waitForCloudWrites() {
 }
 
 export function saveCloudRecord(accessKey, content, updatedAt) {
-    if (readPendingErase()) return Promise.resolve(false);
+    if (cloudRecordErased(accessKey)) return Promise.resolve(false);
     const write = writeCloudRecord(accessKey, content, updatedAt);
     cloudWrites.add(write);
     write.finally(() => cloudWrites.delete(write)).catch(() => {});

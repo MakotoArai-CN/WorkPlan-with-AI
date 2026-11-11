@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from './runtime.js';
 import { stripDataUrlPrefix, describeSavedLocation } from './export-payload.js';
 import { convertOklchColorsInValue } from './color.js';
+import { sanitizeHtml } from './safe-html.js';
+import { escapeHtml } from './safe-content.js';
 
 // Components format their save toasts with this, and reach it through the export
 // module they already import.
@@ -274,7 +276,8 @@ export async function exportToHTML(content, filename = 'export.html', title = 'E
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title}</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+    <title>${escapeHtml(title)}</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
         pre { background: #f4f4f4; padding: 12px; border-radius: 4px; overflow-x: auto; }
@@ -285,7 +288,7 @@ export async function exportToHTML(content, filename = 'export.html', title = 'E
         blockquote { border-left: 4px solid #ddd; margin: 0; padding-left: 16px; color: #666; }
     </style>
 </head>
-<body>${content}</body>
+<body>${sanitizeHtml(content)}</body>
 </html>`;
         const result = await downloadFile(html, filename, {
             useSaveDialog: isTauriRuntime,

@@ -1,64 +1,119 @@
 name: Arch Package
 
 on:
+  workflow_call:
+    inputs:
+      portable-artifact:
+        description: Same-run artifact containing the native Linux tarball
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      upload-to-release:
+        description: Attach the package to the existing published VERSION release
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-arch-package:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Read version
-        id: version
-        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> $GITHUB_OUTPUT
-
       - name: Install Arch build tools
         run: |
           pacman -Syu --noconfirm --needed base-devel git sudo curl
           useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
-      - name: Sync PKGBUILD to the published release asset
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        shell: bash
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/WorkPlan_${version}_linux-x86_64.tar.gz"
-          sum="$(curl -fsSL "${url}.sha256" | awk '{print $1}')"
-          test -n "$sum"
-          echo "pinning PKGBUILD to ${version} (${sum})"
-          sed -i "s/^pkgver=.*/pkgver=${version}/" packaging/arch/PKGBUILD
-          sed -i "s/^sha256sums=.*/sha256sums=('${sum}')/" packaging/arch/PKGBUILD
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Build Arch package
+      - name: Download same-run native Linux archive
+        if: inputs.portable-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.portable-artifact }}
+          path: portable-assets
+
+      - name: Download published native Linux archive for a manual build
+        if: inputs.portable-artifact == ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          chown -R builder:builder .
-          cd packaging/arch
-          sudo -u builder makepkg -s --noconfirm
+          mkdir -p portable-assets
+          archive="WorkPlan_${VERSION}_linux-x86_64.tar.gz"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+          curl --fail --location --retry 3 "${base}/${archive}" -o "portable-assets/${archive}"
+          curl --fail --location --retry 3 "${base}/${archive}.sha256" -o "portable-assets/${archive}.sha256"
 
-      - name: Verify package dependencies
+      - name: Pin package to the verified native archive
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash packaging/arch/prepare-package.sh "$VERSION" portable-assets
+
+      - name: Install runtime dependencies
+        run: pacman -S --noconfirm --needed webkit2gtk-4.1 gtk3 librsvg libappindicator
+
+      - name: Build binary and source packages as an unprivileged user
+        run: |
+          chown -R builder:builder packaging/arch
+          cd packaging/arch
+          sudo -u builder makepkg --noconfirm
+          sudo -u builder bash -c 'makepkg --printsrcinfo > .SRCINFO'
+          sudo -u builder makepkg --source --noconfirm
+
+      - name: Verify install, desktop integration and shared libraries
         run: |
           pacman -U --noconfirm packaging/arch/*.pkg.tar.zst
-          missing=$(ldd /usr/bin/workplan | grep 'not found' || true)
-          if [ -n "$missing" ]; then
-            echo "$missing"
-            exit 1
-          fi
+          test -x /usr/bin/workplan
+          test -f /usr/share/applications/workplan.desktop
+          test -f /usr/share/icons/hicolor/128x128/apps/workplan.png
+          missing="$(ldd /usr/bin/workplan | grep 'not found' || true)"
+          if [ -n "$missing" ]; then printf '%s\n' "$missing"; exit 1; fi
+          pacman -Qkk workplan-bin
+
+      - name: Generate package checksums
+        run: |
+          cd packaging/arch
+          sha256sum -- *.pkg.tar.zst *.src.tar.gz > arch-SHA256SUMS.sha256
 
       - name: Upload Arch package artifact
         uses: actions/upload-artifact@v4
         with:
           name: arch-package
-          path: packaging/arch/*.pkg.tar.zst
+          path: |
+            packaging/arch/*.pkg.tar.zst
+            packaging/arch/*.src.tar.gz
+            packaging/arch/*.sha256
+          if-no-files-found: error
 
-      - name: Upload Arch package to release
-        uses: softprops/action-gh-release@v2
+  attach-manual-package:
+    if: inputs.upload-to-release == true
+    needs: build-arch-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          files: packaging/arch/*.pkg.tar.zst
+          name: arch-package
+          path: arch-package
+      - name: Attach to an existing release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build-arch-package.outputs.version }}
+        run: |
+          gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null
+          gh release upload "v${VERSION}" arch-package/* --repo "$GITHUB_REPOSITORY"

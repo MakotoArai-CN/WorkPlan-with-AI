@@ -21,7 +21,11 @@ let currentDeviceKey = 'machine-a.install-a';
 let deviceKeyAvailable = true;
 
 mock.module('@tauri-apps/api/core', () => ({
-    invoke: async (cmd) => {
+    invoke: async (cmd, args) => {
+        if (cmd === 'vault_verify_master') {
+            const { verifyPassword } = await import('../src/lib/utils/crypto.js');
+            return { valid: await verifyPassword(args.password, localStorage.getItem('workplan_master_hash')), attempted: true, retryAfterMs: 0 };
+        }
         if (cmd === 'get_device_key') {
             if (!deviceKeyAvailable) throw new Error('unavailable');
             return currentDeviceKey;

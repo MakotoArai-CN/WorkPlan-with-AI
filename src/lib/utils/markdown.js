@@ -3,44 +3,11 @@ import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js';
 import markedKatex from 'marked-katex-extension';
 import { gfmHeadingId } from 'marked-gfm-heading-id';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml, sanitizeDiagramSvg } from './safe-html.js';
+import { escapeHtml, safeLinkUrl, safeImageUrl } from './safe-content.js';
 
 let mermaidModule = null;
 let mermaidInitialized = false;
-
-const HTML_SANITIZE_OPTIONS = {
-    USE_PROFILES: {
-        html: true,
-        svg: true,
-        svgFilters: true,
-        mathMl: true
-    },
-    ADD_ATTR: ['target', 'rel', 'class', 'disabled', 'checked', 'type', 'id', 'aria-hidden', 'role'],
-    ALLOW_DATA_ATTR: true,
-    FORBID_TAGS: ['script', 'iframe', 'foreignObject']
-};
-
-const SVG_SANITIZE_OPTIONS = {
-    USE_PROFILES: {
-        svg: true,
-        svgFilters: true
-    },
-    ADD_ATTR: ['class', 'id', 'style', 'role', 'aria-hidden'],
-    FORBID_TAGS: ['script', 'foreignObject']
-};
-const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    return String(text).replace(/[&<>"']/g, m => map[m]);
-}
 
 async function initMermaid() {
     if (mermaidInitialized) return;
@@ -51,6 +18,11 @@ async function initMermaid() {
             startOnLoad: false,
             theme: 'default',
             securityLevel: 'strict',
+            secure: ['securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'suppressErrorRendering', 'themeCSS', 'flowchart', 'htmlLabels', 'dompurifyConfig'],
+            themeCSS: '',
+            suppressErrorRendering: true,
+            maxTextSize: 50000,
+            maxEdges: 1000,
             fontSize: 14,
             flowchart: {
                 useMaxWidth: true,
@@ -89,6 +61,8 @@ marked.use(markedKatex({
     displayMode: false,
     strict: false,
     trust: false,
+    maxSize: 20,
+    maxExpand: 1000,
     macros: {
         "\\RR": "\\mathbb{R}",
         "\\NN": "\\mathbb{N}",
@@ -123,42 +97,24 @@ function extractCodeFromRaw(raw, lang) {
     return raw;
 }
 
-function sanitizeHtml(html, options = HTML_SANITIZE_OPTIONS) {
-    return DOMPurify.sanitize(html, options);
+function sanitizeLinkHref(href) {
+    return escapeHtml(safeLinkUrl(href) || '#');
 }
 
-function sanitizeLinkHref(href) {
-    const value = String(href || '').trim();
-    if (!value) {
-        return '#';
-    }
-
-    if (
-        value.startsWith('#') ||
-        value.startsWith('/') ||
-        value.startsWith('./') ||
-        value.startsWith('../')
-    ) {
-        return escapeHtml(value);
-    }
-
-    try {
-        const parsed = new URL(value);
-        if (!SAFE_LINK_PROTOCOLS.has(parsed.protocol)) {
-            return '#';
-        }
-        return escapeHtml(parsed.toString());
-    } catch {
-        return escapeHtml(value);
-    }
+function diagramPlaceholder(id) {
+    return document.getElementById('user-content-mermaid-placeholder-' + id);
 }
 
 const renderer = {
+    html(token) {
+        // AI/cloud markdown is content, never application HTML or CSS.
+        return escapeHtml(token.text || token.raw || '');
+    },
     listitem(token) {
         const text = token.text || '';
         if (/^\s*\[[ xX]\]/.test(text)) {
             const checked = /^\s*\[[xX]\]/.test(text);
-            const content = text.replace(/^\s*\[[ xX]\]\s*/, '');
+            const content = marked.parseInline(text.replace(/^\s*\[[ xX]\]\s*/, ''));
             return `<li class="task-list-item"><input type="checkbox" ${checked ? 'checked' : ''} disabled><span>${content}</span></li>`;
         }
         return false;
@@ -178,7 +134,7 @@ const renderer = {
                     }
                     
                     if (!mermaidModule) {
-                        const element = document.getElementById('mermaid-placeholder-' + id);
+                        const element = diagramPlaceholder(id);
                         if (element) {
                             element.innerHTML = sanitizeHtml(
                                 `<pre><code>${escapeHtml(code)}</code></pre><p class="error-msg">Mermaid 未加载</p>`
@@ -189,15 +145,18 @@ const renderer = {
                     }
                     
                     try {
-                        const element = document.getElementById('mermaid-placeholder-' + id);
+                        const element = diagramPlaceholder(id);
                         if (element) {
                             const result = await mermaidModule.default.render('svg-' + id, code);
-                            element.innerHTML = sanitizeHtml(result.svg, SVG_SANITIZE_OPTIONS);
+                            const image = document.createElement('img');
+                            image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sanitizeDiagramSvg(result.svg));
+                            image.alt = 'Mermaid diagram';
+                            element.replaceChildren(image);
                             element.classList.remove('mermaid-placeholder');
                             element.classList.add('mermaid-container');
                         }
                     } catch (e) {
-                        const element = document.getElementById('mermaid-placeholder-' + id);
+                        const element = diagramPlaceholder(id);
                         if (element) {
                             const message = e instanceof Error ? e.message : String(e);
                             element.innerHTML = sanitizeHtml(
@@ -249,7 +208,7 @@ const renderer = {
         const alertMatch = text.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i);
         if (alertMatch) {
             const type = alertMatch[1].toLowerCase();
-            const content = text.replace(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i, '');
+            const content = marked.parse(text.replace(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i, ''));
             const icons = {
                 note: 'ph-info',
                 tip: 'ph-lightbulb',
@@ -268,12 +227,18 @@ const renderer = {
     link(token) {
         const href = token.href || '';
         const title = token.title || '';
-        const text = token.text || '';
+        const text = token.tokens ? this.parser.parseInline(token.tokens) : escapeHtml(token.text || '');
         const safeHref = sanitizeLinkHref(href);
         const isExternal = safeHref.startsWith('http://') || safeHref.startsWith('https://');
         const target = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
         const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
         return `<a href="${safeHref}"${target}${titleAttr}>${text}</a>`;
+    },
+
+    image(token) {
+        const url = safeImageUrl(token.href);
+        if (!url) return escapeHtml(token.text || '');
+        return `<img src="${escapeHtml(url)}" alt="${escapeHtml(token.text || '')}" referrerpolicy="no-referrer" loading="lazy">`;
     }
 };
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { nextProtectionFailure, eraseRecordKeys } from '../src/lib/utils/vault-protection.js';
+import { nextProtectionFailure } from '../src/lib/utils/vault-protection.js';
 import { validateMasterPassword } from '../src/lib/utils/master-password-policy.js';
 
 describe('master password policy', () => {
@@ -18,7 +18,7 @@ describe('master password policy', () => {
     });
 });
 
-describe('opt-in absolute protection', () => {
+describe('opt-in non-destructive protection', () => {
     test('disabled policy never increments attempts', () => {
         const disabled = { enabled: false, failures: 0, lockedUntil: 0 };
         expect(nextProtectionFailure(disabled, 1)).toBe(disabled);
@@ -40,16 +40,4 @@ describe('opt-in absolute protection', () => {
         expect(state.failures > 10).toBe(true);
     });
 
-    test('cloud erase covers tasks, both secure formats and account key bundle', () => {
-        const keys = eraseRecordKeys('account');
-        expect(keys).toHaveLength(8);
-        expect(new Set(keys).size).toBe(8);
-        expect(keys).toContain('account');
-        expect(keys).toContain('__workplan_key_bundle_v2__:account');
-        for (const domain of ['notes', 'vault', 'worklog']) {
-            expect(keys).toContain(`__workplan_secure_${domain}_v1__:account`);
-            expect(keys).toContain(`__workplan_secure_${domain}_v2__:account`);
-        }
-        expect(eraseRecordKeys('')).toEqual([]);
-    });
 });

@@ -32,6 +32,33 @@ beforeEach(() => {
 });
 
 describe('notes store persistence', () => {
+    test('empty account storage clears previously loaded notes and retains saved custom prompts', () => {
+        localStorage.setItem('workplan_notes', JSON.stringify({ notes: [{ id: 'old-account', content: 'private' }], aiPrompts: [{ id: 'custom', label: 'Mine', prompt: 'My custom prompt' }] }));
+        notesStore.load();
+        expect(snapshotNotes().notes).toHaveLength(1);
+        expect(snapshotNotes().aiPrompts[0].prompt).toBe('My custom prompt');
+        localStorage.removeItem('workplan_notes');
+        notesStore.load();
+        expect(snapshotNotes().notes).toHaveLength(0);
+        expect(snapshotNotes().aiPrompts).toHaveLength(5);
+    });
+    test('unchanged edits keep the note identity and timestamp and do not write storage', () => {
+        notesStore.addNote({ title: 'Unchanged', content: 'Body' });
+        const note = snapshotNotes().notes[0];
+        const originalSetItem = localStorage.setItem;
+        let writes = 0;
+        let notifications = 0;
+        const unsubscribe = notesStore.subscribe(() => notifications += 1);
+        localStorage.setItem = (...args) => { writes += 1; return originalSetItem.apply(localStorage, args); };
+        try {
+            notesStore.updateNote(note.id, { title: note.title, content: note.content });
+            notesStore.updateNote('missing-id', { title: 'No-op' });
+            expect(writes).toBe(0);
+            expect(notifications).toBe(1);
+            expect(snapshotNotes().notes[0]).toBe(note);
+            expect(snapshotNotes().notes[0].updatedAt).toBe(note.updatedAt);
+        } finally { localStorage.setItem = originalSetItem; unsubscribe(); }
+    });
     test('adds a note and uses a collision-resistant id', () => {
         notesStore.addNote({ title: 'A', content: 'one' });
         notesStore.addNote({ title: 'B', content: 'two' });

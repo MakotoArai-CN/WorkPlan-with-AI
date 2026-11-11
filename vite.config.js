@@ -162,7 +162,13 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    installSplashScreen()
+    installSplashScreen().setOnExitAnimationListener { splash ->
+      splash.view.animate()
+        .alpha(0f)
+        .setDuration(180L)
+        .withEndAction { splash.remove() }
+        .start()
+    }
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     installBackHandlers()
@@ -612,6 +618,7 @@ const ANDROID_LIGHT_THEME = `<resources xmlns:tools="http://schemas.android.com/
 
     <style name="Theme.workplan" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">#f8fafc</item>
         <item name="android:navigationBarColor">#f8fafc</item>
         <item name="android:fontFamily">sans</item>
     </style>
@@ -629,6 +636,7 @@ const ANDROID_NIGHT_THEME = `<resources xmlns:tools="http://schemas.android.com/
     </style>
 
     <style name="Theme.workplan" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">#0f172a</item>
         <item name="android:navigationBarColor">#0f172a</item>
         <item name="android:fontFamily">sans</item>
     </style>

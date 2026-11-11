@@ -16,7 +16,13 @@ function createStorage() {
 globalThis.localStorage = createStorage();
 globalThis.sessionStorage = createStorage();
 globalThis.window = globalThis;
-mock.module('@tauri-apps/api/core', () => ({ invoke: async () => 'test-device' }));
+mock.module('@tauri-apps/api/core', () => ({ invoke: async (command, args) => {
+    if (command === 'vault_verify_master') {
+        const { verifyPassword } = await import('../src/lib/utils/crypto.js');
+        return { valid: await verifyPassword(args.password, localStorage.getItem('workplan_master_hash')), attempted: true, retryAfterMs: 0 };
+    }
+    return 'test-device';
+} }));
 mock.module('../src/lib/utils/runtime.js', () => ({ isTauriRuntime: true, isAndroidRuntime: () => false }));
 const { encrypt, hashPassword } = await import('../src/lib/utils/crypto.js');
 const { passwordsStore } = await import('../src/lib/stores/passwords.js');
@@ -66,6 +72,41 @@ describe('v4 vault at rest', () => {
         expect(passwordsStore.decryptPassword(entry.password)).toBe('gh-secret');
     });
 
+    test('creates validated custom types and persists them across reload', async () => {
+        passwordsStore.updatePassword(currentEntry().id, { notes: 'pending entry write' });
+        expect(passwordsStore.addCategory('  Home devices  ')).toEqual({ success: true, category: 'Home devices' });
+        await flush();
+        expect(JSON.parse(localStorage.getItem('workplan_passwords_settings')).categories).toContain('Home devices');
+        expect(passwordsStore.addCategory('home DEVICES').error).toBe('category_exists');
+        expect(passwordsStore.addCategory('   ').error).toBe('category_empty');
+        passwordsStore.updatePassword(currentEntry().id, { category: 'Home devices' });
+        passwordsStore.lock();
+        passwordsStore.load();
+        expect(passwordsStore.addCategory('Locked type').error).toBe('category_locked');
+        expect(await passwordsStore.unlock(MASTER)).toBe(true);
+        expect(currentEntry().category).toBe('Home devices');
+        expect(passwordsStore.getPortableSyncPayload().categories).toContain('Home devices');
+        expect(JSON.parse(localStorage.getItem('workplan_passwords_settings')).categories).toContain('Home devices');
+    });
+
+    test('imports and cloud replacement keep custom categories filterable and durable', async () => {
+        passwordsStore.addPasswordsBatch([{ title: 'Imported', password: 'value', category: 'Imported type' }]);
+        expect(passwordsStore.getPortableSyncPayload().categories).toContain('Imported type');
+        expect(passwordsStore.replaceFromPortableSync({
+            categories: ['Remote empty type'],
+            passwords: [{ id: 'remote-entry', title: 'Remote', password: 'remote-value', category: 'Remote entry type' }]
+        }).success).toBe(true);
+        const settings = JSON.parse(localStorage.getItem('workplan_passwords_settings'));
+        expect(settings.categories).toContain('Imported type');
+        expect(settings.categories).toContain('Remote empty type');
+        expect(settings.categories).toContain('Remote entry type');
+        passwordsStore.lock();
+        passwordsStore.load();
+        expect(await passwordsStore.unlock(MASTER)).toBe(true);
+        expect(currentEntry().category).toBe('Remote entry type');
+        expect(passwordsStore.getPortableSyncPayload().categories).toContain('Remote empty type');
+    });
+
     test('changes the master transactionally and survives lock/reload', async () => {
         // Keep an old-key debounced save outstanding while changing the master.
         passwordsStore.updatePassword(currentEntry().id, { notes: 'pending edit' });
@@ -90,10 +131,10 @@ describe('v4 vault at rest', () => {
     });
 
     test('a stale verification cannot increment the next account protection state', async () => {
-        localStorage.setItem('workplan_vault_protection', JSON.stringify({ enabled: true, failures: 5, lockedUntil: 0 }));
+        localStorage.setItem('workplan_vault_protection', JSON.stringify({ version: 2, enabled: true, failures: 5, lockedUntil: 0 }));
         const unlocking = passwordsStore.unlock('incorrect master');
         passwordsStore.suspendForAccountSwitch();
-        localStorage.setItem('workplan_vault_protection', JSON.stringify({ enabled: true, failures: 0, lockedUntil: 0 }));
+        localStorage.setItem('workplan_vault_protection', JSON.stringify({ version: 2, enabled: true, failures: 0, lockedUntil: 0 }));
         expect(await unlocking).toBe(false);
         expect(passwordsStore.getProtection().failures).toBe(0);
     });
@@ -118,6 +159,23 @@ describe('v4 vault at rest', () => {
         const unchanged = JSON.parse(localStorage.getItem('workplan_passwords')).find(row => row.id === previous.id);
         expect(unchanged.meta).toBe(previous.meta);
         expect(unchanged.password).toBe(previous.password);
+    });
+
+    test('the eleventh failure disables only opted-in quick unlock and never deletes records', async () => {
+        expect((await passwordsStore.enablePin('395718')).success).toBe(true);
+        const ciphertext = localStorage.getItem('workplan_passwords');
+        localStorage.setItem('workplan_vault_protection', JSON.stringify({
+            version: 2, enabled: true, action: 'disable_quick_unlock', failures: 10, lockedUntil: 0
+        }));
+        passwordsStore.lock();
+        expect(await passwordsStore.unlock('incorrect master')).toBe(false);
+        expect(passwordsStore.getProtection().failures).toBe(11);
+        expect(passwordsStore.isPinEnabled()).toBe(false);
+        expect(localStorage.getItem('workplan_passwords')).toBe(ciphertext);
+        expect(localStorage.getItem('workplan_master_hash')).toBeTruthy();
+        localStorage.setItem('workplan_vault_protection', JSON.stringify({ ...passwordsStore.getProtection(), lockedUntil: 0 }));
+        expect(await passwordsStore.unlock(MASTER)).toBe(true);
+        expect(passwordsStore.decryptPassword(currentEntry().password)).toBe('gh-secret');
     });
 
     test('entry key cache never reuses a key for a different master', async () => {

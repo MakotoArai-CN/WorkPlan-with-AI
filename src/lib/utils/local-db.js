@@ -407,56 +407,20 @@ export async function flushLocalDatabase() {
     }
 }
 
-export async function persistEraseJournal(pending) {
-    if (pending) localStorage.setItem(ERASE_KEY, JSON.stringify(pending));
-    else localStorage.removeItem(ERASE_KEY);
-    if (isTauriRuntime) await enqueueSave();
-}
-
-export async function eraseLocalDatabase(pending) {
-    erasing = true;
-    if (timer) clearTimeout(timer);
-    timer = null;
-    await saveChain.catch(() => {});
-    const keys = { [ERASE_KEY]: JSON.stringify(pending) };
-    if (isTauriRuntime) {
-        await invoke('local_db_erase', { content: JSON.stringify(buildSnapshot(keys)) });
-        persistedKeys = JSON.stringify(keys);
-    }
-    // Use the original methods: normal writes are fenced while erasing.
-    memoryKeys = new Map(Object.entries(keys));
-    const remove = originalRemoveItem;
-    // Bypass the fence only for synchronous removal of the WebView working copy.
-    const existing = [];
-    for (let index = 0; index < localStorage.length; index++) {
-        const key = localStorage.key(index);
-        if (key?.startsWith(PREFIX) || key?.startsWith(LEGACY_PREFIX)) existing.push(key);
-    }
-    for (const key of existing) {
-        if (remove) remove.call(localStorage, key);
-        else localStorage.removeItem(key);
-    }
-    localStorage.setItem(ERASE_KEY, keys[ERASE_KEY]);
-    sessionStorage.clear();
-    if (timer) clearTimeout(timer);
-    timer = null;
-    erasing = true;
-}
-
 export async function localDatabaseInfo() {
     if (!isTauriRuntime) return null;
     return invoke('local_db_info');
 }
 
-export async function exportLocalDatabase(destination) {
+export async function exportLocalDatabase(destination, passphrase = '') {
     if (!isTauriRuntime) throw new Error('仅桌面版支持本地数据库备份');
     await flushPendingMirror();
-    return invoke('local_db_backup', { destination });
+    return invoke('local_db_backup', { destination, passphrase });
 }
 
-export async function restoreLocalDatabase(source) {
+export async function restoreLocalDatabase(source, passphrase = '') {
     if (!isTauriRuntime) throw new Error('仅桌面版支持本地数据库恢复');
-    const content = await invoke('local_db_restore', { source });
+    const content = await invoke('local_db_restore', { source, passphrase });
     const snapshot = readSnapshot(content);
     if (!snapshot) throw new Error('备份文件格式不正确');
     applyKeys(snapshot.keys);
