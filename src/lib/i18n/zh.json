@@ -178,6 +178,7 @@
     "category_locked": "请先解锁密码库",
     "category_save_failed": "类型保存失败，请重试",
     "master_weak": "不允许使用常见弱密码、重复字符或简单数字作为主密码，请使用独特的长密码。",
+    "protection_brief": "多次输错主密码后暂时限制解锁，默认关闭。",
     "protection_enable": "启用额外冷静期",
     "protection_action_cooldown": "仅冷静期，不修改快捷解锁",
     "protection_action_quick": "第11次失败起关闭本机PIN与生物识别",

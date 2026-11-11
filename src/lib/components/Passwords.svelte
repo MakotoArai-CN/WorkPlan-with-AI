@@ -90,6 +90,7 @@
     let editingPassword = null;
     let showSidebar = false;
     let showCustomCategoryModal = false;
+    let customCategoryOrigin = null;
     let customCategoryName = "";
     let customCategoryError = "";
     let customCategoryTarget = "filter";
@@ -619,7 +620,9 @@ let confirmNewMasterPassword = "";
         showAddModal = true;
     }
 
-    async function openCustomCategory(target = "filter") {
+    async function openCustomCategory(target = "filter", event) {
+        const trigger = event?.currentTarget;
+        customCategoryOrigin = trigger?.getBoundingClientRect() || null;
         customCategoryTarget = target;
         customCategoryName = "";
         customCategoryError = "";
@@ -1561,7 +1564,7 @@ async function handleChangeMasterPassword() {
                     {/each}
                 </div>
                 <div class="p-3 border-t border-slate-100">
-                    <button type="button" on:click={() => openCustomCategory("filter")}
+                    <button type="button" on:click={(event) => openCustomCategory("filter", event)}
                         class="w-full flex items-center justify-center gap-2 rounded-lg border border-dashed border-amber-300 px-3 py-2 text-sm font-bold text-amber-700 hover:bg-amber-50 transition-colors">
                         <i class="ph ph-folder-plus"></i> {$_('passwords.custom_category')}
                     </button>
@@ -2282,7 +2285,7 @@ async function handleChangeMasterPassword() {
                         <label for="password-new-category" class="text-xs font-bold text-slate-500 uppercase">
                             {$_('passwords.label_category')}
                         </label>
-                        <button type="button" on:click={() => openCustomCategory("new")}
+                        <button type="button" on:click={(event) => openCustomCategory("new", event)}
                             class="text-xs font-bold text-amber-700 hover:text-amber-800">
                             <i class="ph ph-plus"></i> {$_('passwords.custom_category')}
                         </button>
@@ -2396,7 +2399,7 @@ async function handleChangeMasterPassword() {
                         <label for="password-edit-category" class="text-xs font-bold text-slate-500 uppercase">
                             {$_('passwords.label_category')}
                         </label>
-                        <button type="button" on:click={() => openCustomCategory("edit")}
+                        <button type="button" on:click={(event) => openCustomCategory("edit", event)}
                             class="text-xs font-bold text-amber-700 hover:text-amber-800">
                             <i class="ph ph-plus"></i> {$_('passwords.custom_category')}
                         </button>
@@ -2511,6 +2514,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 <AnimatedModal show={showCustomCategoryModal} onClose={() => (showCustomCategoryModal = false)} zIndex={65}
+    origin={customCategoryOrigin} animationEasing="linear"
     ariaLabel={$_('passwords.custom_category')} panelClass="max-w-sm password-panel p-5 md:p-6">
     <h3 class="text-xl font-bold mb-2">{$_('passwords.custom_category')}</h3>
     <p id="password-category-hint" class="text-sm text-slate-500 mb-4">{$_('passwords.custom_category_hint')}</p>

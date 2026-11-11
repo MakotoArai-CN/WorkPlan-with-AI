@@ -178,6 +178,7 @@
     "category_locked": "Unlock the vault first",
     "category_save_failed": "Could not save the type. Please try again.",
     "master_weak": "Common passwords, repeated characters and simple numbers cannot be used as the master password. Choose a unique long password.",
+    "protection_brief": "Temporarily limit unlocks after repeated failures. Off by default.",
     "protection_enable": "Enable additional cooldowns",
     "protection_action_cooldown": "Cooldown only; keep quick-unlock enrollment",
     "protection_action_quick": "Disable local PIN and biometrics from failure 11",

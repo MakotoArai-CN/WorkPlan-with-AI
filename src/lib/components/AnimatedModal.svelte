@@ -9,6 +9,8 @@
     export let closeOnBackdrop = true;
     export let dismissible = true;
     export let ariaLabel = '';
+    export let origin = null;
+    export let animationEasing = null;
 
     let panel;
     let content;
@@ -51,14 +53,16 @@
 
     async function open() {
         const token = ++animationToken;
+        // Capture before mounting/autofocus can move focus into the dialog.
+        const openingOrigin = origin || triggerRect();
         await tick();
         if (token !== animationToken) return;
         if (!panel || !show || !rendered) return;
         cancelAnimations();
         closing = false;
         const target = panel.getBoundingClientRect();
-        originRect = triggerRect();
-        const origin = originRect;
+        originRect = openingOrigin;
+        const startRect = originRect;
         const reduced = reducedMotion();
 
         if (reduced) {
@@ -73,10 +77,10 @@
         if (content) content.style.opacity = '0';
 
         const duration = 420;
-        const dx = origin ? origin.left + origin.width / 2 - (target.left + target.width / 2) : 0;
-        const dy = origin ? origin.top + origin.height / 2 - (target.top + target.height / 2) : 0;
-        const sx = origin ? Math.max(0.18, Math.min(1, origin.width / Math.max(target.width, 1))) : 0.92;
-        const sy = origin ? Math.max(0.18, Math.min(1, origin.height / Math.max(target.height, 1))) : 0.92;
+        const dx = startRect ? startRect.left + startRect.width / 2 - (target.left + target.width / 2) : 0;
+        const dy = startRect ? startRect.top + startRect.height / 2 - (target.top + target.height / 2) : 0;
+        const sx = startRect ? Math.max(0.06, Math.min(1, startRect.width / Math.max(target.width, 1))) : 0.92;
+        const sy = startRect ? Math.max(0.06, Math.min(1, startRect.height / Math.max(target.height, 1))) : 0.92;
 
         animate(backdrop, [
             { opacity: 0 },
@@ -86,11 +90,11 @@
         animate(panel, [
             { opacity: 0, transform: `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})` },
             { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1, 1)' }
-        ], { duration, easing: 'cubic-bezier(0.22, 0.8, 0.24, 1)', fill: 'both' });
+        ], { duration, easing: animationEasing || 'cubic-bezier(0.22, 0.8, 0.24, 1)', fill: 'both' });
 
         animate(content, [
-            { opacity: 0.15, filter: 'blur(10px)' },
-            { opacity: 0.15, filter: 'blur(10px)', offset: 0.5 },
+            { opacity: 0.15, filter: animationEasing === 'linear' ? 'none' : 'blur(10px)' },
+            { opacity: 0.15, filter: animationEasing === 'linear' ? 'none' : 'blur(10px)', offset: 0.5 },
             { opacity: 1, filter: 'blur(0px)' }
         ], { duration, easing: 'ease-out', fill: 'both' });
     }
@@ -111,13 +115,13 @@
         const origin = originRect || triggerRect();
         const dx = origin ? origin.left + origin.width / 2 - (target.left + target.width / 2) : 0;
         const dy = origin ? origin.top + origin.height / 2 - (target.top + target.height / 2) : 0;
-        const sx = origin ? Math.max(0.18, Math.min(1, origin.width / Math.max(target.width, 1))) : 0.92;
-        const sy = origin ? Math.max(0.18, Math.min(1, origin.height / Math.max(target.height, 1))) : 0.92;
+        const sx = origin ? Math.max(0.06, Math.min(1, origin.width / Math.max(target.width, 1))) : 0.92;
+        const sy = origin ? Math.max(0.06, Math.min(1, origin.height / Math.max(target.height, 1))) : 0.92;
 
         animate(panel, [
             { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1, 1)' },
             { opacity: 0, transform: `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})` }
-        ], { duration: 300, easing: 'cubic-bezier(0.4, 0, 0.8, 0.2)', fill: 'both' });
+        ], { duration: 300, easing: animationEasing || 'cubic-bezier(0.4, 0, 0.8, 0.2)', fill: 'both' });
         animate(backdrop, [{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: 'ease-in', fill: 'both' });
         animate(content, [
             { opacity: 1, filter: 'blur(0px)' },

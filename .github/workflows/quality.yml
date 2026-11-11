@@ -19,6 +19,8 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     steps:
       - uses: actions/checkout@v4
+      - name: Check public repository file policy
+        run: node packaging/check-public-files.mjs
       - name: Checkout pinned G4F assets
         uses: actions/checkout@v4
         with:

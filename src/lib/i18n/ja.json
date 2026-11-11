@@ -178,6 +178,7 @@
     "category_locked": "先に保管庫のロックを解除してください",
     "category_save_failed": "タイプを保存できませんでした。もう一度お試しください。",
     "master_weak": "一般的な弱いパスワード、連続した同じ文字、単純な数字は使用できません。固有の長いマスターパスワードを設定してください。",
+    "protection_brief": "繰り返し失敗した場合に解除を一時制限します。初期設定は無効です。",
     "protection_enable": "追加の待機時間を有効化",
     "protection_action_cooldown": "待機のみ・クイック解除を維持",
     "protection_action_quick": "11回目以降は本機PINと生体認証を無効化",

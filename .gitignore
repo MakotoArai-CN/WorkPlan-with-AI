@@ -183,3 +183,16 @@ web_modules/
 
 # Local agent memory
 .claude/
+
+# Internal documentation and local validation artifacts (never publish)
+/docs/internal/
+/docs/development/
+/docs/testing/
+/docs/SECURITY_NOTES.md
+/AGENTS.md
+/DEVELOPMENT*.md
+/TESTING*.md
+/TEST_REPORT*.md
+/test-results/
+/playwright-report/
+/output/playwright/

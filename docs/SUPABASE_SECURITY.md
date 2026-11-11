@@ -1,23 +1,15 @@
-# Supabase public-table incident response
+# Supabase deployment and incident response
 
-## Scope and access
+## Deployment responsibility
 
-The alert concerns project `aietizthbhsvnwwkuddz`. A table being in schema
-`public` is normal for a PostgREST API; **RLS disabled is not**. Frontend query
+A table being in schema `public` is normal for a PostgREST API;
+**RLS disabled is not**. Frontend query
 filters, encryption, hiding a URL, or rebuilding the app cannot enable RLS.
 
-The repository's local project configuration uses a publishable client key.
-No project-owner database connection or Management API credential is available
-to this change. **The hosted database has not been modified or verified.**
-The project owner must apply the migration in Supabase SQL Editor. Never put
+Installing or updating the app does not change hosted database policies.
+The project owner must apply and verify the migration in Supabase SQL Editor. Never put
 database passwords, `service_role`/`sb_secret_` keys, or Management API tokens
 in Vite variables, a desktop app, Git, chat, or browser code.
-
-Local validation executed both scripts against isolated PostgreSQL (PGlite):
-the migration was applied twice over an existing legacy table with an old
-allow-all policy, then the anon-role probes passed with zero persisted fixture
-rows. The normalized eleven-table schema also enabled/forced RLS and passed
-the same probes. This checks SQL execution, not the hosted project's state.
 
 ## Immediate actions (project owner)
 

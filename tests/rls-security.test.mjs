@@ -64,9 +64,10 @@ describe('Supabase RLS hardening', () => {
         expect(tasks).not.toContain(".select('content, updated_at')\n        .eq('user_key', accessKey)");
     });
 
-    test('deployment instructions distinguish local checks from actual owner-side remediation', () => {
+    test('public deployment instructions require owner-side remediation', () => {
         const instructions = read('docs/SUPABASE_SECURITY.md');
-        expect(instructions).toContain('hosted database has not been modified or verified');
+        expect(instructions).toContain('Installing or updating the app does not change hosted database policies');
+        expect(instructions).toContain('project owner must apply and verify');
         expect(instructions).toContain('previously public credentials as compromised');
         expect(instructions).toContain('additional authenticated data');
         const probes = read('docs/sql/verify_rls.sql');
