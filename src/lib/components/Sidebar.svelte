@@ -175,22 +175,7 @@
         }
     }
 
-    async function clearData() {
-        const t = get(_);
-        const confirmed = await showConfirm({
-            title: t('settings.clear_title'),
-            message: t('settings.clear_confirm', { values: { key: $taskStore.accessKey } }),
-            confirmText: t('settings.clear_confirm_btn'),
-            cancelText: t('common.cancel'),
-            variant: 'danger'
-        });
-        if (confirmed) {
-            await taskStore.clearAllData($taskStore.accessKey);
-            await flushLocalDatabase();
-            showToast({ message: t('settings.clear_success'), type: 'success' });
-            location.reload();
-        }
-    }
+
 </script>
 
 <svelte:window on:resize={handleNavResize} />
@@ -328,15 +313,6 @@
             >
                 <i class="ph-bold ph-sign-out"></i>
                 {#if !collapsed}<span>{$_('settings.switch_account')}</span>{/if}
-            </button>
-
-            <button
-                on:click={clearData}
-                class={`${collapsed ? '' : 'col-span-2'} flex items-center justify-center rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition ${collapsed ? 'h-11' : 'gap-1 py-2 text-[10px]'}`}
-                title={$_('settings.danger_zone')}
-            >
-                <i class="ph ph-trash"></i>
-                {#if !collapsed}<span>{$_('settings.danger_zone')}</span>{/if}
             </button>
 
         </div>

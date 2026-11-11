@@ -19,14 +19,8 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout pinned G4F assets
-        uses: actions/checkout@v4
-        with:
-          repository: gpt4free/g4f.dev
-          ref: f0f09e3716a0ce108b5d1acdd0f6523a21baab90
-          path: g4f.dev
-          fetch-depth: 1
-          sparse-checkout: dist
+      - name: Check public repository file policy
+        run: node packaging/check-public-files.mjs
       - uses: oven-sh/setup-bun@v1
         with:
           bun-version: latest

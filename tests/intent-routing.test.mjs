@@ -65,7 +65,7 @@ describe('web search intent', () => {
             '搜索一下最新的 AI 新闻',
             '帮我查一下今天上海的天气',
             '访问网站 example.com 看看',
-            'https://g4f.dev 是什么',
+            'https://example.com 是什么',
             '今天股价行情怎么样',
             '联网搜索任务管理最佳实践',
             "what's the latest AI news",

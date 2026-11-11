@@ -189,3 +189,44 @@ test('late replies after history clear cannot replace a newer response', () => s
     assert.equal(get(ai.chatHistory).at(-1).content,'new reply');
     assert.equal(get(ai.isAiLoading),false);
 `));
+
+test('ordinary chat never classifies against application stores or includes earlier app data', () => scenario(`
+    taskStore.update(state=>({...state,tasks:[{id:'secret-task',title:'PRIVATE_TASK_SENTINEL',note:'PRIVATE_TASK_BODY'}]}));
+    ai.aiChatContext.set({scope:'notes',mode:'note',activeNoteId:'note-1',noteContent:'PRIVATE_CONTEXT_SENTINEL'});
+    ai.aiChatHistory.set([{role:'assistant',type:'text',content:'PRIVATE_PRIOR_ANSWER'}]);
+    await ai.sendChatMessage('解释一下彩虹是怎么形成的');
+    assert.equal(requests,0);assert.equal(confirms,0);
+    const payload=JSON.stringify(capturedMessages);
+    for(const secret of ['PRIVATE_TASK_SENTINEL','PRIVATE_TASK_BODY','PRIVATE_CONTEXT_SENTINEL','PRIVATE_PRIOR_ANSWER','Original note','Original content','PROJECT_SUMMARY']) assert.ok(!payload.includes(secret),secret);
+    assert.equal(capturedMessages.filter(message=>message.role==='user').length,1);
+    assert.ok(payload.includes('彩虹'));
+`));
+
+test('the side assistant also excludes supplied application context for an ordinary question', () => scenario(`
+    await ai.sendAiMessage('讲一个简短的笑话',{scope:'notes',mode:'note',activeNoteId:'note-1',noteContent:'PRIVATE_CONTEXT_SENTINEL',items:[{title:'PRIVATE_TASK_SENTINEL'}]});
+    assert.equal(requests,0);assert.ok(!JSON.stringify(capturedMessages).includes('PRIVATE_'));
+    assert.ok(!JSON.stringify(capturedMessages).includes('Original content'));
+`));
+
+test('unsupported attachments fail before history, model calls or composer clearing', () => scenario(`
+    const file={name:'recording.wav',mediaType:'audio',mimeType:'audio/wav',base64Data:'YWJjZA==',size:4};
+    ai.aiChatComposerAttachments.set([file]);
+    await assert.rejects(ai.sendChatMessage('分析这个附件'),/未确认支持音频/);
+    assert.equal(get(ai.aiChatHistory).length,0);assert.equal(get(ai.aiChatComposerAttachments).length,1);assert.equal(requests,0);
+`));
+
+test('attached text uses only explicit text content, never local paths or stored app data', () => scenario(`
+    const attachment={name:'example.txt',path:'C:/private/DO_NOT_SEND_PATH/example.txt',mediaType:'text',mimeType:'text/plain',content:'USER_FILE_CONTENT'};
+    await ai.sendChatMessage('只解释这个文件','default',null,{attachments:[attachment]});
+    const payload=JSON.stringify(capturedMessages);
+    assert.ok(payload.includes('USER_FILE_CONTENT'));assert.ok(!payload.includes('DO_NOT_SEND_PATH'));assert.ok(!payload.includes('Original content'));assert.equal(requests,0);
+`));
+
+test('an external web request cannot grant the model application-data tools or directory context', () => scenario(`
+    response.toolCalls=[{name:'workplan_notes_action',arguments:'{"action":"list"}'}];
+    await ai.sendChatMessage('联网搜索最新AI新闻');
+    assert.equal(confirms,0);
+    assert.match(get(ai.aiChatHistory).at(-1).content,/工具参数无效/);
+    const payload=JSON.stringify(capturedMessages);
+    assert.ok(!payload.includes('Original content'));assert.ok(!payload.includes('/workspace'));
+`));

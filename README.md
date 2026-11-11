@@ -27,7 +27,7 @@ WorkPlan with AI 是一个跨平台的任务管理和计划制定工具，支持
 - **多维度任务管理**：今日看板、任务模板、定时任务、数据统计、工作笔记
 - **工具调用**：AI 可调网页搜索（含网页正文抓取）、本地文件读写、任务增删改查；敏感操作需确认
 - **云端同步**：内置 Supabase 配置，也支持自定义 HTTP API / PostgREST 类接口；笔记、密码库、工时记录支持主密码派生的跨设备加密同步（任务本身不加密）
-- **多模型接入**：OpenAI、DeepSeek、通义千问、智谱、Kimi、Groq、Ollama、LM Studio、G4F、自定义兼容接口
+- **多模型接入**：OpenAI、DeepSeek、通义千问、智谱、Kimi、Groq、Ollama、LM Studio、自定义兼容接口
 - **聊天记录导出**：支持导出为 Markdown，桌面端和 Android 端均可用
 - **密码管理 & 工作笔记**：内置密码本、Markdown 笔记编辑器
 - **i18n**：中文、English、日本語
@@ -57,8 +57,6 @@ WorkPlan with AI 是一个跨平台的任务管理和计划制定工具，支持
   - Android：Android SDK + NDK（参考 [Tauri 移动端文档](https://v2.tauri.app/start/prerequisites/#android)）
 
 ### 安装与运行
-
-> G4F 资源从仓库根目录 `g4f.dev/dist` 加载，版本固定 `0.2.7`。本地开发需要该目录存在。
 
 ```bash
 git clone https://github.com/MakotoArai-CN/WorkPlan-with-AI.git
@@ -163,7 +161,13 @@ AI 聊天的「检测能力」现在会保留每一项失败原因（悬停能�
 
 ### AI 配置
 
-在 系统设置 → AI 配置 中选择服务商、填写 API Key 和模型即可。支持保存多个连接配置，每个连接分别保存服务商、模型、Base URL、API Key 和 G4F 提供商设置。
+在 AI 配置中选择服务商、填写 API Key 和模型即可。支持保存多个连接配置，每个连接分别保存服务商、模型、Base URL 和 API Key。
+
+普通 AI 对话只发送当前消息及主动附加的文件，不默认分析任务、笔记或工时数据。
+需要处理应用内数据时请明确说明，例如“查看我的任务”或“总结这篇笔记”；相关修改仍需确认。
+附件按当前提供商、模型及 API 格式校验：最多8个，单个媒体不超过5MB；未知多模态模型按仅文本处理。
+不支持的 PDF、Office 文档、压缩包或音视频需先提取/转录为文本，不会假装读取成功。
+数据清除入口统一位于系统设置，操作不可撤销，请先备份并仔细确认当前账号。
 
 ### 任务管理
 
@@ -191,7 +195,6 @@ WorkPlan-with-ai/
 │   ├── src/                  # Rust 后端
 │   ├── Cargo.toml
 │   └── tauri.conf.json
-├── g4f.dev/                  # G4F 前端资源 (0.2.7)
 ├── .env.example
 ├── README.md
 └── package.json

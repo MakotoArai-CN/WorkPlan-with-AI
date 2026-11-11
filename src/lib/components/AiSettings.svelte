@@ -26,7 +26,6 @@
     import AnimatedModal from './AnimatedModal.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import { get } from 'svelte/store';
-    import { isG4FProvider } from "../utils/g4f-client.js";
     import {
         getValidatedExternalUrl,
         openExternalUrl,
@@ -141,7 +140,7 @@
         if (currentModels.length > 0) {
             const savedModel = $aiConfig.model;
             const userChangedModel = savedModel !== initialModel;
-            const canKeepAuto = isG4FProvider(providerId);
+            const canKeepAuto = providerId === "custom";
             if (
                 !userChangedModel &&
                 (
@@ -171,7 +170,7 @@
             if (!isCurrentInit()) return;
             customHeadersText = serializeRequestHeaders($aiConfig.customHeaders || {});
             if (isWebDemo && $aiConfig.provider === "webhook") {
-                await switchProvider("g4f-default");
+                await switchProvider("openai");
                 if (!isCurrentInit()) return;
             }
             await loadCurrentProviderInfo();
@@ -410,7 +409,6 @@
         }, 500);
     }
     $: needsApiKey = (() => {
-        if (isG4FProvider($aiConfig.provider)) return false;
         if (
             $aiConfig.provider === "ollama" ||
             $aiConfig.provider === "lmstudio" ||
@@ -428,10 +426,7 @@
         const models = currentModels.length > 0
             ? currentModels
             : (currentProvider?.defaultModels || []);
-        const merged = isG4FProvider($aiConfig.provider)
-            ? ["auto", ...models]
-            : models;
-        return [...new Set(merged.filter(Boolean))];
+        return [...new Set(models.filter(Boolean))];
     })();
     $: currentProviderDocUrl = getValidatedExternalUrl(currentProvider?.docUrl || "");
     $: currentProviderApiUrl = getValidatedExternalUrl(currentProvider?.apiUrl || "");
@@ -542,7 +537,7 @@
                         <label
                             for="ai-provider"
                             class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                            >{isG4FProvider($aiConfig.provider) ? "模型提供商" : $_('ai_settings_page.provider')}</label
+                            >{$_('ai_settings_page.provider')}</label
                         >
                         <SelectMenu value={$aiConfig.provider} options={providerOptions}
                             onchange={(value) => handleProviderChange({ target: { value } })}
@@ -568,11 +563,7 @@
                                 </button>
                             {/if}
                         </div>
-                        {#if isG4FProvider($aiConfig.provider)}
-                            <div class="text-[10px] text-slate-400 mt-2">
-                                G4F 需要先选模型提供商，再选模型；不同连接会分别记住各自的 G4F 设置。
-                            </div>
-                        {/if}
+
                     </div>
 
                     {#if isCustomProvider}

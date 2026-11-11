@@ -16,6 +16,7 @@
     import VaultwardenImport from "./VaultwardenImport.svelte";
     import DataRepairModal from "./DataRepairModal.svelte";
     import VaultProtectionSettings from './VaultProtectionSettings.svelte';
+    import { selectionIndicatorBounds } from '../utils/selection-indicator.js';
     import {
         DATABASE_PROVIDER_CATALOG,
         DATABASE_SETUP_SQL,
@@ -50,22 +51,27 @@
     let editorPill = { left: 0, top: 0, width: 0, height: 0, ready: false };
 
     function measurePill(container, attribute, value) {
-        if (!container) return { left: 0, top: 0, width: 0, height: 0, ready: false };
-        const target = container.querySelector(`[data-${attribute}="${value}"]`);
-        if (!target) return { left: 0, top: 0, width: 0, height: 0, ready: false };
-        return {
-            left: target.offsetLeft,
-            top: target.offsetTop,
-            width: target.offsetWidth,
-            height: target.offsetHeight,
-            ready: true
-        };
+        const target = container?.querySelector(`[data-${attribute}="${value}"]`);
+        return selectionIndicatorBounds(container, target);
     }
 
     function updateAppearancePills() {
         themePill = measurePill(themeGridEl, 'theme-id', get(settingsStore).theme);
         languagePill = measurePill(languageGridEl, 'language', get(locale));
         editorPill = measurePill(editorGridEl, 'editor-id', get(settingsStore).markdownEditor);
+    }
+
+    function observeAppearanceGrid(node) {
+        let frame = null;
+        const schedule = () => {
+            if (frame !== null) return;
+            frame = requestAnimationFrame(() => { frame = null; updateAppearancePills(); });
+        };
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+        observer?.observe(node);
+        node.querySelectorAll('button').forEach(button => observer?.observe(button));
+        schedule();
+        return { destroy() { observer?.disconnect(); if (frame !== null) cancelAnimationFrame(frame); } };
     }
 
     $: if (themeGridEl) {
@@ -395,21 +401,29 @@
         }
     }
 
+    let clearingData = false;
     async function clearData() {
-        const t = get(_);
-        const confirmed = await showConfirm({
-            title: t('settings.clear_title'),
-            message: t('settings.clear_confirm', { values: { key: $taskStore.accessKey } }),
-            confirmText: t('settings.clear_confirm_btn'),
-            cancelText: t('common.cancel'),
-            variant: 'danger'
-        });
-        if (confirmed) {
-            await taskStore.clearAllData($taskStore.accessKey);
-            await flushLocalDatabase();
-            showToast({ message: t('settings.clear_success'), type: 'success' });
-            location.reload();
-        }
+        if (clearingData || !$taskStore.accessKey) return;
+        const account = $taskStore.accessKey;
+        clearingData = true;
+        try {
+            const t = get(_);
+            const confirmed = await showConfirm({
+                title: t('settings.clear_title'),
+                message: t('settings.clear_confirm', { values: { key: account } }),
+                confirmText: t('settings.clear_confirm_btn'),
+                cancelText: t('common.cancel'),
+                variant: 'danger'
+            });
+            if (confirmed && $taskStore.accessKey === account) {
+                await taskStore.clearAllData(account);
+                await flushLocalDatabase();
+                showToast({ message: t('settings.clear_success'), type: 'success' });
+                location.reload();
+            }
+        } catch (error) {
+            await showAlert({ message: String(error?.message || error), variant: 'danger' });
+        } finally { clearingData = false; }
     }
 
     function handleThemeChange(theme) {
@@ -506,8 +520,6 @@
         class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 overscroll-contain pb-32 md:pb-40 min-h-0"
         style="-webkit-overflow-scrolling: touch;"
     >
-        <VaultProtectionSettings />
-
         <!-- 外观设置 -->
         <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
             <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
@@ -517,7 +529,7 @@
                 <div>
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.theme_mode')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.theme_desc')}</div>
-                    <div bind:this={themeGridEl} class="relative grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div bind:this={themeGridEl} use:observeAppearanceGrid class="relative isolate overflow-hidden rounded-xl grid grid-cols-2 md:grid-cols-4 gap-2">
                         <div data-pill="theme" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                             style={`width:${themePill.width}px;height:${themePill.height}px;transform:translate3d(${themePill.left}px, ${themePill.top}px, 0);opacity:${themePill.ready ? 1 : 0}`}></div>
                         {#each themeOptions as theme}
@@ -555,7 +567,7 @@
                 <i class="ph ph-translate text-lg"></i> {$_('settings.language')}
             </div>
             <div class="p-4 md:p-6">
-                <div bind:this={languageGridEl} class="relative grid grid-cols-3 gap-2">
+                <div bind:this={languageGridEl} use:observeAppearanceGrid class="relative isolate overflow-hidden rounded-xl grid grid-cols-3 gap-2">
                     <div data-pill="language" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                         style={`width:${languagePill.width}px;height:${languagePill.height}px;transform:translate3d(${languagePill.left}px, ${languagePill.top}px, 0);opacity:${languagePill.ready ? 1 : 0}`}></div>
                     {#each supportedLocales as lang}
@@ -580,7 +592,7 @@
                 <div>
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.markdown_editor')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.editor_desc')}</div>
-                    <div bind:this={editorGridEl} class="relative grid grid-cols-2 gap-2">
+                    <div bind:this={editorGridEl} use:observeAppearanceGrid class="relative isolate overflow-hidden rounded-xl grid grid-cols-2 gap-2">
                         <div data-pill="editor" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                             style={`width:${editorPill.width}px;height:${editorPill.height}px;transform:translate3d(${editorPill.left}px, ${editorPill.top}px, 0);opacity:${editorPill.ready ? 1 : 0}`}></div>
                         <button
@@ -1306,14 +1318,22 @@
                         class="w-full flex items-center justify-center gap-2 py-3 bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 dark:hover:bg-orange-900/50 border border-orange-200 dark:border-orange-800 rounded-lg text-sm font-bold text-orange-600 dark:text-orange-400 transition">
                         <i class="ph-bold ph-sign-out text-lg"></i> {$_('settings.switch_account')}
                     </button>
-                    <button on:click={clearData}
-                        class="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition">
-                        <i class="ph ph-trash text-lg"></i> {$_('settings.danger_zone')}
-                    </button>
                     <input type="file" bind:this={fileInput} on:change={handleImport} class="hidden" accept=".json">
                 </div>
             </div>
         {/if}
+
+        <section class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-red-100 dark:border-red-900 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 border-b border-red-50 dark:border-red-900 font-bold text-slate-700 dark:text-slate-200">{$_('settings.management')}</div>
+            <div class="p-4 md:p-6">
+                <button on:click={clearData} disabled={clearingData}
+                    class="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition disabled:opacity-50">
+                    <i class="ph ph-trash text-lg"></i> {clearingData ? $_('common.loading') : $_('settings.danger_zone')}
+                </button>
+            </div>
+        </section>
+
+        <VaultProtectionSettings />
 
         <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
             <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">

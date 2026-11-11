@@ -178,6 +178,7 @@
     "category_locked": "Unlock the vault first",
     "category_save_failed": "Could not save the type. Please try again.",
     "master_weak": "Common passwords, repeated characters and simple numbers cannot be used as the master password. Choose a unique long password.",
+    "protection_brief": "Temporarily limit unlocks after repeated failures. Off by default.",
     "protection_enable": "Enable additional cooldowns",
     "protection_action_cooldown": "Cooldown only; keep quick-unlock enrollment",
     "protection_action_quick": "Disable local PIN and biometrics from failure 11",
@@ -739,6 +740,7 @@
     "rights_desc": "You can view, edit, export or delete local data, disable cloud sync, delete cloud data or use the in-app data deletion feature. Back up first; cloud backup removal may depend on the provider's retention policy."
   },
   "ai_chat": {
+    "attachment_api_hint": "Attachments are checked against the selected model: up to 8 files, 5 MB per media file. Convert unsupported documents, audio or video to text first. Ordinary chat does not read app data.",
     "title": "AI Chat",
     "subtitle": "Smart assistant with context",
     "settings": "Settings",
@@ -842,7 +844,6 @@
     "get_key": "Get Key",
     "prompt_ph": "Leave empty to use default template...",
     "docs": "Docs",
-    "group_g4f": "G4F Free",
     "group_international": "International",
     "group_domestic": "China Providers",
     "group_local": "Local Deploy",

@@ -1093,8 +1093,6 @@ export default defineConfig(({ command, mode }) => {
             strictPort: true,
             host: true,
             fs: {
-                // G4F is loaded from the repo root `g4f.dev/dist`, so dev server
-                // must allow reads outside the default SvelteKit source directories.
                 allow: [resolve('.')]
             }
         },

@@ -178,6 +178,7 @@
     "category_locked": "请先解锁密码库",
     "category_save_failed": "类型保存失败，请重试",
     "master_weak": "不允许使用常见弱密码、重复字符或简单数字作为主密码，请使用独特的长密码。",
+    "protection_brief": "多次输错主密码后暂时限制解锁，默认关闭。",
     "protection_enable": "启用额外冷静期",
     "protection_action_cooldown": "仅冷静期，不修改快捷解锁",
     "protection_action_quick": "第11次失败起关闭本机PIN与生物识别",
@@ -739,6 +740,7 @@
     "rights_desc": "你可以随时查看、修改、导出或删除本地数据，关闭云同步，删除云端数据或使用应用内的删库功能。删除前请自行备份；云端备份的清除时间可能受服务商策略影响。"
   },
   "ai_chat": {
+    "attachment_api_hint": "附件按当前模型校验：最多8个，单个媒体不超过5MB。不支持的文档、音视频请先转为文本；普通对话不会读取应用数据。",
     "title": "AI 聊天",
     "subtitle": "智能对话助手 · 支持上下文记忆",
     "settings": "设置",
@@ -842,7 +844,6 @@
     "get_key": "获取 Key",
     "prompt_ph": "留空则使用默认模板...",
     "docs": "文档",
-    "group_g4f": "G4F 免费服务",
     "group_international": "国际服务商",
     "group_domestic": "国内服务商",
     "group_local": "本地部署",
