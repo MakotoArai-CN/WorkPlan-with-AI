@@ -130,3 +130,25 @@ test('browser media requests use configured base paths and honor cancellation', 
     await assert.rejects(generateImage({provider:'custom',customEndpoint:'https://media.invalid',prompt:'small tree',signal:controller.signal}),{name:'AbortError'});
     assert.equal(urls.length,2);
 `));
+
+test('multipart input is gated before network and supported APIs receive their native media shape', () => runProbe(`
+    let requests=0;
+    const image={role:'user',content:[{type:'text',text:'describe'},{type:'image_url',image_url:{url:'data:image/png;base64,YWJjZA=='}}]};
+    globalThis.fetch=async(url,options)=>{
+        requests++;
+        const body=JSON.parse(options.body);
+        if(url.includes('/api/chat')){
+            assert.equal(body.messages[0].content,'describe');
+            assert.deepEqual(body.messages[0].images,['YWJjZA==']);
+            return Response.json({message:{content:'local image answer'}});
+        }
+        assert.equal(body.contents[0].parts[1].inlineData.mimeType,'video/mp4');
+        return Response.json({candidates:[{content:{parts:[{text:'video answer'}]}}]});
+    };
+    await assert.rejects(callAIWithMessages({provider:'deepseek',model:'deepseek-chat',apiKey:'test'},[image]),/未确认支持图片/);
+    assert.equal(requests,0);
+    assert.equal(await callAIWithMessages({provider:'ollama',model:'llava'},[image]),'local image answer');
+    const video={role:'user',parts:[{text:'describe'},{inlineData:{mimeType:'video/mp4',data:'YWJjZA=='}}]};
+    assert.equal(await callAIWithMessages({provider:'google',model:'gemini-2.5-flash',apiKey:'test'},[video]),'video answer');
+    assert.equal(requests,2);
+`));

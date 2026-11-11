@@ -196,3 +196,6 @@ web_modules/
 /test-results/
 /playwright-report/
 /output/playwright/
+
+# Removed optional upstream checkout; retained locally, not shipped or tracked.
+/g4f.dev/

@@ -740,6 +740,7 @@
     "rights_desc": "You can view, edit, export or delete local data, disable cloud sync, delete cloud data or use the in-app data deletion feature. Back up first; cloud backup removal may depend on the provider's retention policy."
   },
   "ai_chat": {
+    "attachment_api_hint": "Attachments are checked against the selected model: up to 8 files, 5 MB per media file. Convert unsupported documents, audio or video to text first. Ordinary chat does not read app data.",
     "title": "AI Chat",
     "subtitle": "Smart assistant with context",
     "settings": "Settings",
@@ -815,10 +816,6 @@
     "drop_files_failed": "Failed to add dropped files"
   },
   "ai_settings_page": {
-    "g4f_credit_hint": "G4F anonymous proxies require cake credits. A 402 usually means insufficient credits: earn them manually on the official chat page, or sign up and follow the account usage rules. This app never runs proof-of-work in the background or retries credit errors automatically.",
-    "g4f_open_chat": "Open official G4F chat",
-    "g4f_open_members": "Manage G4F account and API keys",
-    "g4f_key_hint": "Enter an API key generated on the G4F members page. Browser login is not shared with this app; anonymous credits may depend on the public IP. Never enter your WorkPlan master password or database key. Other providers require their own API keys.",
     "title": "AI Settings",
     "tab_basic": "Basic",
     "tab_advanced": "Advanced",
@@ -847,7 +844,6 @@
     "get_key": "Get Key",
     "prompt_ph": "Leave empty to use default template...",
     "docs": "Docs",
-    "group_g4f": "G4F Free",
     "group_international": "International",
     "group_domestic": "China Providers",
     "group_local": "Local Deploy",

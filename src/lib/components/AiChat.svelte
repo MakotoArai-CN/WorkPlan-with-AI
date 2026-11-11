@@ -3,6 +3,7 @@
     import { onMount, tick } from "svelte";
     import {
         captureAiOperationGuard,
+        aiConfig,
         aiChatHistory,
         aiChatSessions,
         activeAiChatSessionId,
@@ -41,6 +42,7 @@
     } from "../stores/navigation.js";
     import { openExternalUrl } from "../utils/open-external.js";
     import { safeImageUrl, safeMediaDataUrl } from "../utils/safe-content.js";
+    import { attachmentCapabilities } from '../utils/ai-attachment-policy.js';
     import { resizeTextarea, observeTextareaResize } from "../utils/textarea-autosize.js";
     import { captureMessageApproval } from "../utils/ai-message-approval.js";
     import { exportToMarkdown, describeSavedLocation } from "../utils/export.js";
@@ -60,6 +62,7 @@
     let chatStyle = "default";
     let showSessionDrawer = false;
     let previousSessionId = null;
+    $: mediaCapabilities = attachmentCapabilities($aiConfig);
 
     $: currentSession =
         $aiChatSessions.find((session) => session.id === $activeAiChatSessionId) ||
@@ -2255,9 +2258,9 @@
                 <button
                     on:click={handleAttachMedia}
                     class="p-2 md:p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-300 hover:border-purple-300 transition disabled:opacity-50"
-                    disabled={$isAiLoading || !$aiChatCapabilities.localFilesAvailable}
+                    disabled={$isAiLoading || !$aiChatCapabilities.localFilesAvailable || !mediaCapabilities.image}
                     aria-label="附加媒体"
-                    title={$aiChatCapabilities.localFilesAvailable ? "附加图片/音频/视频" : "当前环境不可用"}
+                    title={!mediaCapabilities.image ? "当前模型只接收文本；请先选择支持媒体输入的模型" : mediaCapabilities.video ? "附加图片/音频/视频；发送前校验格式与大小" : "当前模型仅支持图片；不支持音频和视频"}
                 >
                     <i class="ph ph-image text-base md:text-lg"></i>
                 </button>
@@ -2296,6 +2299,7 @@
                     </button>
                 {/if}
             </div>
+            <p class="px-1 pt-2 text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">{$_('ai_chat.attachment_api_hint')}</p>
             <div class="mt-2 text-center text-[10px] text-slate-400 dark:text-slate-500">
                 {$_("ai_chat.style_hint", {
                     values: {

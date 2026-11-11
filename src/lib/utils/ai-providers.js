@@ -1,11 +1,4 @@
-import {
-    G4F_PROVIDER_CATALOG,
-    chatWithG4F,
-    fetchG4FModels,
-    getG4FDefaultModels,
-    isG4FProvider,
-    streamChatWithG4F
-} from './g4f-client.js';
+import { assertProviderMessages } from './ai-attachment-policy.js';
 import { isTauriRuntime } from './runtime.js';
 import { resolveRequestHeaders } from './ai-request-fingerprint.js';
 import { abortable, addEndpointQuery, boundedNumber, createAiStreamParser, MAX_AI_RESPONSE_CHARS, readAiResponseJson, readAiResponseText, providerHttpError, safeProviderError, throwIfAborted } from './ai-transport.js';
@@ -510,17 +503,6 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         return modelCache[cacheKey].models;
     }
 
-    if (isG4FProvider(providerId)) {
-        try {
-            const models = await fetchG4FModels(providerId, { apiKey });
-            modelCache[cacheKey] = { models, expireTime: Date.now() + 300000 };
-            return models;
-        } catch (e) {
-            console.warn(`Failed to fetch G4F models for ${providerId}:`, safeProviderError(e, [apiKey]));
-            return getG4FDefaultModels(providerId);
-        }
-    }
-
     if (providerId === 'custom') {
         return await fetchCustomProviderModels(customEndpoint, apiKey, requestHeaders);
     }
@@ -759,7 +741,14 @@ function buildRequestBody(provider, model, messages, options) {
         case 'cloudflare':
             return { messages, temperature, max_tokens: maxTokens, stream };
         case 'ollama':
-            return { model, messages, stream };
+            return { model, messages: messages.map(message => {
+                if (!Array.isArray(message.content)) return message;
+                return {
+                    ...message,
+                    content: message.content.filter(part => part.type === 'text').map(part => part.text).join('\n'),
+                    images: message.content.filter(part => part.type === 'image_url').map(part => part.image_url.url.split(',')[1])
+                };
+            }), stream };
         case 'google':
             return {
                 contents: messages.filter(m => m.role !== 'system').map(m => ({
@@ -909,9 +898,6 @@ function isLocalProvider(providerId) {
 }
 
 export function canProviderUseNativeTools(providerId, config = {}) {
-    if (isG4FProvider(providerId)) {
-        return false;
-    }
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) {
@@ -969,20 +955,7 @@ function getEffectiveEndpoint(provider, providerId, config) {
 export async function callAI(config, userMessage, systemPrompt, options = {}) {
     const signal = options.signal || config.signal;
     throwIfAborted(signal);
-    const providerId = config.provider || 'g4f-default';
-
-    if (isG4FProvider(providerId)) {
-        const messages = [];
-        if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-        messages.push({ role: 'user', content: userMessage });
-
-        return await abortable(chatWithG4F(providerId, config.model, messages, {
-            apiKey: config.apiKey,
-            temperature: config.temperature,
-            maxTokens: config.maxTokens,
-            signal
-        }), signal);
-    }
+    const providerId = config.provider || 'openai';
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
@@ -1014,6 +987,7 @@ export async function callAI(config, userMessage, systemPrompt, options = {}) {
     const messages = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: userMessage });
+    assertProviderMessages({ ...config, model }, messages);
     const requestBody = buildRequestBody(provider, model, messages, {
         temperature: config.temperature ?? 0.7,
         maxTokens: config.maxTokens ?? 2048,
@@ -1053,10 +1027,11 @@ export async function callAI(config, userMessage, systemPrompt, options = {}) {
 }
 
 export async function callAIWithMessagesAndTools(config, messages, tools = [], options = {}) {
+    assertProviderMessages(config, messages);
     const signal = options.signal || config.signal;
     throwIfAborted(signal);
     if (!Array.isArray(tools) || tools.length > 64 || JSON.stringify(tools).length > 128000) throw new Error("Invalid AI tool definitions");
-    const providerId = config.provider || 'g4f-default';
+    const providerId = config.provider || 'openai';
 
     if (!canProviderUseNativeTools(providerId, config)) {
         const error = new Error('当前 AI 提供商不支持原生工具调用');
@@ -1136,18 +1111,10 @@ export async function callAIWithMessagesAndTools(config, messages, tools = [], o
 }
 
 export async function callAIWithMessages(config, messages, options = {}) {
+    assertProviderMessages(config, messages);
     const signal = options.signal || config.signal;
     throwIfAborted(signal);
-    const providerId = config.provider || 'g4f-default';
-
-    if (isG4FProvider(providerId)) {
-        return await abortable(chatWithG4F(providerId, config.model, messages, {
-            apiKey: config.apiKey,
-            temperature: config.temperature,
-            maxTokens: config.maxTokens,
-            signal
-        }), signal);
-    }
+    const providerId = config.provider || 'openai';
 
         const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
@@ -1215,24 +1182,10 @@ export async function callAIWithMessages(config, messages, options = {}) {
 }
 
 export async function callAIWithMessagesStream(config, messages, onChunk, options = {}) {
+    assertProviderMessages(config, messages);
     const signal = options.signal || config.signal;
     throwIfAborted(signal);
-    const providerId = config.provider || 'g4f-default';
-
-    if (isG4FProvider(providerId)) {
-        return await abortable(streamChatWithG4F(
-            providerId,
-            config.model,
-            messages,
-            {
-                apiKey: config.apiKey,
-                temperature: config.temperature,
-                maxTokens: config.maxTokens,
-                signal
-            },
-            (delta, content) => { if (!signal?.aborted) onChunk?.(delta, content); }
-        ), signal);
-    }
+    const providerId = config.provider || 'openai';
 
         const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) throw new Error('未知的 AI 厂商: ' + providerId);
@@ -1372,20 +1325,6 @@ export async function testConnection(config) {
 export async function getProviderList() {
     const result = [];
 
-    for (const provider of G4F_PROVIDER_CATALOG) {
-        result.push({
-            id: provider.id,
-            name: provider.name,
-            models: getG4FDefaultModels(provider.id),
-            defaultModel: getG4FDefaultModels(provider.id)[0] || 'auto',
-            docUrl: 'https://g4f.dev/',
-            apiUrl: '',
-            authType: provider.requiresApiKey ? 'bearer' : 'none',
-            supportsModelList: true,
-            supportsNativeTools: false
-        });
-    }
-
     for (const [id, provider] of Object.entries(PROVIDER_CONFIGS)) {
         result.push({
             id,
@@ -1405,20 +1344,6 @@ export async function getProviderList() {
 }
 
 export function getProviderInfo(providerId) {
-    if (isG4FProvider(providerId)) {
-        const provider = G4F_PROVIDER_CATALOG.find((item) => item.id === providerId);
-        const models = getG4FDefaultModels(providerId);
-        return {
-            name: provider?.name || providerId,
-            defaultModels: models,
-            defaultModel: models[0] || 'auto',
-            authType: 'none',
-            supportsModelList: true,
-            supportsNativeTools: false,
-            docUrl: 'https://g4f.dev/',
-            apiUrl: ''
-        };
-    }
 
     const provider = PROVIDER_CONFIGS[providerId];
     if (!provider) return null;

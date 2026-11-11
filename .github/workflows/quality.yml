@@ -21,14 +21,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check public repository file policy
         run: node packaging/check-public-files.mjs
-      - name: Checkout pinned G4F assets
-        uses: actions/checkout@v4
-        with:
-          repository: MakotoArai-CN/g4f.dev
-          ref: d9de8c2c5691a8e21b2d6fc60e7f38ae9a2382d0
-          path: g4f.dev
-          fetch-depth: 1
-          sparse-checkout: dist
       - uses: oven-sh/setup-bun@v1
         with:
           bun-version: latest

@@ -11,9 +11,6 @@ on:
 permissions:
   contents: read
 
-env:
-  G4F_DEV_REPOSITORY: MakotoArai-CN/g4f.dev
-  G4F_DEV_REF: d9de8c2c5691a8e21b2d6fc60e7f38ae9a2382d0
 
 jobs:
   build-portable:
@@ -22,16 +19,6 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Checkout G4F assets
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.G4F_DEV_REPOSITORY }}
-          ref: ${{ env.G4F_DEV_REF }}
-          path: g4f.dev
-          fetch-depth: 1
-          sparse-checkout: |
-            dist
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -43,8 +30,8 @@ jobs:
 
       - name: Install dependencies (Ubuntu)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Read version
         id: version

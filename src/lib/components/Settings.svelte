@@ -401,21 +401,29 @@
         }
     }
 
+    let clearingData = false;
     async function clearData() {
-        const t = get(_);
-        const confirmed = await showConfirm({
-            title: t('settings.clear_title'),
-            message: t('settings.clear_confirm', { values: { key: $taskStore.accessKey } }),
-            confirmText: t('settings.clear_confirm_btn'),
-            cancelText: t('common.cancel'),
-            variant: 'danger'
-        });
-        if (confirmed) {
-            await taskStore.clearAllData($taskStore.accessKey);
-            await flushLocalDatabase();
-            showToast({ message: t('settings.clear_success'), type: 'success' });
-            location.reload();
-        }
+        if (clearingData || !$taskStore.accessKey) return;
+        const account = $taskStore.accessKey;
+        clearingData = true;
+        try {
+            const t = get(_);
+            const confirmed = await showConfirm({
+                title: t('settings.clear_title'),
+                message: t('settings.clear_confirm', { values: { key: account } }),
+                confirmText: t('settings.clear_confirm_btn'),
+                cancelText: t('common.cancel'),
+                variant: 'danger'
+            });
+            if (confirmed && $taskStore.accessKey === account) {
+                await taskStore.clearAllData(account);
+                await flushLocalDatabase();
+                showToast({ message: t('settings.clear_success'), type: 'success' });
+                location.reload();
+            }
+        } catch (error) {
+            await showAlert({ message: String(error?.message || error), variant: 'danger' });
+        } finally { clearingData = false; }
     }
 
     function handleThemeChange(theme) {
@@ -1310,14 +1318,20 @@
                         class="w-full flex items-center justify-center gap-2 py-3 bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 dark:hover:bg-orange-900/50 border border-orange-200 dark:border-orange-800 rounded-lg text-sm font-bold text-orange-600 dark:text-orange-400 transition">
                         <i class="ph-bold ph-sign-out text-lg"></i> {$_('settings.switch_account')}
                     </button>
-                    <button on:click={clearData}
-                        class="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition">
-                        <i class="ph ph-trash text-lg"></i> {$_('settings.danger_zone')}
-                    </button>
                     <input type="file" bind:this={fileInput} on:change={handleImport} class="hidden" accept=".json">
                 </div>
             </div>
         {/if}
+
+        <section class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-red-100 dark:border-red-900 overflow-hidden">
+            <div class="px-4 md:px-6 py-3 border-b border-red-50 dark:border-red-900 font-bold text-slate-700 dark:text-slate-200">{$_('settings.management')}</div>
+            <div class="p-4 md:p-6">
+                <button on:click={clearData} disabled={clearingData}
+                    class="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition disabled:opacity-50">
+                    <i class="ph ph-trash text-lg"></i> {clearingData ? $_('common.loading') : $_('settings.danger_zone')}
+                </button>
+            </div>
+        </section>
 
         <VaultProtectionSettings />
 

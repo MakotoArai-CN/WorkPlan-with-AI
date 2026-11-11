@@ -1,6 +1,5 @@
 import { writable, get, derived } from 'svelte/store';
-import { isG4FProvider, normalizeG4FProviderId } from '../utils/g4f-client.js';
-import { pruneProviderConfigs } from '../utils/ai-config.js';
+import { pruneProviderConfigs, migrateRemovedProvider } from '../utils/ai-config.js';
 import { resolveRequestHeaders } from '../utils/ai-request-fingerprint.js';
 import {
     looksLikeFileIntent,
@@ -37,6 +36,8 @@ import { TASK_STATUSES, TASK_PRIORITIES, resolveStatus, resolvePriority, normali
 import { formatLocalDateTime } from '../utils/datetime.js';
 import { AI_TRUST_RULES, MAX_NATIVE_TOOL_CALLS, isExplicitWebFetchTarget, parseToolArguments, untrustedAiContext, validateNativeToolCall } from '../utils/ai-tool-policy.js';
 import { isSensitiveAiPath, redactAiSecrets } from '../utils/ai-file-security.js';
+import { requestsApplicationData } from '../utils/ai-data-policy.js';
+import { assertChatAttachments } from '../utils/ai-attachment-policy.js';
 
 const STORAGE_KEY = 'workplan_ai_config';
 const AI_CHAT_HISTORY_KEY = 'workplan_ai_chat_history';
@@ -91,7 +92,7 @@ function getDefaultConnectionProfile(name = '默认连接') {
     return {
         id: createId('profile'),
         name,
-        provider: 'g4f-default',
+        provider: 'openai',
         apiKey: '',
         secretKey: '',
         model: 'auto',
@@ -144,7 +145,7 @@ function getDefaultAiPanelContext() {
 }
 
 function providerNeedsApiKey(providerId) {
-    return !isG4FProvider(providerId) && !OPTIONAL_API_KEY_PROVIDERS.has(providerId);
+    return !OPTIONAL_API_KEY_PROVIDERS.has(providerId);
 }
 
 /** Public wrapper so components do not reimplement the provider matrix. */
@@ -536,24 +537,11 @@ function normalizeConnectionProfile(profile, index = 0) {
         };
     }
 
-    // G4F 升级后部分 provider id 改名（如 g4f-api.airforce → g4f-airforce），
-    // 兼容旧存档里保存的连接与各自缓存的配置。
-    const migratedProvider = normalizeG4FProviderId(normalized.provider);
-    if (migratedProvider !== normalized.provider) {
-        const previousProvider = normalized.provider;
-        const previousConfig = normalized.providerConfigs?.[previousProvider];
-        normalized.provider = migratedProvider;
-        if (previousConfig && !normalized.providerConfigs?.[migratedProvider]) {
-            normalized.providerConfigs = {
-                ...normalized.providerConfigs,
-                [migratedProvider]: previousConfig
-            };
-        }
-    }
+    Object.assign(normalized, migrateRemovedProvider(normalized));
 
     normalized.id = normalized.id || createId('profile');
     normalized.name = normalized.name || `连接 ${index + 1}`;
-    normalized.provider = normalized.provider || 'g4f-default';
+    normalized.provider = normalized.provider || 'openai';
     normalized.model = normalized.model || 'auto';
     normalized.providerConfigs = normalized.providerConfigs || {};
     normalized.createdAt = normalized.createdAt || new Date().toISOString();
@@ -564,7 +552,7 @@ function normalizeConnectionProfile(profile, index = 0) {
 function createConnectionProfileFromState(state, overrides = {}) {
     const profile = normalizeConnectionProfile({
         ...extractProviderConfigFromAiConfig(state),
-        provider: state.provider || 'g4f-default',
+        provider: state.provider || 'openai',
         providerConfigs: state.providerConfigs || {},
         ...overrides
     });
@@ -594,7 +582,7 @@ function applyProfileToState(state, profileId = null) {
         ? profileId
         : activeProfileId;
     const profile = profiles.find(item => item.id === resolvedProfileId) || profiles[0];
-    const providerId = profile.provider || 'g4f-default';
+    const providerId = profile.provider || 'openai';
     const providerConfigs = profile.providerConfigs || {};
     const cached = providerConfigs[providerId] || extractProviderConfigFromProfile(profile);
     const merged = { ...getDefaultProviderConfig(), ...cached };
@@ -620,7 +608,7 @@ function syncActiveProfile(state, overrides = {}) {
     const { profiles, activeProfileId } = ensureConnectionProfiles(nextState);
     const profileIndex = profiles.findIndex(profile => profile.id === activeProfileId);
     const activeProfile = profileIndex >= 0 ? profiles[profileIndex] : profiles[0];
-    const providerId = nextState.provider || activeProfile.provider || 'g4f-default';
+    const providerId = nextState.provider || activeProfile.provider || 'openai';
     const providerConfigs = mergeProviderConfigs(
         nextState.providerConfigs || activeProfile.providerConfigs || {},
         providerId,
@@ -718,7 +706,7 @@ async function normalizeProviderModel(providerId, providerInfo, providerConfig) 
 
 export function hydrateCurrentProviderConfig() {
     const current = get(aiConfig);
-    const providerId = current.provider || 'g4f-default';
+    const providerId = current.provider || 'openai';
     const providerConfigs = current.providerConfigs || {};
     const cached = providerConfigs[providerId] || null;
     const merged = cached ? { ...getDefaultProviderConfig(), ...cached } : getDefaultProviderConfig();
@@ -737,10 +725,10 @@ export function hydrateCurrentProviderConfig() {
 
 export async function hydrateCurrentProviderConfigWithDefaults() {
     const current = get(aiConfig);
-    const providerId = current.provider || 'g4f-default';
+    const providerId = current.provider || 'openai';
     const providerInfo = await getProviderInfoCached(providerId);
     const latest = get(aiConfig);
-    if ((latest.provider || 'g4f-default') !== providerId) return;
+    if ((latest.provider || 'openai') !== providerId) return;
 
     const providerConfigs = latest.providerConfigs || {};
     const cached = providerConfigs[providerId] || null;
@@ -762,7 +750,7 @@ export async function hydrateCurrentProviderConfigWithDefaults() {
 
 export async function switchProvider(newProviderId) {
     const current = get(aiConfig);
-    const prevProviderId = current.provider || 'g4f-default';
+    const prevProviderId = current.provider || 'openai';
     if (prevProviderId === newProviderId) return;
     resetAiChatRuntimeCapabilities();
 
@@ -775,7 +763,7 @@ export async function switchProvider(newProviderId) {
     const normalizedModel = await normalizeProviderModel(newProviderId, newProviderInfo, merged);
 
     const latest = get(aiConfig);
-    if ((latest.provider || 'g4f-default') !== prevProviderId) return;
+    if ((latest.provider || 'openai') !== prevProviderId) return;
     const nextState = {
         ...latest,
         provider: newProviderId,
@@ -818,7 +806,7 @@ export function loadAiConfig() {
                 const legacyProviderConfigs = parsed.providerConfigs || {};
                 const legacyProfile = normalizeConnectionProfile({
                     name: parsed.activeProfileName || '默认连接',
-                    provider: parsed.provider || 'g4f-default',
+                    provider: parsed.provider || 'openai',
                     model: parsed.model || 'auto',
                     providerConfigs: legacyProviderConfigs
                 });
@@ -1053,6 +1041,7 @@ export async function attachFilesToAiChatComposer() {
         maxBytes: 96000,
         trustedDirectories: get(settingsStore).localFileConfig?.trustedDirectories || []
     }));
+    assertChatAttachments(getEffectiveConfig(), [...get(aiChatComposerAttachments), ...files]);
 
     aiChatComposerAttachments.update((current) => {
         const merged = normalizeChatAttachments([...(current || []), ...files]);
@@ -1070,7 +1059,7 @@ export async function attachMediaToAiChatComposer() {
 
     const mediaFiles = await readSelectedMediaFiles({
         paths: selectedPaths,
-        maxBytes: 10_000_000,
+        maxBytes: 5_000_000,
         trustedDirectories: get(settingsStore).localFileConfig?.trustedDirectories || []
     });
 
@@ -1095,6 +1084,7 @@ export async function attachMediaToAiChatComposer() {
             };
         })
     );
+    assertChatAttachments(getEffectiveConfig(), [...get(aiChatComposerAttachments), ...files]);
 
     aiChatComposerAttachments.update((current) => {
         const merged = normalizeChatAttachments([...(current || []), ...files]);
@@ -1107,11 +1097,12 @@ export async function attachMediaToAiChatComposer() {
 export async function attachPastedFilesToAiChatComposer(fileList) {
     const files = normalizeChatAttachments(await readPastedFilesAsAttachments(fileList, {
         textMaxBytes: 96000,
-        mediaMaxBytes: 10_000_000
+        mediaMaxBytes: 5_000_000
     }));
     if (!files.length) {
         return [];
     }
+    assertChatAttachments(getEffectiveConfig(), [...get(aiChatComposerAttachments), ...files]);
 
     aiChatComposerAttachments.update((current) => {
         const merged = normalizeChatAttachments([...(current || []), ...files]);
@@ -2116,10 +2107,15 @@ function normalizeAssistantPayload(payload = []) {
 }
 
 async function buildAiChatAssistantPayload(text = '') {
-    const context = normalizeAssistantPayload(get(aiChatContext));
-    if (context.mode === 'note' || context.scope === 'notes') {
-        return context;
+    if (!requestsApplicationData(text)) return { ...getDefaultAiPanelContext(), items: [] };
+    let context = normalizeAssistantPayload(get(aiChatContext));
+    if (/笔记|工作文档|\bnotes?\b/i.test(text)) {
+        return context.activeNoteId
+            ? { ...context, scope: 'notes', mode: 'note', items: [] }
+            : { ...getDefaultAiPanelContext(), scope: 'notes', items: [] };
     }
+    if (/加班|工时|请假|工资|薪资|worklog|overtime|payroll|leave record/i.test(text)) return { ...getDefaultAiPanelContext(), scope: 'worklog', items: [] };
+    if (context.mode === 'note' || context.scope === 'notes') context = getDefaultAiPanelContext();
 
     const { taskStore } = await import('./tasks.js');
     const taskState = get(taskStore);
@@ -2152,6 +2148,7 @@ async function buildAiChatAssistantPayload(text = '') {
 }
 
 function shouldUseAssistantToolsInChat(text = '') {
+    if (!requestsApplicationData(text)) return false;
     const context = get(aiChatContext);
     // Only explicitly specialized panels should force the tool router. The
     // dashboard/project scope used by the normal AI chat must still classify
@@ -2591,7 +2588,6 @@ function buildAttachmentContext(attachments = []) {
         '【用户附加文件】',
         ...textItems.map((item, index) => [
             `附件 ${index + 1}: ${item.name}`,
-            `路径: ${item.path}`,
             `大小: ${formatFileSize(item.size)}`,
             item.truncated ? '说明: 文件内容已截断' : '',
             '内容：',
@@ -2758,7 +2754,7 @@ function resolveUnauthorizedDirectory(plan = {}, settings = get(settingsStore)) 
 async function buildContextualAssistantResponse(userText, assistantContext, config, options = {}) {
     const { callAIWithMessages } = await import('../utils/ai-providers.js');
     const nowStr = getFormattedDateTime();
-    const projectContext = await getProjectContextSummary();
+    const projectContext = '';
     const dateInfo = getDateInfo();
     const timeScope = detectTimeScope(userText, dateInfo);
     const operationType = detectOperationType(userText);
@@ -3292,7 +3288,7 @@ const NATIVE_UPDATE_FIELDS_SCHEMA = {
     }
 };
 
-function buildNativeToolDefinitions(allowLocalFiles = true) {
+function buildNativeToolDefinitions(allowLocalFiles = true, allowApplicationData = true) {
     const settings = get(settingsStore);
     if (settings.enableAiChatTools === false) return [];
     const tools = [
@@ -3497,7 +3493,8 @@ function buildNativeToolDefinitions(allowLocalFiles = true) {
         });
     }
 
-    return tools.filter(tool => tool.function.name !== 'workplan_worklog_action' || settings.enableOvertime === true);
+    return tools.filter(tool => (tool.function.name !== 'workplan_worklog_action' || settings.enableOvertime === true)
+        && (allowApplicationData || !['workplan_project_action', 'workplan_notes_action', 'workplan_worklog_action'].includes(tool.function.name)));
 }
 
 function normalizeNativeProjectSource(source = '', fallback = 'tasks') {
@@ -3574,8 +3571,8 @@ ${formatNativeProjectItemsForAI(assistantContext)}
 
 【本地文件权限】
 - 本地文件工具: ${(allowLocalFiles && localFileConfig.enabled) ? '已开启' : '未开启（当前对话不可用）'}
-- 工作目录: ${settings.workspaceRoot || '未设置'}
-- 受信任目录: ${trustedDirectories.length ? trustedDirectories.join(' | ') : '无'}`)
+- 工作目录: ${allowLocalFiles ? settings.workspaceRoot || '未设置' : '未请求本地文件，不提供目录信息'}
+- 受信任目录: ${allowLocalFiles && trustedDirectories.length ? trustedDirectories.join(' | ') : '不提供'}`)
         },
         {
             role: 'user',
@@ -4164,7 +4161,7 @@ async function runNativeNotesAction(args, isCurrent = captureAiOperationGuard())
 async function executeNativeToolCall(toolCall, userText, config, assistantContext, requireFileConfirmation, progress, allowLocalFiles = true) {
     const isCurrent = config.isCurrent || captureAiOperationGuard(config.signal);
     if (!isCurrent()) throw new DOMException('操作已取消或上下文已改变', 'AbortError');
-    const checked = validateNativeToolCall(toolCall, buildNativeToolDefinitions(allowLocalFiles));
+    const checked = validateNativeToolCall(toolCall, buildNativeToolDefinitions(allowLocalFiles, config.allowApplicationData !== false));
     if (!checked.valid) return { role: 'assistant', type: 'text', content: `工具参数无效，未执行任何操作：${checked.error}` };
     const args = checked.args;
     if (toolCall.name === 'workplan_web_search') {
@@ -4246,7 +4243,7 @@ async function tryResolveWithNativeTools(userText, assistantContext, config, int
         return null;
     }
 
-    const tools = buildNativeToolDefinitions(allowLocalFiles);
+    const tools = buildNativeToolDefinitions(allowLocalFiles, config.allowApplicationData !== false);
     if (!tools.length) return null;
 
     let executionStarted = false;
@@ -4784,7 +4781,20 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     lastFailedMessage.set({ text, index: retryIndex });
 
     try {
-        let result = await resolveAssistantMessage(text, existingTasks, currentConfig, null, null, { allowLocalFiles: false });
+        let result;
+        if (!requestsApplicationData(text)) {
+            const { callAIWithMessages } = await import('../utils/ai-providers.js');
+            const content = await callAIWithMessages(currentConfig, [
+                { role: 'system', content: `只根据用户当前消息回答，不读取或分析应用内数据。${AI_TRUST_RULES}` },
+                { role: 'user', content: text }
+            ]);
+            result = { role: 'assistant', type: 'text', content };
+        } else {
+            const supplied = normalizeAssistantPayload(existingTasks);
+            const relevantContext = supplied.scope === 'notes' && !/笔记|工作文档|\bnotes?\b/i.test(text)
+                ? await buildAiChatAssistantPayload(text) : supplied;
+            result = await resolveAssistantMessage(text, relevantContext, currentConfig, null, null, { allowLocalFiles: false });
+        }
 
         // Right-side assistant doesn't support streaming — fallback to non-stream response
         if (result?.__useStreamingChat) {
@@ -6182,68 +6192,8 @@ async function analyzeQueryIntent(userText, allTasks, relevantTasks, dateInfo, c
     }
 }
 
-async function getProjectContextSummary() {
-    const { taskStore } = await import('./tasks.js');
-
-    const taskState = get(taskStore);
-    const noteState = get(notesStore);
-
-    const formatSummaryLines = (items, label, formatter, limit = AI_PROJECT_SUMMARY_LIMIT) => {
-        const sourceItems = Array.isArray(items) ? items : [];
-        if (sourceItems.length === 0) return `- [${label}] 暂无`;
-
-        const shownItems = Number.isFinite(limit)
-            ? sourceItems.slice(-limit)
-            : sourceItems;
-        const lines = shownItems.map(formatter);
-        if (sourceItems.length > shownItems.length) {
-            lines.push(`- [${label}] 共 ${sourceItems.length} 项，项目摘要显示最近 ${shownItems.length} 项`);
-        }
-        return lines.join('\n');
-    };
-
-    const dateInfo = getDateInfo();
-    const defaultTaskScope = getDefaultTaskTimeScope(dateInfo);
-    const allTasks = taskState.tasks || [];
-    const scopedTasks = filterTasksByTimeScope(allTasks, defaultTaskScope);
-    const taskRangeLine = `- [任务范围] ${formatDateForAI(defaultTaskScope.startDate)} 至 ${formatDateForAI(defaultTaskScope.endDate)}，范围内 ${scopedTasks.length} / 全部 ${allTasks.length} 项`;
-    const taskLines = formatSummaryLines(
-        scopedTasks,
-        '任务',
-        task => `- [任务] ${task.title} | ${task.status} | ${task.date}`,
-        AI_PROJECT_SUMMARY_LIMIT
-    );
-    const templateLines = formatSummaryLines(
-        taskState.templates || [],
-        '模板',
-        template => `- [模板] ${template.title}`
-    );
-    const scheduledLines = formatSummaryLines(
-        taskState.scheduledTasks || [],
-        '定时',
-        task => `- [定时] ${task.title} | ${Array.isArray(task.repeatDays) ? task.repeatDays.join(',') : ''}`
-    );
-    const accessibleNotes = (noteState.notes || [])
-        .filter(note => !note.aiLocked);
-    const noteLines = formatSummaryLines(
-        accessibleNotes,
-        '笔记',
-        note => `- [笔记] ${note.title} | ${note.category || '未分类'}`
-    );
-
-    return [
-        '【项目上下文】',
-        taskRangeLine,
-        taskLines,
-        templateLines,
-        scheduledLines,
-        noteLines
-    ].join('\n');
-}
-
-async function buildContextMessages(history, chatStyle, bodyFormat = 'openai') {
+async function buildContextMessages(history, chatStyle, bodyFormat = 'openai', useApplicationData = false) {
     const nowStr = getFormattedDateTime();
-    const projectContext = await getProjectContextSummary();
     const stylePrompts = {
         default: `你是 WorkPlan 的智能助手。当前时间：${nowStr}。请用友好、专业的方式回答用户问题。`,
         fun: `你是 WorkPlan 的智能助手。当前时间：${nowStr}。可以风趣幽默、适度自嘲，但不攻击用户；保持逻辑清晰、事实准确，不冒充其他模型或服务商。`,
@@ -6252,10 +6202,13 @@ async function buildContextMessages(history, chatStyle, bodyFormat = 'openai') {
         teacher: `你是一个耐心的老师。当前时间：${nowStr}。请用循循善诱的方式解释问题，适当举例说明。`
     };
     const systemPrompt = stylePrompts[chatStyle] || stylePrompts.default;
-    const messages = [
-        { role: 'system', content: `${systemPrompt}\n${AI_TRUST_RULES}` },
-        { role: 'user', content: untrustedAiContext('PROJECT_SUMMARY', projectContext, 12000) }
-    ];
+    const messages = [{ role: 'system', content: `${systemPrompt}\n${AI_TRUST_RULES}\n未明确授权时，只针对当前用户消息及主动上传的附件回答，不推测或读取应用内数据。` }];
+    if (useApplicationData) {
+        const lastUser = history.filter(message => message.role === 'user').at(-1);
+        const scoped = await buildAiChatAssistantPayload(lastUser?.content || '');
+        messages.push({ role: 'user', content: untrustedAiContext('REQUESTED_APP_DATA',
+            `${formatContextItemsForAI(scoped.items, scoped)}\n${formatNoteContextForAI(scoped)}`, 12000) });
+    }
     const validHistory = history.filter(msg => {
         if (!msg.content && !msg.summary && !msg.data && !msg.plan && !msg.attachments?.length) return false;
         if (msg.role !== 'user' && msg.role !== 'assistant') return false;
@@ -6263,7 +6216,7 @@ async function buildContextMessages(history, chatStyle, bodyFormat = 'openai') {
         if (msg.type === 'loading' || msg.type === 'streaming' || msg.type === 'tool_progress') return false;
         return true;
     });
-    const recentHistory = validHistory.slice(-20);
+    const recentHistory = validHistory.filter(message => message.role === 'user').slice(-1);
     for (const msg of recentHistory) {
         if (msg.role === 'user') {
             const content = buildUserMessageContentForAI(msg, bodyFormat);
@@ -6311,8 +6264,12 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     if (!requestedText && selectedAttachments.length === 0) return;
 
     const effectiveText = requestedText || '请阅读并分析这些附件。';
+    const useApplicationData = selectedAttachments.length === 0 && requestsApplicationData(effectiveText);
+    const explicitExternalTool = selectedAttachments.length === 0 && (looksLikeFileIntent(effectiveText) || isExplicitWebSearchRequest(effectiveText));
 
     const currentConfig = getEffectiveConfig();
+    currentConfig.allowApplicationData = useApplicationData;
+    assertChatAttachments(currentConfig, selectedAttachments);
     const needsApiKey = providerNeedsApiKey(currentConfig.provider);
 
     if (needsApiKey && !currentConfig.apiKey) {
@@ -6361,7 +6318,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     currentConfig.isCurrent = isCurrent;
 
     try {
-        const aiChatToolsEnabled = get(settingsStore).enableAiChatTools ?? true;
+        const aiChatToolsEnabled = (useApplicationData || explicitExternalTool) && (get(settingsStore).enableAiChatTools ?? true);
 
         // Helper: update tool progress in chat history
         function updateToolProgress(stepKey) {
@@ -6385,7 +6342,9 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         let intentHint = null;
 
         if (aiChatToolsEnabled) {
-            if (looksLikeGeneralChatIntent(effectiveText)) {
+            if (explicitExternalTool) {
+                useToolRouter = true;
+            } else if (looksLikeGeneralChatIntent(effectiveText)) {
                 // Clear conversation: never ask a task classifier to reinterpret it.
                 useToolRouter = false;
             } else if (shouldUseAssistantToolsInChat(effectiveText)) {
@@ -6408,7 +6367,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         // Check if this is a complex multi-step request that should be decomposed.
         // Task authoring is never decomposed: the plan router lists web_search as a
         // step type and used to turn "帮我整理今天的任务" into a web lookup.
-        if (aiChatToolsEnabled && !shouldSkipWebSearchForTaskText(effectiveText)) {
+        if (aiChatToolsEnabled && useApplicationData && !shouldSkipWebSearchForTaskText(effectiveText)) {
             const { shouldDecompose, decomposeIntoSteps, executePlan, formatPlanSummary, cancelPlan, getTaskCreateResults } = await import('../utils/ai-execution-engine.js');
             if (shouldDecompose(effectiveText)) {
                 if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -6553,7 +6512,7 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
             if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             const assistantPayload = await buildAiChatAssistantPayload(effectiveText);
             if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            const assistantResult = await resolveAssistantMessage(effectiveText, assistantPayload, currentConfig, intentHint, updateToolProgress, { allowLocalFiles: true });
+            const assistantResult = await resolveAssistantMessage(effectiveText, assistantPayload, currentConfig, intentHint, updateToolProgress, { allowLocalFiles: looksLikeFileIntent(effectiveText) });
             if (!isCurrent()) return;
             // If resolveAssistantMessage signals no tool action matched, fall through to streaming chat
             if (assistantResult?.__batchResults?.length) {
@@ -6585,7 +6544,9 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
         const bodyFormat = getProviderBodyFormat(currentConfig.provider);
         const currentHistory = get(aiChatHistory);
         const historyWithoutStreaming = currentHistory.filter(m => m.type !== 'streaming' && m.type !== 'loading' && m.type !== 'tool_progress');
-        const messages = await buildContextMessages(historyWithoutStreaming, chatStyle, bodyFormat);
+        const lastUser = historyWithoutStreaming.filter(message => message.role === 'user').at(-1);
+        assertChatAttachments(currentConfig, lastUser?.attachments || []);
+        const messages = await buildContextMessages(historyWithoutStreaming, chatStyle, bodyFormat, useApplicationData);
         if (!isCurrent()) return;
 
         aiChatHistory.update(h => {
