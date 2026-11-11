@@ -44,6 +44,18 @@ beforeEach(() => {
 });
 
 describe('home-directory local database', () => {
+    test('an erase journal defeats both stale local content and automatic backup recovery', async () => {
+        dbContent = JSON.stringify({ format: 'workplan-local-db', version: 1, keys: {
+            workplan_protection_erase: JSON.stringify({ localErased: true, records: ['old-account'] })
+        } });
+        recoverContent = JSON.stringify({ format: 'workplan-local-db', version: 1, keys: { workplan_access_key: 'backup-account' } });
+        localStorage.setItem('workplan_access_key', 'stale-account');
+        localStorage.setItem('workplan_passwords', 'stale-vault');
+        await initLocalDatabase();
+        expect(localStorage.getItem('workplan_access_key')).toBeNull();
+        expect(localStorage.getItem('workplan_passwords')).toBeNull();
+        expect(localStorage.getItem('workplan_protection_erase')).toContain('old-account');
+    });
     test('migrates existing localStorage into the database on first boot', async () => {
         localStorage.setItem('workplan_access_key', 'abc');
         localStorage.setItem('workplan_notes', '[]');
@@ -55,7 +67,7 @@ describe('home-directory local database', () => {
         expect(localStorage.getItem('workplan_db_saved_at')).toBeTruthy();
     });
 
-    test('hydrates an empty local storage from the database and requests one reload', async () => {
+    test('hydrates an empty local storage from the database and does not request a second boot', async () => {
         dbContent = JSON.stringify({
             format: 'workplan-local-db',
             version: 1,
@@ -63,7 +75,7 @@ describe('home-directory local database', () => {
             keys: { workplan_access_key: 'restored', workplan_notes: '[{"id":"n1"}]' }
         });
         const result = await initLocalDatabase();
-        expect(result.reloaded).toBe(true);
+        expect(result.reloaded).toBe(false);
         expect(localStorage.getItem('workplan_access_key')).toBe('restored');
         expect(localStorage.getItem('workplan_notes')).toContain('n1');
     });
@@ -80,7 +92,7 @@ describe('home-directory local database', () => {
         });
         localStorage.setItem('workplan_connector_config', '{"enabled":false}');
         const result = await initLocalDatabase();
-        expect(result.reloaded).toBe(true);
+        expect(result.reloaded).toBe(false);
         expect(localStorage.getItem('workplan_access_key')).toBe('from-db');
         expect(localStorage.getItem('workplan_tasks_local_cache')).toContain('db-task');
     });
@@ -128,7 +140,7 @@ describe('home-directory local database', () => {
             }
         });
         const first = await initLocalDatabase();
-        expect(first.reloaded).toBe(true);
+        expect(first.reloaded).toBe(false);
         // The reloaded app re-reads the same snapshot; it must not loop.
         const second = await initLocalDatabase();
         expect(second.reloaded).toBe(false);
@@ -173,7 +185,7 @@ describe('home-directory local database', () => {
             }
         });
         const first = await initLocalDatabase();
-        expect(first.reloaded).toBe(true);
+        expect(first.reloaded).toBe(false);
         expect(localStorage.getItem('workplan_access_key')).toBe('user_legacy');
         expect(localStorage.getItem('workplan_notes')).toContain('旧笔记');
         expect(localStorage.getItem('planpro_access_key')).toBeNull();
@@ -219,9 +231,14 @@ describe('home-directory local database', () => {
             }
         });
         const result = await initLocalDatabase();
-        expect(result.reloaded).toBe(true);
+        expect(result.reloaded).toBe(false);
         expect(localStorage.getItem('workplan_access_key')).toBe('recovered_account');
         expect(localStorage.getItem('workplan_notes')).toContain('n2');
+        await flushLocalDatabase();
+        expect(writes.at(-1).keys.workplan_access_key).toBe('recovered_account');
+        const before = writes.length;
+        await flushLocalDatabase();
+        expect(writes.length).toBe(before);
     });
 
     test('a deliberate logout is not overwritten by backup recovery', async () => {

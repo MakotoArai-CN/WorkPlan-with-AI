@@ -3,6 +3,7 @@ import CryptoJS from 'crypto-js';
 import {
     encrypt,
     decrypt,
+    decryptAsync,
     hashPassword,
     verifyPassword,
     verifierNeedsUpgrade,
@@ -41,6 +42,15 @@ function legacyEncryptV2(plaintext, password) {
 }
 
 describe('encrypt / decrypt', () => {
+    test('native async KDF reads old v3, v2 and unversioned ciphertext', async () => {
+        const v3 = encrypt('legacy secret', 'master-pw');
+        const v2 = legacyEncryptV2('legacy secret', 'master-pw');
+        for (const ciphertext of [v3, v2, v2.slice(3)]) {
+            expect(await decryptAsync(ciphertext, 'master-pw')).toBe('legacy secret');
+        }
+        expect(await decryptAsync(v3, 'wrong')).toBeNull();
+        expect(await decryptAsync(tamperField(v3.split(':'), 4), 'master-pw')).toBeNull();
+    });
     test('round trips a value', () => {
         const ciphertext = encrypt('hunter2', 'master-pw');
         expect(ciphertext.startsWith('v3:')).toBe(true);

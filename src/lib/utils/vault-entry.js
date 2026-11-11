@@ -82,7 +82,7 @@ async function deriveKeyPair(secret, meta) {
 export async function ensureVaultEntryKey(secret, saltOverride = '') {
     if (!secret) return null;
     let meta = readMeta();
-    if (saltOverride) {
+    if (saltOverride && meta?.salt !== saltOverride) {
         // Recovery may only have the encrypted entries, so every entry carries
         // the public KDF salt. Persist it again for future unlocks.
         meta = { version: 2, salt: saltOverride, iterations: ITERATIONS, createdAt: new Date().toISOString() };
@@ -90,11 +90,11 @@ export async function ensureVaultEntryKey(secret, saltOverride = '') {
     } else if (!meta) {
         meta = rotateVaultMeta();
     }
-    if (cached && cached.salt === meta.salt && cached.iterations === meta.iterations) {
+    if (cached && cached.secret === secret && cached.salt === meta.salt && cached.iterations === meta.iterations) {
         return cached.key;
     }
     const key = await deriveKeyPair(secret, meta);
-    cached = { salt: meta.salt, iterations: meta.iterations, key };
+    cached = { secret, salt: meta.salt, iterations: meta.iterations, key };
     return key;
 }
 

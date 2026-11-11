@@ -4,6 +4,8 @@ const SCOPED_KEYS = [
     'workplan_passwords',
     'workplan_master_hash',
     'workplan_passwords_settings',
+    'workplan_vault_protection',
+    'workplan_vault_meta',
     'workplan_passwords_session',
     'workplan_ai_chat_sessions',
     'workplan_ai_chat_history',

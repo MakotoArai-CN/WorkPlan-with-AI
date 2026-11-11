@@ -149,6 +149,33 @@ export function decrypt(ciphertext, password) {
     return result;
 }
 
+/** Legacy vault KDFs run natively off the UI thread, preserving their exact format. */
+export async function decryptAsync(ciphertext, password) {
+    if (!ciphertext || !password) return null;
+    const parts = ciphertext.split(':');
+    const authenticated = parts[0] === 'v3' && parts.length === 5;
+    const fields = authenticated || parts[0] === 'v2' ? parts.slice(1) : parts;
+    if (fields.length !== (authenticated ? 4 : 3)) return null;
+    const [salt, ivHex, encryptedHex, mac] = fields;
+    try {
+        const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+        // CryptoJS interprets the legacy hex-looking salt as a UTF-8 string.
+        const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: ITERATIONS_NEW, hash: 'SHA-256' }, material, authenticated ? 512 : 256);
+        const words = CryptoJS.lib.WordArray.create(new Uint8Array(bits));
+        const encKey = CryptoJS.lib.WordArray.create(words.words.slice(0, 8));
+        if (authenticated) {
+            const macKey = CryptoJS.lib.WordArray.create(words.words.slice(8, 16));
+            if (!timingSafeEqual(computeMac(macKey, salt, ivHex, encryptedHex), mac)) return null;
+        }
+        const plain = CryptoJS.AES.decrypt({ ciphertext: CryptoJS.enc.Hex.parse(encryptedHex) }, encKey, {
+            iv: CryptoJS.enc.Hex.parse(ivHex), mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7
+        }).toString(CryptoJS.enc.Utf8);
+        return plain || null;
+    } catch {
+        return null;
+    }
+}
+
 /** Derive a non-reversible sync secret from already-derived material. */
 export function deriveSyncSecret(...parts) {
     const material = parts.filter(part => part !== null && part !== undefined && part !== '').join('|');

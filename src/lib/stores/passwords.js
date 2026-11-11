@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import {
     encrypt,
     decrypt,
+    decryptAsync,
     hashPassword,
     verifyPassword,
     verifierNeedsUpgrade,
@@ -48,6 +49,8 @@ import {
     enableBiometric,
     disableBiometric
 } from '../utils/device-auth.js';
+import { validateMasterPassword } from '../utils/master-password-policy.js';
+import { PROTECTION_KEY, readProtection, writeProtection, nextProtectionFailure, executeProtectionErase } from '../utils/vault-protection.js';
 
 const STORAGE_KEY = 'workplan_passwords';
 const MASTER_KEY = 'workplan_master_hash';
@@ -75,6 +78,51 @@ function createPasswordsStore() {
     let sessionToken = null;
     let saveTimer = null;
     let migrationDone = false;
+    let encodedEntries = new WeakMap();
+    let portableEntries = new WeakMap();
+    let encodedKey = null;
+    let verificationBusy = false;
+    let secretsGeneration = 0;
+
+    function quickUnlockBlocked() {
+        const protection = readProtection();
+        return protection.enabled && (protection.failures > 10 || Date.now() < protection.lockedUntil);
+    }
+
+    async function verifyMaster(password, hash) {
+        if (verificationBusy) throw new Error('请等待当前验证完成');
+        const generation = secretsGeneration;
+        const protection = readProtection();
+        if (protection.enabled && protection.failures > 10) {
+            await executeProtectionErase();
+            return false;
+        }
+        if (protection.enabled && Date.now() < protection.lockedUntil) {
+            throw new Error(`强制冷静中，请在 ${Math.ceil((protection.lockedUntil - Date.now()) / 60000)} 分钟后重试`);
+        }
+        verificationBusy = true;
+        try {
+            const valid = await verifyPassword(password, hash);
+            // A native KDF may finish after locking or switching accounts.
+            if (generation !== secretsGeneration) return false;
+            if (protection.enabled) {
+                const next = valid ? { enabled: true, failures: 0, lockedUntil: 0 } : nextProtectionFailure(protection);
+                writeProtection(next);
+                const { flushLocalDatabase } = await import('../utils/local-db.js');
+                await flushLocalDatabase();
+                if (generation !== secretsGeneration) return false;
+                if (next.failures > 10) {
+                    clearActiveSecrets();
+                    clearSession();
+                    update(s => ({ ...s, passwords: [], isUnlocked: false }));
+                    await executeProtectionErase();
+                }
+            }
+            return valid;
+        } finally {
+            verificationBusy = false;
+        }
+    }
 
     /** Recompute the vault secret from the master password and current binding state. */
     async function deriveVaultSecret(masterPassword) {
@@ -91,23 +139,40 @@ function createPasswordsStore() {
     }
 
     async function setActiveSecrets(masterPassword) {
-        currentMasterPassword = masterPassword;
-        vaultSecret = await deriveVaultSecret(masterPassword);
+        const generation = secretsGeneration;
         const state = get({ subscribe });
+        const secret = await deriveVaultSecret(masterPassword);
         const salt = (state.passwords || []).find(entry => entry.kdfSalt)?.kdfSalt || '';
-        vaultEntryKey = await ensureVaultEntryKey(vaultSecret, salt);
+        const key = await ensureVaultEntryKey(secret, salt);
+        if (generation !== secretsGeneration) {
+            resetVaultKeyCache();
+            throw new Error('密码库会话已结束');
+        }
+        currentMasterPassword = masterPassword;
+        vaultSecret = secret;
+        vaultEntryKey = key;
         return vaultSecret;
     }
 
     function clearActiveSecrets() {
+        secretsGeneration++;
         currentMasterPassword = null;
         vaultSecret = null;
         vaultEntryKey = null;
         resetVaultKeyCache();
+        encodedEntries = new WeakMap();
+        portableEntries = new WeakMap();
+        encodedKey = null;
     }
 
     function encodeEntryForStorage(entry) {
         if (!vaultEntryKey) return entry;
+        if (encodedKey !== vaultEntryKey) {
+            encodedEntries = new WeakMap();
+            encodedKey = vaultEntryKey;
+        }
+        const cached = encodedEntries.get(entry);
+        if (cached) return cached;
         const meta = {
             title: entry.title || '',
             username: entry.username || '',
@@ -121,18 +186,22 @@ function createPasswordsStore() {
         const password = rawPassword.startsWith('v4:') || rawPassword.startsWith('v3:')
             ? rawPassword
             : encryptVaultPayload(rawPassword, vaultEntryKey);
-        return {
+        const encoded = {
             id: entry.id,
             meta: encryptVaultEntryFields(meta, vaultEntryKey),
             password,
-            kdfSalt: getVaultMeta()?.salt || '',
+            kdfSalt: storageSalt,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
             schema: 2
         };
+        encodedEntries.set(entry, encoded);
+        return encoded;
     }
 
+    let storageSalt = '';
     function encodePasswordsForStorage(list = []) {
+        storageSalt = getVaultMeta()?.salt || '';
         return list.map(encodeEntryForStorage);
     }
 
@@ -147,31 +216,30 @@ function createPasswordsStore() {
     async function migrateLegacyVaultEntries() {
         if (vaultMigrationRunning || !vaultSecret || !vaultEntryKey) return;
         vaultMigrationRunning = true;
+        const generation = secretsGeneration;
+        const key = vaultEntryKey;
+        const secret = vaultSecret;
         let migratedAny = false;
         try {
             const initial = get({ subscribe });
-            const legacyIds = initial.passwords
+            const legacyEntries = initial.passwords
                 .filter(entry => {
                     const value = String(entry.password || '');
                     return value && !value.startsWith('v4:');
-                })
-                .map(entry => entry.id);
-            for (let offset = 0; offset < legacyIds.length; offset += 12) {
-                await new Promise(resolve => setTimeout(resolve, 0));
-                if (!vaultEntryKey) break;
-                const batch = new Set(legacyIds.slice(offset, offset + 12));
-                let changed = false;
-                const current = get({ subscribe });
-                const migrated = current.passwords.map(entry => {
-                    if (!batch.has(entry.id)) return entry;
-                    const value = String(entry.password || '');
-                    if (!value || value.startsWith('v4:')) return entry;
-                    const plain = decrypt(value, vaultSecret);
-                    if (plain === null) return entry;
-                    changed = true;
-                    return { ...entry, password: encryptVaultPayload(plain, vaultEntryKey) };
                 });
-                if (changed) {
+            for (let offset = 0; offset < legacyEntries.length; offset += 12) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+                if (generation !== secretsGeneration || vaultEntryKey !== key) break;
+                const batch = new Map();
+                for (const entry of legacyEntries.slice(offset, offset + 12)) {
+                    const plain = await decryptAsync(entry.password, secret);
+                    if (generation !== secretsGeneration || vaultEntryKey !== key) return;
+                    if (plain !== null) batch.set(entry, { ...entry, password: encryptVaultPayload(plain, key) });
+                }
+                if (batch.size) {
+                    const current = get({ subscribe });
+                    // Object identity prevents overwriting edits made during the native KDF.
+                    const migrated = current.passwords.map(entry => batch.get(entry) || entry);
                     const next = { ...current, passwords: migrated };
                     update(() => next);
                     migratedAny = true;
@@ -186,24 +254,36 @@ function createPasswordsStore() {
     }
 
     function scheduleVaultMigration() {
-        setTimeout(() => { void migrateLegacyVaultEntries(); }, 80);
+        setTimeout(() => {
+            void migrateLegacyVaultEntries().catch(error => console.warn('Vault migration deferred:', error));
+        }, 80);
     }
 
     async function hydrateVaultEntries() {
         if (!vaultSecret || !vaultEntryKey) return;
         const state = get({ subscribe });
-        const hydrated = state.passwords.map(entry => {
+        const hydrated = [];
+        const key = vaultEntryKey;
+        const generation = secretsGeneration;
+        let sliceStart = performance.now();
+        for (const entry of state.passwords) {
+            if (performance.now() - sliceStart > 8) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+                if (generation !== secretsGeneration || key !== vaultEntryKey) throw new Error('密码库会话已结束');
+                sliceStart = performance.now();
+            }
             let next = { ...entry };
             if (entry.meta) {
                 const meta = decryptVaultEntryFields(entry.meta, vaultEntryKey);
-                if (meta) next = { ...next, ...meta };
+                if (!meta) throw new Error('密码库元数据损坏，已停止解锁以避免覆盖数据');
+                next = { ...next, ...meta };
                 delete next.meta;
             }
             // Do NOT re-encrypt every legacy entry here. Each old entry needs
             // a 10k PBKDF2 pass; doing that inside unlock() freezes the UI when
             // the vault contains hundreds/thousands of passwords.
-            return next;
-        });
+            hydrated.push(next);
+        }
         const nextState = { ...state, passwords: hydrated };
         update(() => nextState);
         migrationDone = true;
@@ -251,7 +331,7 @@ function createPasswordsStore() {
         const encryptedSession = sessionStorage.getItem(SESSION_KEY);
         let sessionUnlocked = false;
 
-        if (settings.rememberSession && encryptedSession) {
+        if (!quickUnlockBlocked() && settings.rememberSession && encryptedSession) {
             const sessionData = decryptSessionData(encryptedSession);
             if (sessionData && sessionData.token && sessionData.key) {
                 sessionToken = sessionData.token;
@@ -296,11 +376,22 @@ function createPasswordsStore() {
     function saveImmediate(state) {
         if (typeof window === 'undefined') return;
         if (!vaultEntryKey) return;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(encodePasswordsForStorage(state.passwords)));
-        if (state.masterPasswordHash) {
-            localStorage.setItem(MASTER_KEY, state.masterPasswordHash);
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = null;
+        const previousEntries = localStorage.getItem(STORAGE_KEY);
+        const previousHash = localStorage.getItem(MASTER_KEY);
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(encodePasswordsForStorage(state.passwords)));
+            if (state.masterPasswordHash) localStorage.setItem(MASTER_KEY, state.masterPasswordHash);
+            saveSettings({ rememberSession: state.rememberSession });
+        } catch (error) {
+            // Keep verifier and ciphertext in the same generation on write failure.
+            if (previousEntries === null) localStorage.removeItem(STORAGE_KEY);
+            else localStorage.setItem(STORAGE_KEY, previousEntries);
+            if (previousHash === null) localStorage.removeItem(MASTER_KEY);
+            else localStorage.setItem(MASTER_KEY, previousHash);
+            throw error;
         }
-        saveSettings({ rememberSession: state.rememberSession });
     }
 
     function saveSession(password) {
@@ -336,6 +427,8 @@ function createPasswordsStore() {
      * still sees error codes like 'wrong_pin' and attemptsRemaining.
      */
     async function completeQuickUnlock(result) {
+        if (quickUnlockBlocked()) return { success: false, error: 'cooldown' };
+        const generation = secretsGeneration;
         if (!result?.success) {
             return result;
         }
@@ -348,6 +441,7 @@ function createPasswordsStore() {
         }
 
         await hydrateVaultEntries();
+        if (generation !== secretsGeneration || quickUnlockBlocked()) return { success: false, error: 'cooldown' };
         update(s => ({ ...s, isUnlocked: true }));
         saveSession(result.masterPassword);
         scheduleVaultMigration();
@@ -357,11 +451,21 @@ function createPasswordsStore() {
     return {
         subscribe,
         load,
+        getProtection: readProtection,
+        setProtection: async (enabled, masterPassword) => {
+            if (!get({ subscribe }).isUnlocked || !currentMasterPassword) return { success: false, error: '请先解锁密码库' };
+            if (!(await verifyMaster(masterPassword, get({ subscribe }).masterPasswordHash))) return { success: false, error: '原密码错误' };
+            writeProtection({ enabled: !!enabled, failures: 0, lockedUntil: 0 });
+            const { flushLocalDatabase } = await import('../utils/local-db.js');
+            await flushLocalDatabase();
+            return { success: true };
+        },
         hasMasterPassword: () => {
             const state = get({ subscribe });
             return !!state.masterPasswordHash;
         },
         isSessionValid: () => {
+            if (quickUnlockBlocked()) return false;
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
             if (state.isUnlocked && currentMasterPassword && sessionToken) return true;
@@ -371,6 +475,8 @@ function createPasswordsStore() {
             return !!(sessionData && sessionData.token && sessionData.key);
         },
         restoreSession: async () => {
+            if (quickUnlockBlocked()) return false;
+            const generation = secretsGeneration;
             const state = get({ subscribe });
             if (!state.rememberSession) return false;
             const encryptedSession = sessionStorage.getItem(SESSION_KEY);
@@ -389,6 +495,7 @@ function createPasswordsStore() {
                     return false;
                 }
                 await hydrateVaultEntries();
+                if (generation !== secretsGeneration || quickUnlockBlocked()) return false;
                 update(s => ({ ...s, isUnlocked: true }));
                 scheduleVaultMigration();
                 return true;
@@ -399,6 +506,8 @@ function createPasswordsStore() {
             return false;
         },
         setMasterPassword: async (password) => {
+            const policy = validateMasterPassword(password);
+            if (policy) throw new Error(policy === 'too_short' ? '主密码至少需要8个字符' : '不允许使用常见弱密码作为主密码');
             const hash = await hashPassword(password);
             await setActiveSecrets(password);
             let newState;
@@ -411,25 +520,30 @@ function createPasswordsStore() {
             return newState;
         },
         unlock: async (password) => {
+            const generation = secretsGeneration;
             const state = get({ subscribe });
-            if (!(await verifyPassword(password, state.masterPasswordHash))) {
+            if (!(await verifyMaster(password, state.masterPasswordHash))) {
                 return false;
             }
+            if (generation !== secretsGeneration) return false;
 
             await setActiveSecrets(password);
             await hydrateVaultEntries();
+            if (generation !== secretsGeneration) return false;
 
             // Transparently re-hash legacy verifiers (unsalted SHA-256 / low-iteration
             // PBKDF2) now that we hold the correct plaintext password.
             if (verifierNeedsUpgrade(state.masterPasswordHash)) {
                 try {
                     const upgraded = await hashPassword(password);
+                    if (generation !== secretsGeneration) return false;
                     update(s => {
                         const next = { ...s, masterPasswordHash: upgraded, isUnlocked: true };
                         saveImmediate(next);
                         return next;
                     });
                 } catch (e) {
+                    if (generation !== secretsGeneration) return false;
                     console.warn('Failed to upgrade master password verifier:', e);
                     update(s => ({ ...s, isUnlocked: true }));
                 }
@@ -443,6 +557,7 @@ function createPasswordsStore() {
         },
         lock: () => {
             const state = get({ subscribe });
+            if (saveTimer && vaultEntryKey) saveImmediate(state);
             // An explicit lock must drop the decrypted key material from memory
             // even when "remember session" is on (that flag only keeps the
             // encrypted session blob for the next app start).
@@ -556,6 +671,33 @@ function createPasswordsStore() {
             });
             return { passwords, categories: [...state.categories] };
         },
+        getPortableSyncPayloadAsync: async () => {
+            if (!vaultSecret || !vaultEntryKey) return null;
+            const state = get({ subscribe });
+            const generation = secretsGeneration;
+            const key = vaultEntryKey;
+            const secret = vaultSecret;
+            const passwords = [];
+            let started = performance.now();
+            for (const entry of state.passwords) {
+                if (performance.now() - started > 8) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                    started = performance.now();
+                }
+                if (generation !== secretsGeneration || key !== vaultEntryKey) return null;
+                const cached = portableEntries.get(entry);
+                if (cached?.key === key) { passwords.push(cached.value); continue; }
+                const plain = !entry.password ? '' : String(entry.password).startsWith('v4:')
+                    ? decryptVaultPayload(entry.password, key) : await decryptAsync(entry.password, secret);
+                if (generation !== secretsGeneration || key !== vaultEntryKey) return null;
+                if (plain === null) throw new Error('密码条目无法解密，已停止同步');
+                const value = { ...entry, password: plain };
+                portableEntries.set(entry, { key, value });
+                passwords.push(value);
+            }
+            if (get({ subscribe }).passwords !== state.passwords) throw new Error('密码库已更改，请稍后重试同步');
+            return { passwords, categories: [...state.categories] };
+        },
         /** Convert a legacy v1 payload (local ciphertext) into plaintext. */
         decryptSyncPayload: (payload) => {
             if (!vaultSecret || !payload || !Array.isArray(payload.passwords)) return null;
@@ -637,6 +779,8 @@ function createPasswordsStore() {
             }));
         },
         clearAll: () => {
+            if (saveTimer) clearTimeout(saveTimer);
+            saveTimer = null;
             clearActiveSecrets();
             sessionToken = null;
             migrationDone = false;
@@ -658,6 +802,7 @@ function createPasswordsStore() {
                 localStorage.removeItem(STORAGE_KEY);
                 localStorage.removeItem(MASTER_KEY);
                 localStorage.removeItem(SETTINGS_KEY);
+                localStorage.removeItem(PROTECTION_KEY);
             }
             set({
                 passwords: [],
@@ -669,16 +814,25 @@ function createPasswordsStore() {
             });
         },
         changeMasterPassword: async (oldPassword, newPassword) => {
-            const state = get({ subscribe });
+            let state = get({ subscribe });
             if (!state.masterPasswordHash) {
                 return { success: false, error: '当前会话没有主密码，请先解锁密码库' };
             }
-            if (!(await verifyPassword(oldPassword, state.masterPasswordHash))) {
+            if (!(await verifyMaster(oldPassword, state.masterPasswordHash))) {
                 return { success: false, error: '原密码错误' };
             }
+            if (get({ subscribe }).masterPasswordHash !== state.masterPasswordHash) return { success: false, error: '密码库会话已更改，请重试' };
+            state = get({ subscribe });
             if (!newPassword || newPassword.length < 8) {
                 return { success: false, error: '新密码至少需要8个字符' };
             }
+            if (validateMasterPassword(newPassword)) return { success: false, error: '不允许使用常见弱密码作为主密码' };
+            if (!state.isUnlocked || !vaultEntryKey) return { success: false, error: '请先解锁密码库' };
+            const generation = ++secretsGeneration;
+            const unchanged = () => generation === secretsGeneration && get({ subscribe }).passwords === state.passwords && get({ subscribe }).isUnlocked;
+            const oldEntryKey = vaultEntryKey;
+            // Flush pending old-key writes before the key swap.
+            saveImmediate(state);
 
             const BATCH_SIZE = 50;
             const passwords = state.passwords;
@@ -703,7 +857,9 @@ function createPasswordsStore() {
                 await new Promise(resolve => setTimeout(resolve, 0));
                 const batch = passwords.slice(i, i + BATCH_SIZE);
                 for (const p of batch) {
-                    const plain = decryptEntryPassword(p.password);
+                    const plain = !p.password ? '' : String(p.password).startsWith('v4:')
+                        ? decryptVaultPayload(p.password, oldEntryKey)
+                        : await decryptAsync(p.password, oldSecret);
                     if (plain === null) {
                         // Never rewrite an entry we could not read: encrypt('') is
                         // null and would permanently destroy the stored secret.
@@ -712,6 +868,7 @@ function createPasswordsStore() {
                     }
                     decryptedEntries.push({ entry: p, plain });
                 }
+                if (!unchanged()) return { success: false, error: '密码库数据或会话已更改，请重试' };
             }
 
             if (failedPasswords.length > 0) {
@@ -728,30 +885,27 @@ function createPasswordsStore() {
             // session would keep the new master while storage still holds the
             // old one: every later save/cancel then fails to encrypt/decrypt.
             // Swap under a guard and roll the session back on failure.
+            let newEntryKey;
             try {
-                resetVaultKeyCache();
-                vaultSecret = newSecret;
-                vaultEntryKey = await ensureVaultEntryKey(newSecret);
+                newEntryKey = await ensureVaultEntryKey(newSecret);
                 for (const { entry, plain } of decryptedEntries) {
                     reEncryptedPasswords.push({
                         ...entry,
-                        password: plain === '' ? '' : encryptVaultPayload(plain, vaultEntryKey),
+                        password: encryptVaultPayload(plain, newEntryKey),
                         updatedAt: now
                     });
                 }
-                await setActiveSecrets(newPassword);
             } catch (error) {
-                currentMasterPassword = oldPassword;
-                vaultSecret = oldSecret;
-                resetVaultKeyCache();
-                try {
-                    vaultEntryKey = await ensureVaultEntryKey(oldSecret);
-                } catch {
-                    // Keep whatever key is cached; the next unlock rebuilds it.
-                }
                 return { success: false, error: `主密码更新失败：${error.message || error}` };
             }
 
+            if (!unchanged()) {
+                resetVaultKeyCache();
+                return { success: false, error: '密码库数据或会话已更改，请重试' };
+            }
+            currentMasterPassword = newPassword;
+            vaultSecret = newSecret;
+            vaultEntryKey = newEntryKey;
             try {
                 update(s => {
                     const newState = { ...s, passwords: reEncryptedPasswords, masterPasswordHash: newHash };
@@ -763,7 +917,7 @@ function createPasswordsStore() {
                 currentMasterPassword = oldPassword;
                 vaultSecret = oldSecret;
                 resetVaultKeyCache();
-                vaultEntryKey = await ensureVaultEntryKey(oldSecret);
+                vaultEntryKey = oldEntryKey;
                 return { success: false, error: `主密码更新保存失败：${error.message || error}` };
             }
 
@@ -910,7 +1064,7 @@ function createPasswordsStore() {
         recoverWithCode: async (recoveryCode, masterPassword) => {
             const state = get({ subscribe });
 
-            if (!(await verifyPassword(masterPassword, state.masterPasswordHash))) {
+            if (!(await verifyMaster(masterPassword, state.masterPasswordHash))) {
                 return { success: false, error: '主密码错误' };
             }
 
@@ -1041,6 +1195,7 @@ function createPasswordsStore() {
 
         /** Unlock via PIN. Falls back to the master password once attempts run out. */
         unlockWithPin: async (pin) => {
+            if (quickUnlockBlocked()) return { success: false, error: 'cooldown' };
             const result = await unlockWithPin(pin);
             return await completeQuickUnlock(result);
         },

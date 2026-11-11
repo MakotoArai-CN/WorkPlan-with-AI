@@ -47,7 +47,16 @@ export const connectorStatus = writable({
     gatewayHello: null
 });
 
-connectorConfig.subscribe((cfg) => persistConfig(cfg));
+let firstConfigEmission = true;
+connectorConfig.subscribe((cfg) => {
+    // Import-time defaults must not overwrite the database before hydration.
+    if (firstConfigEmission) { firstConfigEmission = false; return; }
+    persistConfig(cfg);
+});
+
+export function reloadConnectorConfig() {
+    connectorConfig.set(loadConfig());
+}
 
 export function updateConnectorConfig(updates) {
     connectorConfig.update((c) => ({ ...c, ...updates }));

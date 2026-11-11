@@ -1488,6 +1488,7 @@ pub fn run() {
             device::reset_device_key,
             local_db::local_db_load,
             local_db::local_db_save,
+            local_db::local_db_erase,
             local_db::local_db_info,
             local_db::local_db_backup,
             local_db::local_db_restore,

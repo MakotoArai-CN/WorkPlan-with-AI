@@ -160,6 +160,15 @@
     "export_word": "Export Word"
   },
   "passwords": {
+    "master_weak": "Common passwords, repeated characters and simple numbers cannot be used as the master password. Choose a unique long password.",
+    "protection_title": "Absolute Protection",
+    "protection_warning": "Safety notice: OFF by default. Failed master-password attempt 6 locks access for 5 minutes; attempt 7 for 10; attempts 8-10 for 30 each. Attempt 11 immediately erases ALL local app data (including other local accounts and built-in backups) and the current account's cloud tasks, notes, vault, worklog and sync keys, with NO further prompt. This is irreversible. Successful master verification resets the count. Cooldowns survive restarts and block PIN/biometrics. Offline or rejected cloud deletion is retried when online; immediate cloud deletion is not guaranteed. External exported backups and provider-retained history are not deleted. Back up first and accept permanent loss from typos or malicious attempts. This app-level policy cannot resist local storage tampering.",
+    "protection_understood": "I understand and accept the risks",
+    "protection_confirm": "Confirm again: verify master password",
+    "protection_disable": "Enter the master password to disable Absolute Protection.",
+    "protection_cooldown": "Cooling down. Try again in {minutes} minutes.",
+    "previous_page": "Previous",
+    "next_page": "Next",
     "title": "Password Manager",
     "subtitle": "Encrypted storage",
     "count": "{count} records",

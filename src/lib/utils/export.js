@@ -1,5 +1,3 @@
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import CryptoJS from 'crypto-js';
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from './runtime.js';
@@ -139,6 +137,7 @@ function cleanOklchColors(element) {
 
 export async function exportToPDF(element, filename = 'export.pdf', options = {}) {
     const { width = 'a4', showToast } = options;
+    const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
 
     try {
         if (showToast) showToast({ message: '正在生成PDF...', type: 'info', duration: 2000 });

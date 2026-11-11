@@ -11,6 +11,8 @@
     import { currentView } from "../stores/tasks.js";
     import { showConfirm, showAlert, showToast } from "../stores/modal.js";
     import { generatePassword } from "../utils/crypto.js";
+    import { validateMasterPassword } from "../utils/master-password-policy.js";
+    import { readPendingErase } from "../utils/vault-protection.js";
     import { filterPasswordEntries } from "../utils/passwords-search.js";
     import {
         isDeviceBindingSupported,
@@ -30,6 +32,13 @@
     let unlockPasswordInput;
     let showSetupModal = false;
     let showUnlockModal = false;
+    let unlockBusy = false;
+    let changingMaster = false;
+    let protectionEnabled = false;
+    let showProtectionModal = false;
+    let protectionMaster = "";
+    let protectionBusy = false;
+    let unlockError = "";
 
     // --- Device binding / PIN / recovery ---
     let deviceBindingSupported = false;
@@ -60,6 +69,7 @@
     let biometricSetupPin = "";
 
     function refreshSecurityState() {
+        protectionEnabled = passwordsStore.getProtection().enabled;
         deviceBindingEnabled = passwordsStore.isDeviceBindingEnabled();
         pinEnabled = passwordsStore.isPinEnabled();
         pinAttemptsRemaining = passwordsStore.getPinAttemptsRemaining();
@@ -98,9 +108,8 @@
     let importTotal = 0;
     let showImportProgress = false;
     let displayCount = 50;
-    let loadingMore = false;
-    let loadTrigger;
-    let observer;
+    let searchTimer;
+    let deferredQuery = "";
     let decryptedCache = {};
     let exportMenuHandler = null;
     let showChangeMasterPasswordModal = false;
@@ -186,46 +195,24 @@ let confirmNewMasterPassword = "";
     });
 
     onDestroy(() => {
-        if (observer) {
-            observer.disconnect();
-        }
+        clearTimeout(searchTimer);
         if (exportMenuHandler) {
             document.removeEventListener("click", exportMenuHandler);
             exportMenuHandler = null;
         }
     });
 
-    function setupIntersectionObserver() {
-        if (observer) {
-            observer.disconnect();
-        }
-        if (!loadTrigger) return;
-
-        observer = new IntersectionObserver(
-            (entries) => {
-                if (entries[0].isIntersecting && !loadingMore) {
-                    loadMore();
-                }
-            },
-            { rootMargin: "200px" },
-        );
-        observer.observe(loadTrigger);
+    function nextPasswordPage() {
+        displayCount = Math.min(displayCount + 50, Math.ceil(filteredPasswords.length / 50) * 50);
     }
 
-    async function loadMore() {
-        if (loadingMore || displayCount >= filteredPasswords.length) return;
-        loadingMore = true;
-        await tick();
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        displayCount = Math.min(displayCount + 50, filteredPasswords.length);
-        loadingMore = false;
+    $: {
+        clearTimeout(searchTimer);
+        const query = searchQuery;
+        searchTimer = setTimeout(() => { deferredQuery = query; displayCount = 50; }, 120);
     }
 
-    $: if (loadTrigger && $isPasswordsUnlocked) {
-        setupIntersectionObserver();
-    }
-
-    $: if (searchQuery || selectedCategory) {
+    $: if (selectedCategory) {
         displayCount = 50;
         decryptedCache = {};
         showPasswordValue = {};
@@ -260,7 +247,12 @@ let confirmNewMasterPassword = "";
             });
             return;
         }
-        await passwordsStore.setMasterPassword(masterPassword);
+        if (validateMasterPassword(masterPassword)) {
+            showAlert({ title: t('common.warning'), message: t('passwords.master_weak'), variant: "warning" });
+            return;
+        }
+        try { await passwordsStore.setMasterPassword(masterPassword); }
+        catch (error) { showAlert({ message: error.message, variant: "danger" }); return; }
         showSetupModal = false;
         masterPassword = "";
         confirmPassword = "";
@@ -527,10 +519,14 @@ let confirmNewMasterPassword = "";
 
     async function handleRecoverWithCode() {
         const t = getI18n(_);
-        const result = await passwordsStore.recoverWithCode(
-            recoverCode,
-            recoverMasterPassword,
-        );
+        let result;
+        try {
+            result = await passwordsStore.recoverWithCode(recoverCode, recoverMasterPassword);
+        } catch (error) {
+            if (!readPendingErase()) showAlert({ message: error.message, variant: "danger" });
+            return;
+        }
+        if (readPendingErase()) return;
         refreshSecurityState();
 
         if (!result.success) {
@@ -554,19 +550,54 @@ let confirmNewMasterPassword = "";
     }
 
     async function unlockVault() {
+        if (unlockBusy || !unlockPassword) return;
         const t = getI18n(_);
-        if (await passwordsStore.unlock(unlockPassword)) {
-            showUnlockModal = false;
-            unlockPassword = "";
-            decryptedCache = {};
+        unlockBusy = true;
+        unlockError = "";
+        try {
+            if (await passwordsStore.unlock(unlockPassword)) {
+                showUnlockModal = false;
+                unlockPassword = "";
+                decryptedCache = {};
+                refreshSecurityState();
+            } else if (!readPendingErase()) {
+                unlockError = t('passwords.master_wrong');
+                const protection = passwordsStore.getProtection();
+                if (protection.enabled && protection.lockedUntil > Date.now()) {
+                    unlockError = t('passwords.protection_cooldown', { values: { minutes: Math.ceil((protection.lockedUntil - Date.now()) / 60000) } });
+                }
+            }
+        } catch (error) {
+            if (!readPendingErase()) unlockError = error.message;
+        } finally { unlockBusy = false; }
+    }
+
+    async function openProtectionSettings() {
+        closeExportMenu();
+        const t = getI18n(_);
+        if (!protectionEnabled && !await showConfirm({
+            title: t('passwords.protection_title'), message: t('passwords.protection_warning'),
+            variant: "danger", confirmText: t('passwords.protection_understood')
+        })) return;
+        protectionMaster = "";
+        showProtectionModal = true;
+    }
+
+    async function confirmProtection() {
+        if (protectionBusy) return;
+        protectionBusy = true;
+        try {
+            const result = await passwordsStore.setProtection(!protectionEnabled, protectionMaster);
+            if (!result.success) {
+                if (!readPendingErase()) showAlert({ message: result.error, variant: "danger" });
+                return;
+            }
+            showProtectionModal = false;
+            protectionMaster = "";
             refreshSecurityState();
-        } else {
-            showAlert({
-                title: t('common.warning'),
-                message: t('passwords.master_wrong'),
-                variant: "danger",
-            });
-        }
+        } catch (error) {
+            if (!readPendingErase()) showAlert({ message: error.message, variant: "danger" });
+        } finally { protectionBusy = false; }
     }
 
     async function handleForgotPassword() {
@@ -639,6 +670,7 @@ let confirmNewMasterPassword = "";
     }
 
     function updatePassword() {
+        if (!editingPassword) return;
         const t = getI18n(_);
         if (!editingPassword.title || !editingPassword.password) {
             showAlert({
@@ -771,6 +803,7 @@ let confirmNewMasterPassword = "";
 }
 
 async function handleChangeMasterPassword() {
+    if (changingMaster) return;
     const t = getI18n(_);
     if (!oldMasterPassword) {
         showAlert({
@@ -799,12 +832,18 @@ async function handleChangeMasterPassword() {
         return;
     }
 
+    if (validateMasterPassword(newMasterPassword)) {
+        showAlert({ message: t("passwords.master_weak"), variant: "warning" });
+        return;
+    }
+    changingMaster = true;
     let result;
     try {
         result = await passwordsStore.changeMasterPassword(oldMasterPassword, newMasterPassword);
     } catch (error) {
         result = { success: false, error: String(error?.message || error || '主密码修改失败') };
-    }
+    } finally { changingMaster = false; }
+    if (readPendingErase()) return;
 
     if (result.success) {
         showChangeMasterPasswordModal = false;
@@ -1213,11 +1252,15 @@ async function handleChangeMasterPassword() {
     // merged after unlock, and older exports may omit fields). Filtering must
     // never throw here: a render error used to freeze the whole app.
     $: filteredPasswords = filterPasswordEntries($passwordsList, {
-        query: searchQuery,
+        query: deferredQuery,
         category: selectedCategory,
     });
 
-    $: displayedPasswords = filteredPasswords.slice(0, displayCount);
+    $: if (displayCount > Math.max(50, Math.ceil(filteredPasswords.length / 50) * 50)) {
+        displayCount = Math.max(50, Math.ceil(filteredPasswords.length / 50) * 50);
+    }
+
+    $: displayedPasswords = filteredPasswords.slice(Math.max(0, displayCount - 50), displayCount);
     $: hasMore = displayCount < filteredPasswords.length;
 
     // Keep the document listener stable: writing the handler into a reactive
@@ -1414,6 +1457,11 @@ async function handleChangeMasterPassword() {
                                 {/if}
                                 <hr class="my-1 border-slate-100" />
                             {/if}
+                            <button on:click={openProtectionSettings}
+                                class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                                <i class="ph {protectionEnabled ? 'ph-check-square' : 'ph-square'} text-lg"></i>
+                                {$_('passwords.protection_title')}
+                            </button>
                             <button
                                 on:click={toggleRememberSession}
                                 class="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
@@ -1718,25 +1766,13 @@ async function handleChangeMasterPassword() {
                         {/each}
                     </div>
 
-                    {#if hasMore}
-                        <div
-                            bind:this={loadTrigger}
-                            class="flex justify-center py-8 pb-20"
-                        >
-                            {#if loadingMore}
-                                <div
-                                    class="flex items-center gap-2 text-slate-400"
-                                >
-                                    <i
-                                        class="ph ph-spinner animate-spin text-xl"
-                                    ></i>
-                                    <span class="text-sm">{$_('common.loading')}</span>
-                                </div>
-                            {:else}
-                                <div class="text-sm text-slate-400">
-                                    {$_('passwords.scroll_more')}
-                                </div>
-                            {/if}
+                    {#if filteredPasswords.length > 50}
+                        <div class="flex items-center justify-center gap-4 py-6 pb-20">
+                            <button disabled={displayCount <= 50} on:click={() => displayCount -= 50}
+                                class="px-4 py-2 rounded-lg bg-slate-100 disabled:opacity-40">{$_('passwords.previous_page')}</button>
+                            <span class="text-sm text-slate-500">{Math.ceil(displayCount / 50)} / {Math.ceil(filteredPasswords.length / 50)}</span>
+                            <button disabled={!hasMore} on:click={nextPasswordPage}
+                                class="px-4 py-2 rounded-lg bg-slate-100 disabled:opacity-40">{$_('passwords.next_page')}</button>
                         </div>
                     {:else}
                         <div class="pb-20"></div>
@@ -1968,11 +2004,13 @@ async function handleChangeMasterPassword() {
                     </div>
                 </div>
                 <button
+                    disabled={unlockBusy}
                     on:click={unlockVault}
                     class="w-full mt-4 py-3 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
                 >
-                    {$_('passwords.unlock')}
+                    {unlockBusy ? $_('common.loading') : $_('passwords.unlock')}
                 </button>
+                {#if unlockError}<p role="alert" class="mt-2 text-sm text-red-600">{unlockError}</p>{/if}
                 {#if pinEnabled}
                     <button
                         on:click={() => { unlockMode = "pin"; pinError = ""; }}
@@ -2275,8 +2313,8 @@ async function handleChangeMasterPassword() {
             </div>
 </AnimatedModal>
 
-<AnimatedModal show={showEditModal && editingPassword} onClose={() => (showEditModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
-
+<AnimatedModal show={showEditModal && !!editingPassword} onClose={() => (showEditModal = false)} zIndex={50} panelClass="max-w-lg password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
+        {#if editingPassword}
             <h3 class="text-xl font-bold text-slate-800 mb-4">{$_('passwords.edit_title')}</h3>
             <div class="space-y-3">
                 <div>
@@ -2385,9 +2423,10 @@ async function handleChangeMasterPassword() {
                     {$_('common.save')}
                 </button>
             </div>
+        {/if}
 </AnimatedModal>
 
-<AnimatedModal show={showChangeMasterPasswordModal} onClose={() => (showChangeMasterPasswordModal = false)} zIndex={60} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
+<AnimatedModal show={showChangeMasterPasswordModal} dismissible={!changingMaster} closeOnBackdrop={!changingMaster} onClose={() => (showChangeMasterPasswordModal = false)} zIndex={60} panelClass="max-w-md password-panel p-5 md:p-6 max-h-[92vh] overflow-y-auto">
 
             <h3
                 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"
@@ -2443,18 +2482,36 @@ async function handleChangeMasterPassword() {
             </div>
             <div class="flex gap-3 mt-4">
                 <button
+                    disabled={changingMaster}
                     on:click|stopPropagation={() => (showChangeMasterPasswordModal = false)}
                     class="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200"
                 >
                     {$_('common.back')}
                 </button>
                 <button
+                    disabled={changingMaster}
                     on:click={handleChangeMasterPassword}
                     class="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700"
                 >
                     {$_('passwords.confirm_change')}
                 </button>
             </div>
+</AnimatedModal>
+
+<AnimatedModal show={showProtectionModal} dismissible={!protectionBusy} closeOnBackdrop={!protectionBusy}
+    onClose={() => { showProtectionModal = false; protectionMaster = ""; }} zIndex={65}
+    panelClass="max-w-md password-panel p-5 md:p-6">
+    <h3 class="text-xl font-bold mb-3">{$_('passwords.protection_confirm')}</h3>
+    <p class="text-sm text-red-600 mb-4">{protectionEnabled ? $_('passwords.protection_disable') : $_('passwords.protection_warning')}</p>
+    <input type="password" bind:value={protectionMaster} autocomplete="current-password"
+        aria-label={$_('passwords.old_password_label')} placeholder={$_('passwords.old_password_placeholder')}
+        class="w-full border rounded-lg px-3 py-2 mb-4" />
+    <div class="flex gap-3">
+        <button disabled={protectionBusy} on:click={() => { showProtectionModal = false; protectionMaster = ""; }}
+            class="flex-1 py-2 rounded-lg bg-slate-100">{$_('common.cancel')}</button>
+        <button disabled={protectionBusy || !protectionMaster} on:click={confirmProtection}
+            class="flex-1 py-2 rounded-lg bg-red-600 text-white">{$_('common.confirm')}</button>
+    </div>
 </AnimatedModal>
 
 <style>
