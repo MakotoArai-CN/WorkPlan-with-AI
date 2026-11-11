@@ -20,7 +20,10 @@
     import GlobalModal from '$lib/components/GlobalModal.svelte';
     import { migrateLegacyProtection } from '$lib/utils/vault-protection.js';
     const loadBackupModal = () => import('$lib/components/BackupModal.svelte');
+    const loadDataRepairModal = () => import('$lib/components/DataRepairModal.svelte');
     let backupModule;
+    let startupError = '';
+    let showStartupRepair = false;
     import { backupModal, closeBackupModal } from '$lib/stores/backup-modal.js';
     import { get } from 'svelte/store';
     import { setupI18n } from '$lib/i18n/index.js';
@@ -61,7 +64,9 @@
                 migrateLegacyProtection();
             } catch (error) {
                 console.warn('Local database init failed:', error);
-                window.dispatchEvent(new Event('workplan:startup-error'));
+                startupError = String(error?.message || error);
+                await tick();
+                window.dispatchEvent(new Event('workplan:ready'));
                 return;
             }
 
@@ -178,6 +183,25 @@
 </script>
 
 <GlobalModal />
+
+{#if startupError}
+    <div class="min-h-dvh grid place-items-center p-6 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+        <div class="max-w-lg space-y-4">
+            <h1 class="text-xl font-bold">WorkPlan — {$_('common.error')}</h1>
+            <p role="alert" class="text-sm break-words">{startupError}</p>
+            <p class="text-xs text-slate-500">{$_('settings.secure_backup_restore_warning')}</p>
+            <div class="flex gap-3">
+                <button on:click={() => location.reload()} class="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700">{$_('ai.retry')}</button>
+                <button on:click={() => showStartupRepair = true} class="px-4 py-2 rounded-xl bg-blue-600 text-white">{$_('settings.secure_backup_title')}</button>
+            </div>
+        </div>
+    </div>
+    {#if showStartupRepair}
+        {#await loadDataRepairModal() then module}
+            <svelte:component this={module.default} show={showStartupRepair} onClose={() => showStartupRepair = false} />
+        {/await}
+    {/if}
+{/if}
 
 {#if i18nReady}
     {#if $showExitToast}

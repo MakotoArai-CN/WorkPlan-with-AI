@@ -106,12 +106,10 @@ function collectKeys() {
     for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
         if (!key || (!key.startsWith(PREFIX) && !key.startsWith(LEGACY_PREFIX))) continue;
-        const normalized = normalizeKey(key);
-        if (EXCLUDED.has(normalized)) continue;
         const value = localStorage.getItem(key);
-        if (typeof value === 'string') keys[normalized] = value;
+        if (typeof value === 'string') keys[key] = value;
     }
-    return keys;
+    return normalizeKeys(keys);
 }
 
 function applyKeys(keys) {
@@ -184,13 +182,8 @@ async function flushPendingMirror() {
 
 async function activateMemoryStorage() {
     if (memoryMode || typeof localStorage === 'undefined') return;
-    memoryKeys = new Map();
-    for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        if (!key || !key.startsWith(PREFIX) || EXCLUDED.has(key)) continue;
-        const value = localStorage.getItem(key);
-        if (typeof value === 'string') memoryKeys.set(key, value);
-    }
+    // Capture both namespaces before removing either WebView copy.
+    memoryKeys = new Map(Object.entries(collectKeys()));
     memoryMode = true;
     // An empty snapshot is a legitimate state (logged out). Only refuse to
     // take over when the database could not be read and the WebView copy is
@@ -319,8 +312,10 @@ export async function initLocalDatabase() {
             persistedKeys = null;
             if (hasLocal) {
                 await enqueueSave(() => localKeys);
+                applyKeys(localKeys);
                 return { supported: true, migrated: true, reloaded: false };
             }
+            applyKeys(localKeys);
             return { supported: true, migrated: false, reloaded: false, empty: true };
         }
 
@@ -333,7 +328,10 @@ export async function initLocalDatabase() {
             try { journal = JSON.parse(snapshot.keys[ERASE_KEY]); } catch { journal = null; }
             if (journal && (!journal.completed || Object.keys(snapshot.keys).length === 1)) {
                 const existing = Object.keys(localKeys);
-                for (const key of existing) localStorage.removeItem(key);
+                for (const key of existing) {
+                    localStorage.removeItem(key);
+                    localStorage.removeItem(LEGACY_PREFIX + key.slice(PREFIX.length));
+                }
                 applyKeys(snapshot.keys);
                 return { supported: true, migrated: false, reloaded: false };
             }
@@ -341,6 +339,7 @@ export async function initLocalDatabase() {
         if (hasLocal) {
             // Writes are mirrored continuously, so an existing WebView copy is
             // the current working copy. Never overwrite it with the database.
+            applyKeys(localKeys);
             return { supported: true, migrated: false, reloaded: false };
         }
 
@@ -369,9 +368,15 @@ export function getLocalDatabaseKeys() {
  * flush the new snapshot to the encrypted DB before the caller reloads.
  */
 export async function replaceLocalDatabaseKeys(keys = {}) {
-    const allowed = Object.entries(keys).filter(
-        ([key, value]) => key.startsWith(PREFIX) && !EXCLUDED.has(key) && typeof value === 'string'
-    );
+    if (!keys || typeof keys !== 'object' || Array.isArray(keys)) throw new Error('备份内容格式不正确');
+    for (const [key, value] of Object.entries(keys)) {
+        const target = normalizeKey(key);
+        if (target.startsWith(PREFIX) && !EXCLUDED.has(target) && typeof value !== 'string') {
+            throw new Error(`备份字段格式不正确：${key}`);
+        }
+    }
+    const allowed = Object.entries(normalizeKeys(keys));
+    if (!allowed.length) throw new Error('备份内容为空');
     if (memoryMode) {
         const previous = new Map(memoryKeys);
         memoryKeys = new Map(allowed);
@@ -386,7 +391,7 @@ export async function replaceLocalDatabaseKeys(keys = {}) {
     const existing = [];
     for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
-        if (key && key.startsWith(PREFIX)) existing.push(key);
+        if (key && (key.startsWith(PREFIX) || key.startsWith(LEGACY_PREFIX))) existing.push(key);
     }
     for (const key of existing) localStorage.removeItem(key);
     for (const [key, value] of allowed) localStorage.setItem(key, value);
@@ -418,12 +423,12 @@ export async function exportLocalDatabase(destination, passphrase = '') {
     return invoke('local_db_backup', { destination, passphrase });
 }
 
-export async function restoreLocalDatabase(source, passphrase = '') {
+export async function restoreLocalDatabase(source, passphrase = '', allowKeyRecovery = false) {
     if (!isTauriRuntime) throw new Error('仅桌面版支持本地数据库恢复');
-    const content = await invoke('local_db_restore', { source, passphrase });
+    const content = await invoke('local_db_restore', { source, passphrase, allowKeyRecovery });
     const snapshot = readSnapshot(content);
     if (!snapshot) throw new Error('备份文件格式不正确');
-    applyKeys(snapshot.keys);
+    await replaceLocalDatabaseKeys(snapshot.keys);
     localStorage.setItem(MARKER_KEY, String(snapshot.savedAt || Date.now()));
     await flushPendingMirror();
     return snapshot;

@@ -18,11 +18,14 @@ const PORTABLE_ITERATIONS: u32 = 600_000;
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const SNAPSHOT_KEY: &[u8] = b"snapshot";
 const SAVED_AT_KEY: &[u8] = b"saved_at";
+const ACTIVE_KEY_FILE: &[u8] = b"active_key_file";
 // Compatibility only: new snapshots never use the old globally shared key.
 const LEGACY_APP_DB_SECRET: &[u8] = b"WorkPlan::LocalDatabase::sled::AES-GCM::v1";
 static DB: OnceLock<sled::Db> = OnceLock::new();
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 static HIDDEN: OnceLock<()> = OnceLock::new();
+#[cfg(test)]
+static TEST_ROOT: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(any(target_os = "android", target_os = "ios"))]
 static MOBILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
@@ -37,7 +40,7 @@ pub struct LocalDbInfo {
     pub backups: usize,
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(all(not(test), not(any(target_os = "android", target_os = "ios"))))]
 fn home_dir() -> Result<PathBuf, String> {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -46,9 +49,11 @@ fn home_dir() -> Result<PathBuf, String> {
 }
 
 fn root_dir() -> Result<PathBuf, String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(test)]
+    { TEST_ROOT.get().cloned().ok_or_else(|| "Native tests must select an isolated temporary database".to_string()) }
+    #[cfg(all(not(test), not(any(target_os = "android", target_os = "ios"))))]
     { Ok(home_dir()?.join(".workplan")) }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(all(not(test), any(target_os = "android", target_os = "ios")))]
     { MOBILE_ROOT.get().cloned().ok_or_else(|| "应用私有数据库目录尚未初始化".to_string()) }
 }
 
@@ -166,8 +171,19 @@ fn has_local_v2_data() -> Result<bool, String> {
 
 fn installation_key(allow_create: bool) -> Result<[u8; 32], String> {
     ensure_dirs()?;
-    let path = root_dir()?.join(".local-db-key");
+    let active = open_db()?.get(ACTIVE_KEY_FILE).map_err(|e| e.to_string())?;
+    let name = match active.as_ref() {
+        Some(value) => {
+            let name = std::str::from_utf8(value).map_err(|_| key_error())?;
+            let suffix = name.strip_prefix(".local-db-key-recovered-").ok_or_else(key_error)?;
+            if suffix.len() != 32 || !suffix.bytes().all(|b| b.is_ascii_hexdigit()) { return Err(key_error()); }
+            name
+        }
+        None => ".local-db-key",
+    };
+    let path = root_dir()?.join(name);
     if fs::symlink_metadata(&path).is_ok() { return read_or_create_key(&path, false); }
+    if active.is_some() { return Err(key_error()); }
     let can_create = allow_create && !has_local_v2_data()?;
     read_or_create_key(&path, can_create)
 }
@@ -534,17 +550,17 @@ fn local_db_backup_impl(destination: String, passphrase: String) -> Result<Strin
 }
 
 #[tauri::command]
-pub async fn local_db_restore(app: tauri::AppHandle, passphrase: Option<String>) -> Result<String, String> {
+pub async fn local_db_restore(app: tauri::AppHandle, passphrase: Option<String>, allow_key_recovery: Option<bool>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let Some(selected) = app.dialog().file().add_filter("WorkPlan Database", &["wpb", "json"]).blocking_pick_file() else {
             return Err("CANCELLED:Restore canceled".into());
         };
         let FilePath::Path(source) = selected else { return Err("Use the application backup screen for document-provider imports".into()); };
-        local_db_restore_impl(source.to_string_lossy().into_owned(), passphrase.unwrap_or_default())
+        local_db_restore_impl(source.to_string_lossy().into_owned(), passphrase.unwrap_or_default(), allow_key_recovery.unwrap_or(false))
     }).await.map_err(|e| e.to_string())?
 }
 
-fn local_db_restore_impl(source: String, passphrase: String) -> Result<String, String> {
+fn local_db_restore_impl(source: String, passphrase: String, allow_key_recovery: bool) -> Result<String, String> {
     if fs::metadata(&source).map_err(|e| e.to_string())?.len() > MAX_SNAPSHOT_BYTES as u64 {
         return Err("备份文件超过64MB".into());
     }
@@ -565,8 +581,46 @@ fn local_db_restore_impl(source: String, passphrase: String) -> Result<String, S
     if value.get("format").and_then(|v| v.as_str()) != Some("workplan-local-db") {
         return Err("不是 WorkPlan 本地数据库备份".to_string());
     }
-    local_db_save_impl(content.clone())?;
+    restore_snapshot_content(&content, allow_key_recovery)?;
     Ok(content)
+}
+
+fn restore_snapshot_content(content: &str, allow_key_recovery: bool) -> Result<(), String> {
+    validate_snapshot(content)?;
+    match local_db_save_impl(content.to_string()) {
+        Ok(_) => return Ok(()),
+        Err(error) if !allow_key_recovery => return Err(error),
+        Err(_) => {},
+    }
+    let _guard = WRITE_LOCK.lock().map_err(|e| e.to_string())?;
+    let db = open_db()?;
+    let previous = db.get(SNAPSHOT_KEY).map_err(|e| e.to_string())?.ok_or_else(key_error)?;
+    // Only an explicitly authorized import may recover an unreadable v2 DB.
+    // Normal writes and failed passphrases must never replace its key.
+    if !previous.starts_with(MAGIC) || open_json(&previous).is_ok() { return Err(key_error()); }
+    let mut random = [0u8; 16];
+    getrandom::fill(&mut random).map_err(|e| e.to_string())?;
+    let suffix = random.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let name = format!(".local-db-key-recovered-{suffix}");
+    let key = read_or_create_key(&root_dir()?.join(&name), true)?;
+    let sealed = seal_with_key(content, &key, MAGIC)?;
+    let preserved = root_dir()?.join("unreadable-recovery");
+    fs::create_dir_all(&preserved).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&preserved, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    fs::write(preserved.join(format!("snapshot-{suffix}.wpb")), previous.as_ref()).map_err(|e| e.to_string())?;
+    // The key filename and snapshot switch together in one native transaction.
+    // Old key files/backups are untouched; a crash before commit loses nothing.
+    let mut batch = sled::Batch::default();
+    batch.insert(SNAPSHOT_KEY, sealed);
+    batch.insert(ACTIVE_KEY_FILE, name.into_bytes());
+    batch.insert(SAVED_AT_KEY, timestamp().to_string().into_bytes());
+    db.apply_batch(batch).map_err(|e| e.to_string())?;
+    db.flush().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -700,5 +754,51 @@ mod tests {
             assert_eq!(serde_json::to_value(state).unwrap()["failures"], 0);
             Ok(())
         }).expect("independent vault");
+    }
+
+    #[test]
+    fn native_database_legacy_upgrade_and_missing_key_restore_round_trip() {
+        let root = std::env::temp_dir().join(format!("workplan-native-compat-{}", {
+            let mut bytes = [0u8; 16];
+            getrandom::fill(&mut bytes).expect("random isolated path");
+            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        }));
+        TEST_ROOT.set(root.clone()).expect("single isolated native fixture");
+        ensure_dirs().expect("isolated folders");
+        let original = r#"{"format":"workplan-local-db","version":1,"keys":{"planpro_access_key":"native-synthetic-legacy","planpro_notes":"[{\"id\":\"note-1\",\"content\":\"compatibility text\"}]","planpro_passwords":"encrypted-fixture"}}"#;
+        let key: [u8; 32] = Sha256::digest(LEGACY_APP_DB_SECRET).into();
+        let mut nonce = [0u8; 12];
+        getrandom::fill(&mut nonce).expect("nonce");
+        let compressed = zstd::encode_all(original.as_bytes(), 3).unwrap();
+        let ciphertext = Aes256Gcm::new_from_slice(&key).unwrap().encrypt(Nonce::from_slice(&nonce), compressed.as_ref()).unwrap();
+        let mut legacy = LEGACY_MAGIC.to_vec();
+        legacy.extend_from_slice(&nonce);
+        legacy.extend_from_slice(&ciphertext);
+        open_db().unwrap().insert(SNAPSHOT_KEY, legacy).unwrap();
+        assert_eq!(local_db_load_impl().unwrap().as_deref(), Some(original));
+        assert!(root.join(".local-db-key").is_file());
+        let upgraded = open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap();
+        assert!(upgraded.starts_with(MAGIC));
+        assert_eq!(local_db_load_impl().unwrap().as_deref(), Some(original));
+
+        let backup_path = root.join("portable.wpb");
+        let phrase = "separate-backup-test-passphrase";
+        local_db_backup_impl(backup_path.to_string_lossy().into_owned(), phrase.into()).unwrap();
+        assert!(fs::read(&backup_path).unwrap().starts_with(PORTABLE_MAGIC));
+        fs::remove_file(root.join(".local-db-key")).expect("remove isolated key");
+        assert!(local_db_load_impl().is_err());
+        assert!(local_db_save_impl(original.into()).is_err());
+        assert!(!root.join(".local-db-key").exists());
+        assert!(local_db_restore_impl(backup_path.to_string_lossy().into_owned(), "incorrect-backup-phrase".into(), true).is_err());
+        assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), upgraded);
+        assert!(local_db_restore_impl(backup_path.to_string_lossy().into_owned(), phrase.into(), false).is_err());
+        assert_eq!(local_db_restore_impl(backup_path.to_string_lossy().into_owned(), phrase.into(), true).unwrap(), original);
+        assert_eq!(local_db_load_impl().unwrap().as_deref(), Some(original));
+        assert_eq!(fs::read_dir(root.join("unreadable-recovery")).unwrap().count(), 1);
+        assert!(open_db().unwrap().get(ACTIVE_KEY_FILE).unwrap().is_some());
+        assert!(!root.join(".local-db-key").exists());
+        local_db_save_impl(original.into()).expect("recovered database remains writable");
+        // Retain the isolated fixture for inspection; it never uses user data.
+        eprintln!("native compatibility fixture: {}", root.display());
     }
 }

@@ -18,8 +18,9 @@
     let error = '';
     let passphrase = '';
     let confirmPassphrase = '';
+    let allowKeyRecovery = false;
 
-    $: if (!show) { passphrase = ''; confirmPassphrase = ''; }
+    $: if (!show) { passphrase = ''; confirmPassphrase = ''; allowKeyRecovery = false; }
 
     async function refresh() {
         if (!isTauriRuntime) return;
@@ -58,14 +59,16 @@
         try {
             const confirmed = await showConfirm({
                 title: '恢复本地数据库',
-                message: '恢复会覆盖当前本地数据库，并重新加载应用。当前数据库会先自动备份到 .workplan/backups。',
+                message: allowKeyRecovery
+                    ? '允许从已解密验证的备份恢复，并在本机密钥丢失时建立独立恢复密钥。原始不可读快照会保留在 unreadable-recovery，旧密钥和备份不会删除。此操作不会解密原来无法读取的数据。'
+                    : '恢复会覆盖当前本地数据库，并重新加载应用。当前数据库会先自动备份到 .workplan/backups。',
                 confirmText: '恢复并重载',
                 cancelText: '取消',
                 variant: 'danger'
             });
             if (!confirmed) return;
             busy = true;
-            await restoreLocalDatabase('', passphrase);
+            await restoreLocalDatabase('', passphrase, allowKeyRecovery);
             showToast({ message: '数据库已恢复，正在重新加载…', type: 'success', duration: 2000 });
             setTimeout(() => location.reload(), 400);
         } catch (e) {
@@ -118,6 +121,10 @@
                 <p class="text-slate-500">导出的数据库备份使用独立密码加密，可跨设备恢复。恢复旧版无密码备份可留空。本机自动备份依赖 .local-db-key，请勿单独删除密钥文件。</p>
                 <input type="password" bind:value={passphrase} autocomplete="new-password" aria-label="数据库备份密码" placeholder="数据库备份密码（至少8位）" class="w-full border rounded-lg p-2 bg-transparent" />
                 <input type="password" bind:value={confirmPassphrase} autocomplete="new-password" aria-label="再次确认备份密码" placeholder="导出时再次确认备份密码" class="w-full border rounded-lg p-2 bg-transparent" />
+                <label class="flex items-start gap-2 text-amber-700 dark:text-amber-400">
+                    <input type="checkbox" bind:checked={allowKeyRecovery} disabled={busy} class="mt-0.5" />
+                    <span>本机密钥已丢失：允许从有效备份恢复并建立新密钥（保留原不可读快照）</span>
+                </label>
             </div>
 
             <div class="mt-4 grid gap-2 sm:grid-cols-2">
