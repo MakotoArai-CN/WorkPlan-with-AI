@@ -264,38 +264,45 @@ export async function hashPassword(password) {
 }
 
 export async function verifyPassword(password, storedHash) {
-    if (!storedHash || !password) return false;
+    if (!storedHash || typeof password !== 'string' || !password || new TextEncoder().encode(password).length > 4096) return false;
 
     const parts = String(storedHash).split(':');
 
-    if (parts[0] === VERIFIER_PREFIX && parts.length === 4) {
+    if (parts[0] === VERIFIER_PREFIX) {
+        if (parts.length !== 4) return false;
         const [, salt, iterations, expected] = parts;
         const iterCount = Number(iterations);
-        if (!Number.isFinite(iterCount) || iterCount <= 0) return false;
+        if (!/^[0-9a-f]{32}$/i.test(salt) || !/^[0-9a-f]{64}$/i.test(expected)
+            || !/^\d+$/.test(iterations) || !Number.isInteger(iterCount) || iterCount < 10000 || iterCount > 2000000) return false;
         const computed = await pbkdf2Hex(password, salt, iterCount);
-        return timingSafeEqual(computed, expected);
+        return timingSafeEqual(computed, expected.toLowerCase());
     }
 
     // Legacy formats, kept so existing vaults still unlock. Both are weak; callers
     // should re-hash with hashPassword() after a successful legacy verification.
     if (parts.length === 2) {
         const [salt, hash] = parts;
+        if (salt.length > 128 || !/^[0-9a-f]{64}$/i.test(hash)) return false;
         const computed = CryptoJS.PBKDF2(password, salt, {
             keySize: 256 / 32,
             iterations: ITERATIONS_OLD,
             hasher: CryptoJS.algo.SHA256
         }).toString();
-        if (timingSafeEqual(computed, hash)) return true;
+        return timingSafeEqual(computed, hash.toLowerCase());
     }
 
     // Original format: unsalted single-round SHA-256.
-    return timingSafeEqual(CryptoJS.SHA256(password).toString(), String(storedHash));
+    if (parts.length !== 1 || !/^[0-9a-f]{64}$/i.test(String(storedHash))) return false;
+    return timingSafeEqual(CryptoJS.SHA256(password).toString(), String(storedHash).toLowerCase());
 }
 
 /** True when the stored verifier predates the salted high-iteration format. */
 export function verifierNeedsUpgrade(storedHash) {
     if (!storedHash) return false;
-    return !String(storedHash).startsWith(`${VERIFIER_PREFIX}:`);
+    const parts = String(storedHash).split(':');
+    return parts.length !== 4 || parts[0] !== VERIFIER_PREFIX || !/^[0-9a-f]{32}$/i.test(parts[1])
+        || !/^\d+$/.test(parts[2]) || !/^[0-9a-f]{64}$/i.test(parts[3])
+        || Number(parts[2]) < VERIFIER_ITERATIONS || Number(parts[2]) > 2000000;
 }
 
 export function generatePassword(length = 16, options = {}) {
