@@ -815,6 +815,10 @@
     "drop_files_failed": "Failed to add dropped files"
   },
   "ai_settings_page": {
+    "g4f_credit_hint": "G4F anonymous proxies require cake credits. A 402 usually means insufficient credits: earn them manually on the official chat page, or sign up and follow the account usage rules. This app never runs proof-of-work in the background or retries credit errors automatically.",
+    "g4f_open_chat": "Open official G4F chat",
+    "g4f_open_members": "Manage G4F account and API keys",
+    "g4f_key_hint": "Enter an API key generated on the G4F members page. Browser login is not shared with this app; anonymous credits may depend on the public IP. Never enter your WorkPlan master password or database key. Other providers require their own API keys.",
     "title": "AI Settings",
     "tab_basic": "Basic",
     "tab_advanced": "Advanced",

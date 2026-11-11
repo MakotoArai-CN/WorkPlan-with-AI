@@ -1,5 +1,6 @@
 import g4fConfig from '../../../g4f.dev/dist/js/providers.json';
-import { safeProviderError, throwIfAborted } from './ai-transport.js';
+import { throwIfAborted } from './ai-transport.js';
+import { g4fRequestError, g4fRequiresUserAction } from './g4f-errors.js';
 
 let g4fModule = null;
 let g4fLoadPromise = null;
@@ -505,6 +506,7 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
         }
     } catch (streamError) {
         throwIfAborted(options.signal);
+        if (g4fRequiresUserAction(streamError)) throw g4fRequestError(streamError, [options.apiKey]);
         if (fullContent) throw new Error('G4F stream interrupted; retry explicitly to avoid a duplicated request');
         console.warn('G4F stream unavailable; trying non-stream');
     }
@@ -526,8 +528,7 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
             }
         } catch (nonStreamError) {
             throwIfAborted(options.signal);
-            const errorMessage = safeProviderError(nonStreamError, [options.apiKey]);
-            throw new Error(`G4F 请求失败: ${errorMessage}`);
+            throw g4fRequestError(nonStreamError, [options.apiKey]);
         }
     }
 
@@ -566,6 +567,7 @@ export async function streamChatWithG4F(providerId, model, messages, options = {
         }
     } catch (streamError) {
         throwIfAborted(options.signal);
+        if (g4fRequiresUserAction(streamError)) throw g4fRequestError(streamError, [options.apiKey]);
         if (fullContent) {
             const error = new Error('G4F stream interrupted; retry explicitly to avoid a duplicated request');
             error.partialContent = fullContent;
@@ -592,8 +594,7 @@ export async function streamChatWithG4F(providerId, model, messages, options = {
             }
         } catch (nonStreamError) {
             throwIfAborted(options.signal);
-            const errorMessage = safeProviderError(nonStreamError, [options.apiKey]);
-            throw new Error(`G4F 请求失败: ${errorMessage}`);
+            throw g4fRequestError(nonStreamError, [options.apiKey]);
         }
     }
 

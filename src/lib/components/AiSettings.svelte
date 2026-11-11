@@ -410,7 +410,7 @@
         }, 500);
     }
     $: needsApiKey = (() => {
-        if (isG4FProvider($aiConfig.provider)) return false;
+        if (isG4FProvider($aiConfig.provider)) return $aiConfig.provider === 'g4f-default' || currentProvider?.authType === 'bearer';
         if (
             $aiConfig.provider === "ollama" ||
             $aiConfig.provider === "lmstudio" ||
@@ -572,6 +572,13 @@
                             <div class="text-[10px] text-slate-400 mt-2">
                                 G4F 需要先选模型提供商，再选模型；不同连接会分别记住各自的 G4F 设置。
                             </div>
+                            <div class="mt-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
+                                <p class="text-xs leading-relaxed text-amber-800 dark:text-amber-200">{$_('ai_settings_page.g4f_credit_hint')}</p>
+                                <div class="flex flex-wrap gap-3 text-xs font-bold">
+                                    <button type="button" on:click={() => openApiUrl('https://g4f.dev/chat/')} class="text-blue-600 dark:text-blue-400 hover:underline">{$_('ai_settings_page.g4f_open_chat')}</button>
+                                    <button type="button" on:click={() => openApiUrl('https://g4f.dev/members.html')} class="text-blue-600 dark:text-blue-400 hover:underline">{$_('ai_settings_page.g4f_open_members')}</button>
+                                </div>
+                            </div>
                         {/if}
                     </div>
 
@@ -723,16 +730,19 @@
                             <label
                                 for="ai-api-key"
                                 class="text-xs font-bold text-slate-500 uppercase mb-2 block"
-                                >API Key {#if isCustomProvider}<span class="text-slate-400 normal-case font-normal">({$_('ai_settings_page.optional')})</span>{/if}</label
+                                >API Key {#if isCustomProvider || $aiConfig.provider === 'g4f-default'}<span class="text-slate-400 normal-case font-normal">({$_('ai_settings_page.optional')})</span>{/if}</label
                             >
                             <input
                                 id="ai-api-key"
                                 bind:value={$aiConfig.apiKey}
                                 on:blur={handleApiKeyChange}
                                 type="password"
-                                placeholder={isCustomProvider ? $_('ai_settings_page.api_key_optional_ph') : $_('ai_settings_page.api_key_ph')}
+                                placeholder={isCustomProvider || $aiConfig.provider === 'g4f-default' ? $_('ai_settings_page.api_key_optional_ph') : $_('ai_settings_page.api_key_ph')}
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
+                            {#if $aiConfig.provider === 'g4f-default'}
+                                <p class="mt-1 text-[10px] leading-relaxed text-slate-500">{$_('ai_settings_page.g4f_key_hint')}</p>
+                            {/if}
                         </div>
                     {/if}
 

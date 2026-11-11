@@ -815,6 +815,10 @@
     "drop_files_failed": "拖入文件失败"
   },
   "ai_settings_page": {
+    "g4f_credit_hint": "G4F 匿名代理需要 cake 额度。402 通常表示额度不足：可在官方聊天页手动完成工作量证明，或注册后按账号规则使用。应用不会后台计算或自动重试额度错误。",
+    "g4f_open_chat": "打开 G4F 官方聊天页",
+    "g4f_open_members": "管理 G4F 账号与 API Key",
+    "g4f_key_hint": "可填写 G4F 会员页生成的 API Key。浏览器登录不自动同步到应用；匿名额度可能按出口 IP 计算。不要填写 WorkPlan 主密码或数据库密钥。其他提供商请使用其对应的 API Key。",
     "title": "AI 配置",
     "tab_basic": "基础设置",
     "tab_advanced": "高级参数",
