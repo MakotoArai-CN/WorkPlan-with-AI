@@ -1,75 +1,43 @@
-import { beforeEach, expect, mock, test } from 'bun:test';
+import { beforeEach, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { migrateLegacyProtection, readProtection, readPendingErase, cloudRecordErased } from '../src/lib/utils/vault-protection.js';
 
-// All destructive I/O is mocked. Never point these tests at a real app DB.
 const values = new Map();
 globalThis.localStorage = {
     getItem: key => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, String(value)),
-    removeItem: key => values.delete(key),
-    clear: () => values.clear()
+    removeItem: key => values.delete(key)
 };
-let deleted = [];
-let offline = false;
-let reloaded = 0;
-globalThis.location = { reload: () => reloaded++ };
-mock.module('../src/lib/stores/tasks.js', () => ({
-    readDatabaseConfig: () => ({ url: 'https://cloud.invalid', apiKey: 'test-only', enabled: false }),
-    waitForCloudWrites: async () => {},
-    loadCloudRecord: async () => null,
-    saveCloudRecord: async () => false,
-    deleteCloudRecord: async key => {
-        if (offline) throw new Error('offline');
-        deleted.push(key);
-    }
-}));
-mock.module('../src/lib/utils/local-db.js', () => ({
-    flushLocalDatabase: async () => {},
-    eraseLocalDatabase: async pending => {
-        values.clear();
-        values.set('workplan_protection_erase', JSON.stringify(pending));
-    },
-    persistEraseJournal: async pending => {
-        values.set('workplan_protection_erase', JSON.stringify(pending));
-    }
-}));
-const { executeProtectionErase, retryPendingErase, resumeProtectionErase, readPendingErase, cloudRecordErased } = await import('../src/lib/utils/vault-protection.js');
+beforeEach(() => values.clear());
 
-beforeEach(() => { values.clear(); deleted = []; offline = false; reloaded = 0; });
-
-test('erases local content silently, persists offline deletes, retries every cloud namespace', async () => {
-    localStorage.setItem('workplan_access_key', 'test-account');
-    localStorage.setItem('workplan_passwords', 'secret data');
-    await executeProtectionErase();
-    expect(reloaded).toBe(1);
-    expect(localStorage.getItem('workplan_passwords')).toBeNull();
-    expect(readPendingErase().localErased).toBe(true);
-    expect(readPendingErase().databaseConfig.enabled).toBe(false);
-    expect(cloudRecordErased('any-key')).toBe(true);
-    offline = true;
-    await retryPendingErase();
-    expect(readPendingErase().records).toHaveLength(8);
-    offline = false;
-    await retryPendingErase();
-    expect(deleted).toHaveLength(8);
-    expect(readPendingErase()).toBeNull();
-    // Keep a non-secret tombstone: automatic backup recovery must stay disabled.
-    expect(JSON.parse(localStorage.getItem('workplan_protection_erase')).completed).toBe(true);
-});
-
-test('restarts an interrupted local erase before starting cloud retries', async () => {
-    localStorage.setItem('workplan_protection_erase', JSON.stringify({ records: ['test-account'], localErased: false }));
-    localStorage.setItem('workplan_passwords', 'stale working copy');
-    await retryPendingErase();
-    expect(deleted).toHaveLength(0);
-    expect(await resumeProtectionErase()).toBe(true);
-    expect(localStorage.getItem('workplan_passwords')).toBeNull();
-    expect(readPendingErase().localErased).toBe(true);
-    expect(reloaded).toBe(1);
-});
-
-test('failure 11 persisted before a crash still triggers local erase on startup', async () => {
+test('upgrade disables destructive v1 settings without touching vault or account data', () => {
     localStorage.setItem('workplan_vault_protection', JSON.stringify({ enabled: true, failures: 11, lockedUntil: 0 }));
-    expect(await resumeProtectionErase()).toBe(true);
-    expect(reloaded).toBe(1);
-    expect(localStorage.getItem('workplan_vault_protection')).toBeNull();
+    localStorage.setItem('workplan_passwords', 'preserved vault ciphertext');
+    localStorage.setItem('workplan_access_key', 'preserved-account');
+    expect(readProtection().enabled).toBe(false);
+    migrateLegacyProtection();
+    expect(readProtection().version).toBe(2);
+    expect(readProtection().enabled).toBe(false);
+    expect(localStorage.getItem('workplan_passwords')).toBe('preserved vault ciphertext');
+    expect(localStorage.getItem('workplan_access_key')).toBe('preserved-account');
+});
+
+test('upgrade cancels unfinished cloud deletion and discards stored cloud credentials', () => {
+    localStorage.setItem('workplan_protection_erase', JSON.stringify({ records: ['old-account'], localErased: true, databaseConfig: { apiKey: 'old-credential' } }));
+    migrateLegacyProtection();
+    const canceled = JSON.parse(localStorage.getItem('workplan_protection_erase'));
+    expect(canceled.completed).toBe(true);
+    expect(canceled.canceled).toBe(true);
+    expect(canceled.databaseConfig).toBeUndefined();
+    expect(canceled.records).toBeUndefined();
+    expect(readPendingErase()).toBeNull();
+    expect(cloudRecordErased('any-record')).toBe(false);
+});
+
+test('new version has no automatic erase implementation or registered destructive native command', () => {
+    const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    expect(read('src/lib/utils/vault-protection.js')).not.toContain('deleteCloudRecord');
+    expect(read('src/lib/stores/passwords.js')).not.toContain('executeProtectionErase');
+    expect(read('src-tauri/src/lib.rs')).not.toContain('local_db::local_db_erase');
+    expect(read('src-tauri/src/local_db.rs')).not.toContain('fn local_db_erase');
 });

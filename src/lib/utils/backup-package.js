@@ -4,6 +4,7 @@ const BACKUP_FORMAT = 'workplan-secure-backup';
 const BACKUP_DATA_FORMAT = 'workplan-backup-data';
 const BACKUP_VERSION = 1;
 const BACKUP_PREFIX = 'workplan_';
+const LEGACY_BACKUP_PREFIX = 'planpro_';
 const EXCLUDED_KEYS = new Set(['workplan_passwords_session', 'workplan_login_tip_index']);
 // Binds the package to this application. It is combined with the user's backup
 // password before PBKDF2, so a raw JSON dump cannot be opened by another app.
@@ -70,9 +71,12 @@ export function validateBackupData(payload) {
     }
     const keys = {};
     for (const [key, value] of Object.entries(payload.keys)) {
-        if (!key.startsWith(BACKUP_PREFIX) || EXCLUDED_KEYS.has(key)) continue;
+        const legacy = key.startsWith(LEGACY_BACKUP_PREFIX);
+        const target = legacy ? BACKUP_PREFIX + key.slice(LEGACY_BACKUP_PREFIX.length) : key;
+        if (!target.startsWith(BACKUP_PREFIX) || EXCLUDED_KEYS.has(target)) continue;
         if (typeof value !== 'string') throw new Error(`备份字段格式不正确：${key}`);
-        keys[key] = value;
+        if (legacy && keys[target] !== undefined) continue;
+        keys[target] = value;
     }
     if (!Object.keys(keys).length) throw new Error('备份内容为空');
     return keys;

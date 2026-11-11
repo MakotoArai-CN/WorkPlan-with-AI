@@ -2,7 +2,6 @@
     import { onMount } from 'svelte';
     import AnimatedModal from './AnimatedModal.svelte';
     import { showConfirm, showToast } from '../stores/modal.js';
-    import { save, open } from '@tauri-apps/plugin-dialog';
     import { isTauriRuntime } from '../utils/runtime.js';
     import {
         localDatabaseInfo,
@@ -17,6 +16,11 @@
     let info = null;
     let busy = false;
     let error = '';
+    let passphrase = '';
+    let confirmPassphrase = '';
+    let allowKeyRecovery = false;
+
+    $: if (!show) { passphrase = ''; confirmPassphrase = ''; allowKeyRecovery = false; }
 
     async function refresh() {
         if (!isTauriRuntime) return;
@@ -31,21 +35,19 @@
 
     async function exportBackup() {
         if (busy) return;
+        if (passphrase.length < 8 || passphrase !== confirmPassphrase) {
+            error = '导出备份请设置至少8位备份密码，并再次确认。请妥善保存此密码。';
+            return;
+        }
         busy = true;
         error = '';
         try {
             const defaultName = `WorkPlan-LocalDB-${new Date().toISOString().slice(0, 10)}.wpb`;
-            const destination = await save({
-                title: '导出本地数据库备份',
-                defaultPath: defaultName,
-                filters: [{ name: 'WorkPlan Database', extensions: ['wpb'] }]
-            });
-            if (!destination) return;
-            const path = await exportLocalDatabase(destination);
+            const path = await exportLocalDatabase(defaultName, passphrase);
             showToast({ message: `数据库备份已导出：${path}`, type: 'success', duration: 7000 });
             await refresh();
         } catch (e) {
-            error = String(e?.message || e);
+            if (!String(e?.message || e).startsWith('CANCELLED:')) error = String(e?.message || e);
         } finally {
             busy = false;
         }
@@ -55,26 +57,22 @@
         if (busy) return;
         error = '';
         try {
-            const selected = await open({
-                title: '选择本地数据库备份',
-                multiple: false,
-                filters: [{ name: 'WorkPlan Database', extensions: ['wpb', 'json'] }]
-            });
-            if (!selected) return;
             const confirmed = await showConfirm({
                 title: '恢复本地数据库',
-                message: '恢复会覆盖当前本地数据库，并重新加载应用。当前数据库会先自动备份到 .workplan/backups。',
+                message: allowKeyRecovery
+                    ? '允许从已解密验证的备份恢复，并在本机密钥丢失时建立独立恢复密钥。原始不可读快照会保留在 unreadable-recovery，旧密钥和备份不会删除。此操作不会解密原来无法读取的数据。'
+                    : '恢复会覆盖当前本地数据库，并重新加载应用。当前数据库会先自动备份到 .workplan/backups。',
                 confirmText: '恢复并重载',
                 cancelText: '取消',
                 variant: 'danger'
             });
             if (!confirmed) return;
             busy = true;
-            await restoreLocalDatabase(selected);
+            await restoreLocalDatabase('', passphrase, allowKeyRecovery);
             showToast({ message: '数据库已恢复，正在重新加载…', type: 'success', duration: 2000 });
             setTimeout(() => location.reload(), 400);
         } catch (e) {
-            error = String(e?.message || e);
+            if (!String(e?.message || e).startsWith('CANCELLED:')) error = String(e?.message || e);
         } finally {
             busy = false;
         }
@@ -117,6 +115,16 @@
                 <div class="flex justify-between"><span class="text-slate-400">大小</span><span>{info ? `${(info.bytes / 1024).toFixed(1)} KB` : '-'}</span></div>
                 <div class="flex justify-between"><span class="text-slate-400">自动备份</span><span>{info?.backups ?? '-'} 份</span></div>
                 <div class="flex justify-between"><span class="text-slate-400">状态</span><span>{info?.exists ? '已创建' : '尚未创建'}</span></div>
+            </div>
+
+            <div class="mt-4 space-y-2 text-xs">
+                <p class="text-slate-500">导出的数据库备份使用独立密码加密，可跨设备恢复。恢复旧版无密码备份可留空。本机自动备份依赖 .local-db-key，请勿单独删除密钥文件。</p>
+                <input type="password" bind:value={passphrase} autocomplete="new-password" aria-label="数据库备份密码" placeholder="数据库备份密码（至少8位）" class="w-full border rounded-lg p-2 bg-transparent" />
+                <input type="password" bind:value={confirmPassphrase} autocomplete="new-password" aria-label="再次确认备份密码" placeholder="导出时再次确认备份密码" class="w-full border rounded-lg p-2 bg-transparent" />
+                <label class="flex items-start gap-2 text-amber-700 dark:text-amber-400">
+                    <input type="checkbox" bind:checked={allowKeyRecovery} disabled={busy} class="mt-0.5" />
+                    <span>本机密钥已丢失：允许从有效备份恢复并建立新密钥（保留原不可读快照）</span>
+                </label>
             </div>
 
             <div class="mt-4 grid gap-2 sm:grid-cols-2">

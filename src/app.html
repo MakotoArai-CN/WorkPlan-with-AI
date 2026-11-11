@@ -10,9 +10,28 @@
     <title>WorkPlan with AI</title>
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <script src="%sveltekit.assets%/theme-init.js"></script>
+    <link rel="stylesheet" href="%sveltekit.assets%/startup.css" />
+    <script src="%sveltekit.assets%/startup.js"></script>
     %sveltekit.head%
 </head>
 <body data-sveltekit-preload-data="hover">
+    <div id="workplan-startup" role="status" aria-live="polite" aria-label="WorkPlan">
+        <div class="startup-stage" aria-hidden="true">
+            <div class="startup-mark">
+                <svg viewBox="0 0 48 48"><path d="M33 10H13a3 3 0 0 0-3 3v22a3 3 0 0 0 3 3h22a3 3 0 0 0 3-3V22" /><path class="startup-check" d="m19 22 7 7 15-18" /></svg>
+            </div>
+            <div>
+                <p class="startup-brand">WorkPlan</p>
+                <p class="startup-tagline">Your day, in focus.</p>
+                <div class="startup-tracks"><span></span><span></span><span></span></div>
+            </div>
+        </div>
+        <div class="startup-status">
+            <p id="workplan-startup-status">Preparing your workspace</p>
+            <button id="workplan-startup-retry" type="button" hidden>Reload</button>
+            <noscript>JavaScript is required to open WorkPlan.</noscript>
+        </div>
+    </div>
     <div style="display: contents">%sveltekit.body%</div>
     <!-- Vditor loads its icon sprite by injecting an inline <script>, which the
          app CSP (script-src 'self') blocks. Preload it as a normal same-origin

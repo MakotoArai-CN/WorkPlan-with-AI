@@ -48,7 +48,7 @@
         <button on:click={() => navigateTo('aichat')}
             class="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center gap-4 hover:bg-slate-50 transition">
             <div class="w-12 h-12 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl flex items-center justify-center">
-                <i class="ph-fill ph-robot text-2xl text-indigo-600"></i>
+                <i class="ph-fill ph-chat-teardrop-dots text-2xl text-indigo-600"></i>
             </div>
             <div class="flex-1 text-left">
                 <div class="font-bold text-slate-800">{$_('ai_chat.title')}</div>

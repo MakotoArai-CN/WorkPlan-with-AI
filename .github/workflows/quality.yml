@@ -1,0 +1,47 @@
+name: Quality
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      VITE_SUPABASE_URL: https://cloud.invalid
+      VITE_SUPABASE_KEY: public-test-placeholder
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned G4F assets
+        uses: actions/checkout@v4
+        with:
+          repository: gpt4free/g4f.dev
+          ref: f0f09e3716a0ce108b5d1acdd0f6523a21baab90
+          path: g4f.dev
+          fetch-depth: 1
+          sparse-checkout: dist
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Svelte diagnostics
+        run: bun run check
+      - name: Unit and integration tests (isolated storage only)
+        run: bun test tests/
+      - name: Native tests (no application database)
+        working-directory: src-tauri
+        run: cargo test --locked --lib
+      - name: Production frontend build
+        run: bun run build

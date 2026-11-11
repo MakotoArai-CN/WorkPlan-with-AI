@@ -1,6 +1,7 @@
 <script>
-    import { tick } from "svelte";
+    import { onMount, tick } from "svelte";
     import {
+        captureAiOperationGuard,
         chatHistory,
         aiPanelContext,
         isAiLoading,
@@ -16,7 +17,9 @@
     import { taskStore } from "../stores/tasks.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { openExternalUrl } from "../utils/open-external.js";
-        import { _ } from 'svelte-i18n';
+    import { resizeTextarea, observeTextareaResize } from "../utils/textarea-autosize.js";
+    import { captureMessageApproval } from "../utils/ai-message-approval.js";
+    import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
     function t(key, opts) { return get(_)(key, opts); }
@@ -49,10 +52,10 @@
         };
     }
 
-    function addScopedItem(data) {
+    function addScopedItem(data, source = $aiPanelContext.source) {
         const normalized = {
             ...data,
-            id: data.id || Date.now().toString(),
+            id: `ai_${Date.now()}_${Array.from(crypto.getRandomValues(new Uint32Array(2)), value => value.toString(36)).join('')}`,
             status: data.status || "todo",
             subtasks: (data.subtasks || []).map((s) => ({
                 title: typeof s === "string" ? s : s.title,
@@ -60,12 +63,12 @@
             })),
         };
 
-        if ($aiPanelContext.source === 'templates') {
+        if (source === 'templates') {
             taskStore.addTemplate(normalized);
             return;
         }
 
-        if ($aiPanelContext.source === 'scheduled') {
+        if (source === 'scheduled') {
             taskStore.addScheduledTask({
                 ...normalized,
                 repeatDays: Array.isArray(normalized.repeatDays) ? normalized.repeatDays : [],
@@ -79,24 +82,24 @@
         taskStore.addTask(normalized);
     }
 
-    function updateScopedItem(id, updates) {
-        if ($aiPanelContext.source === 'templates') {
+    function updateScopedItem(id, updates, source = $aiPanelContext.source) {
+        if (source === 'templates') {
             taskStore.updateTemplate(id, updates);
             return;
         }
-        if ($aiPanelContext.source === 'scheduled') {
+        if (source === 'scheduled') {
             taskStore.updateScheduledTask(id, updates);
             return;
         }
         taskStore.updateTask(id, updates);
     }
 
-    function deleteScopedItem(id) {
-        if ($aiPanelContext.source === 'templates') {
+    function deleteScopedItem(id, source = $aiPanelContext.source) {
+        if (source === 'templates') {
             taskStore.deleteTemplate(id);
             return;
         }
-        if ($aiPanelContext.source === 'scheduled') {
+        if (source === 'scheduled') {
             taskStore.deleteScheduledTask(id);
             return;
         }
@@ -196,19 +199,13 @@
 
     async function syncComposerHeight() {
         await tick();
-        if (!composerTextarea) return;
-
-        const shell = composerTextarea.closest('[data-ai-shell]');
-        const shellHeight = shell?.clientHeight || window.innerHeight || 0;
-        const minHeight = Math.max(120, Math.floor(shellHeight / 4));
-        const maxHeight = Math.max(minHeight, Math.floor(shellHeight * (7 / 13)));
-        const currentHeight = parseFloat(composerTextarea.style.height) || 0;
-        const contentHeight = composerTextarea.scrollHeight;
-        const nextHeight = Math.min(maxHeight, Math.max(minHeight, currentHeight, contentHeight));
-
-        composerTextarea.style.height = `${nextHeight}px`;
-        composerTextarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
+        resizeTextarea(composerTextarea, 0.5);
     }
+
+    onMount(() => {
+        syncComposerHeight();
+        return observeTextareaResize(composerTextarea, syncComposerHeight);
+    });
 
     function scrollToBottom() {
         if (chatContainer) {
@@ -249,7 +246,9 @@
     }
 
     function handleConfirmTask(data, index) {
-        addScopedItem(data);
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
+        addScopedItem(data, messageSource(index));
         confirmAiTask(index);
         chatHistory.update((h) => [
             ...h,
@@ -263,15 +262,19 @@
     }
 
     function handleConfirmMultiTask(msgIndex, taskIndex, task) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent() || get(chatHistory)[msgIndex].confirmedIndexes?.includes(taskIndex)) return;
         addScopedItem({
             ...task,
             id: task.id || (Date.now() + taskIndex).toString()
-        });
+        }, messageSource(msgIndex));
         confirmMultiTask(msgIndex, taskIndex);
         scrollToBottom();
     }
 
     function handleConfirmAllTasks(msgIndex, tasks, confirmedIndexes) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent()) return;
         const unconfirmed = tasks.filter(
             (_, i) => !confirmedIndexes.includes(i),
         );
@@ -279,7 +282,7 @@
             addScopedItem({
                 ...task,
                 id: task.id || (Date.now() + idx).toString()
-            });
+            }, messageSource(msgIndex));
         });
         confirmAllMultiTasks(msgIndex);
         chatHistory.update((h) => [
@@ -294,6 +297,8 @@
     }
 
     async function handleDeleteConfirm(tasks, msgIndex) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent()) return;
         const taskNames = tasks.map((t) => `• ${t.title}`).join("\n");
         const confirmed = await showConfirm({
             title: t('ai_panel.confirm_delete'),
@@ -302,9 +307,9 @@
             cancelText: t('common.cancel'),
             variant: "danger",
         });
-        if (confirmed) {
+        if (confirmed && isCurrent()) {
             tasks.forEach((task) => {
-                deleteScopedItem(task.id);
+                deleteScopedItem(task.id, messageSource(msgIndex));
             });
             chatHistory.update((h) => {
                 const newHistory = [...h];
@@ -320,6 +325,8 @@
     }
 
     async function handleUpdateConfirm(task, updates, msgIndex) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent()) return;
         const updateDescriptions = [];
         if (updates.title) updateDescriptions.push(`${t('ai_panel.title_label')} → "${updates.title}"`);
         if (updates.date)
@@ -343,8 +350,8 @@
             cancelText: t('common.cancel'),
             variant: "warning",
         });
-        if (confirmed) {
-            updateScopedItem(task.id, updates);
+        if (confirmed && isCurrent()) {
+            updateScopedItem(task.id, updates, messageSource(msgIndex));
             chatHistory.update((h) => {
                 const newHistory = [...h];
                 newHistory[msgIndex] = {
@@ -359,6 +366,8 @@
     }
 
     async function handleMultiUpdateConfirm(operations, msgIndex) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent()) return;
         const summaryLines = operations
             .map((op) => {
                 const updates = [];
@@ -383,9 +392,9 @@
             cancelText: t('common.cancel'),
             variant: "warning",
         });
-        if (confirmed) {
+        if (confirmed && isCurrent()) {
             operations.forEach((op) => {
-                updateScopedItem(op.task.id, op.updates);
+                updateScopedItem(op.task.id, op.updates, messageSource(msgIndex));
             });
             chatHistory.update((h) => {
                 const newHistory = [...h];
@@ -401,6 +410,8 @@
     }
 
     async function handleBatchCompleteConfirm(operations, msgIndex) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent()) return;
         const taskNames = operations
             .map((op) => `• ${op.task.title}`)
             .join("\n");
@@ -413,9 +424,9 @@
             variant: "success",
         });
 
-        if (confirmed) {
+        if (confirmed && isCurrent()) {
             operations.forEach((op) => {
-                updateScopedItem(op.task.id, op.updates);
+                updateScopedItem(op.task.id, op.updates, messageSource(msgIndex));
             });
             chatHistory.update((h) => {
                 const newHistory = [...h];
@@ -431,6 +442,8 @@
     }
 
     async function handleMixedConfirm(deleteOps, updateOps, msgIndex) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent()) return;
         let summaryLines = [];
 
         if (updateOps.length > 0) {
@@ -464,12 +477,12 @@
             variant: "warning",
         });
 
-        if (confirmed) {
+        if (confirmed && isCurrent()) {
             updateOps.forEach((op) => {
-                updateScopedItem(op.task.id, op.updates);
+                updateScopedItem(op.task.id, op.updates, messageSource(msgIndex));
             });
             deleteOps.forEach((task) => {
-                deleteScopedItem(task.id);
+                deleteScopedItem(task.id, messageSource(msgIndex));
             });
 
             const resultParts = [];
@@ -489,6 +502,22 @@
             });
             scrollToBottom();
         }
+    }
+
+
+    function messageSource(index) {
+        return get(chatHistory)[index]?.assistantSource || get(aiPanelContext).source || 'tasks';
+    }
+
+    function captureApproval(index) {
+        const message = get(chatHistory)[index];
+        const source = messageSource(index);
+        if (!['tasks', 'templates', 'scheduled'].includes(source)) return () => false;
+        return captureMessageApproval({
+            message, getMessage: () => get(chatHistory)[index],
+            getItems: () => { const state = get(taskStore); return source === 'templates' ? state.templates : source === 'scheduled' ? state.scheduledTasks : state.tasks; },
+            getContext: () => get(aiPanelContext), isOperationCurrent: captureAiOperationGuard()
+        });
     }
 
     function formatDateTime(d) {
@@ -557,6 +586,8 @@
     }
 
         function handleSubtaskConfirm(task, subtaskChanges, msgIndex) {
+        const isCurrent = captureApproval(msgIndex);
+        if (!isCurrent()) return;
         let newSubtasks = [...(task.subtasks || [])];
         
         for (const change of subtaskChanges) {
@@ -579,7 +610,7 @@
             }
         }
         
-        updateScopedItem(task.id, { subtasks: newSubtasks });
+        updateScopedItem(task.id, { subtasks: newSubtasks }, messageSource(msgIndex));
         
         chatHistory.update(h => {
             const newHistory = [...h];
@@ -610,7 +641,7 @@
 <div class="flex flex-col h-full bg-rose-50/30" data-ai-shell>
     <div class="h-16 border-b border-rose-100 hidden md:flex items-center justify-between px-6 bg-white shrink-0">
         <h3 class="font-bold text-rose-600 flex items-center gap-2">
-            <i class="ph-fill ph-sparkle"></i> {panelMeta.title}
+            <i class="ph-fill ph-chat-teardrop-dots"></i> {panelMeta.title}
         </h3>
         <div class="flex items-center gap-2">
             <button on:click={() => showAiSettings.set(true)}
@@ -632,7 +663,7 @@
             <div
                 class="w-7 h-7 md:w-8 md:h-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 shrink-0"
             >
-                <i class="ph-fill ph-robot text-sm md:text-base"></i>
+                <i class="ph-fill ph-chat-teardrop-dots text-sm md:text-base"></i>
             </div>
             <div
                 class="bg-white border border-rose-100 p-2.5 md:p-3 rounded-2xl rounded-tl-none text-xs md:text-sm text-slate-700 shadow-sm max-w-[85%]"
@@ -664,7 +695,7 @@
                     <i
                         class={msg.role === "user"
                             ? "ph-fill ph-user text-sm md:text-base"
-                            : "ph-fill ph-robot text-sm md:text-base"}
+                            : "ph-fill ph-chat-teardrop-dots text-sm md:text-base"}
                     ></i>
                 </div>
 
@@ -684,6 +715,9 @@
                     class:border-red-200={msg.type === "error"}
                     class:text-red-700={msg.type === "error"}
                 >
+                    {#if msg.assistantSource === 'templates' || msg.assistantSource === 'scheduled'}
+                        <div class="mb-2 text-[10px] font-bold text-rose-600">{$_(msg.assistantSource === 'templates' ? 'nav.templates_full' : 'nav.scheduled')}</div>
+                    {/if}
                     {#if msg.type === "text"}
                         <div class="whitespace-pre-wrap">{msg.content}</div>
                     {:else if msg.type === "loading"}

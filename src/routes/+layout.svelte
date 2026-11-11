@@ -1,5 +1,5 @@
 <script>
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import '../app.css';
     import '@phosphor-icons/web/regular';
     import '@phosphor-icons/web/bold';
@@ -18,9 +18,12 @@
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
-    import { retryPendingErase, resumeProtectionErase } from '$lib/utils/vault-protection.js';
+    import { migrateLegacyProtection } from '$lib/utils/vault-protection.js';
     const loadBackupModal = () => import('$lib/components/BackupModal.svelte');
+    const loadDataRepairModal = () => import('$lib/components/DataRepairModal.svelte');
     let backupModule;
+    let startupError = '';
+    let showStartupRepair = false;
     import { backupModal, closeBackupModal } from '$lib/stores/backup-modal.js';
     import { get } from 'svelte/store';
     import { setupI18n } from '$lib/i18n/index.js';
@@ -29,8 +32,6 @@
     let i18nReady = false;
 
     onMount(() => {
-        const retryErase = () => { void retryPendingErase().catch(error => console.warn('Protection deletion pending:', error)); };
-        window.addEventListener('online', retryErase);
         let destroyed = false;
         let unlistenNotification = () => {};
         let unlistenAutostart = () => {};
@@ -58,26 +59,35 @@
 
             try {
                 const localDb = await initLocalDatabase();
+                if (localDb.error) throw new Error(localDb.error);
                 await installLocalDatabaseMirror();
-                if (await resumeProtectionErase()) return;
+                migrateLegacyProtection();
             } catch (error) {
                 console.warn('Local database init failed:', error);
-                // Do not initialize stores if a destructive operation is unfinished.
-                if (localStorage.getItem('workplan_protection_erase') || passwordsStore.getProtection().failures > 10) return;
+                startupError = String(error?.message || error);
+                await tick();
+                window.dispatchEvent(new Event('workplan:ready'));
+                return;
             }
 
-            i18nReady = true;
             // Specular highlight for the liquid glass theme (no-op elsewhere).
             uninstallGlassPointer = installGlassPointer();
             taskStore.loadFromLocal();
             reloadConnectorConfig();
-            await settingsStore.init();
+            // Hydrate preferences synchronously, but do not keep the startup
+            // screen over native permission dialogs and peripheral checks.
+            const settingsInit = settingsStore.init().catch(error => console.warn('Settings initialization failed:', error));
             loadAiConfig();
             notesStore.load();
             // Vault entries are loaded on first use, not on the startup critical path.
             initSecureSync();
-            void retryPendingErase().catch(error => console.warn('Protection deletion pending:', error));
+            if (destroyed) return;
+            i18nReady = true;
+            await tick();
+            window.dispatchEvent(new Event('workplan:ready'));
             if (isWebDemo || destroyed) return;
+            await settingsInit;
+            if (destroyed) return;
 
             const currentSettings = get(settingsStore);
             if (currentSettings.closeToQuit) {
@@ -153,11 +163,13 @@
                 if (destroyed) return;
                 taskStore.maybeHeartbeat({ idleMs: 300000, minIntervalMs: 300000 });
             }, 60000);
-        })();
+        })().catch(error => {
+            console.error('Application startup failed:', error);
+            if (!destroyed) window.dispatchEvent(new Event('workplan:startup-error'));
+        });
 
         return () => {
             destroyed = true;
-            window.removeEventListener('online', retryErase);
             unlistenNotification();
             unlistenAutostart();
             unlistenUpdate();
@@ -171,6 +183,25 @@
 </script>
 
 <GlobalModal />
+
+{#if startupError}
+    <div class="min-h-dvh grid place-items-center p-6 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+        <div class="max-w-lg space-y-4">
+            <h1 class="text-xl font-bold">WorkPlan — {$_('common.error')}</h1>
+            <p role="alert" class="text-sm break-words">{startupError}</p>
+            <p class="text-xs text-slate-500">{$_('settings.secure_backup_restore_warning')}</p>
+            <div class="flex gap-3">
+                <button on:click={() => location.reload()} class="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700">{$_('ai.retry')}</button>
+                <button on:click={() => showStartupRepair = true} class="px-4 py-2 rounded-xl bg-blue-600 text-white">{$_('settings.secure_backup_title')}</button>
+            </div>
+        </div>
+    </div>
+    {#if showStartupRepair}
+        {#await loadDataRepairModal() then module}
+            <svelte:component this={module.default} show={showStartupRepair} onClose={() => showStartupRepair = false} />
+        {/await}
+    {/if}
+{/if}
 
 {#if i18nReady}
     {#if $showExitToast}

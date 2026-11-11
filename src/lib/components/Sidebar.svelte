@@ -87,7 +87,7 @@
         {
             id: 'aichat',
             label: $_('nav.ai_chat'),
-            icon: 'ph-robot',
+            icon: 'ph-chat-teardrop-dots',
             activeBg: 'bg-gradient-to-r from-indigo-50 to-purple-50',
             activeText: 'text-indigo-700',
             hoverBg: 'hover:bg-slate-50'

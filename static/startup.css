@@ -1,0 +1,174 @@
+#workplan-startup {
+    --startup-bg: #f8fafc;
+    --startup-ink: #0f172a;
+    --startup-muted: #64748b;
+    --startup-accent: #2563eb;
+    --startup-line: rgba(100, 116, 139, 0.14);
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    color: var(--startup-ink);
+    background:
+        radial-gradient(ellipse at 68% 30%, rgba(56, 189, 248, 0.1), transparent 55%),
+        var(--startup-bg);
+    font-family: "Segoe UI", "Noto Sans CJK SC", sans-serif;
+    transition: opacity 200ms ease, visibility 200ms;
+}
+.dark #workplan-startup {
+    --startup-bg: #0f172a;
+    --startup-ink: #f1f5f9;
+    --startup-muted: #94a3b8;
+    --startup-accent: #60a5fa;
+    --startup-line: rgba(148, 163, 184, 0.15);
+}
+#workplan-startup::before {
+    content: "";
+    position: absolute;
+    width: min(760px, 90vw);
+    height: min(480px, 80vh);
+    background-image: radial-gradient(var(--startup-line) 1px, transparent 1px);
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse, #000, transparent 70%);
+    pointer-events: none;
+}
+#workplan-startup .startup-stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 34px;
+    padding: 32px;
+    max-width: 100%;
+    box-sizing: border-box;
+    animation: startup-enter 400ms ease-out both;
+}
+#workplan-startup .startup-mark {
+    position: relative;
+    width: 78px;
+    height: 78px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border-radius: 23px;
+    background: linear-gradient(145deg, #3b82f6, #1d4ed8);
+    box-shadow: 0 12px 36px rgba(37, 99, 235, 0.2), inset 0 1px rgba(255, 255, 255, 0.35);
+}
+#workplan-startup .startup-mark svg {
+    width: 48px;
+    height: 48px;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+#workplan-startup .startup-check {
+    stroke-dasharray: 32;
+    animation: startup-check 850ms ease-in-out both;
+}
+#workplan-startup .startup-brand {
+    margin: 0;
+    font-size: 35px;
+    font-weight: 700;
+    letter-spacing: -1.2px;
+    line-height: 1.15;
+}
+#workplan-startup .startup-tagline {
+    margin: 9px 0 0;
+    color: var(--startup-muted);
+    font-size: 11px;
+    letter-spacing: 2.3px;
+    text-transform: uppercase;
+}
+#workplan-startup .startup-tracks {
+    display: flex;
+    gap: 5px;
+    margin-top: 24px;
+    width: 192px;
+}
+#workplan-startup .startup-tracks span {
+    position: relative;
+    flex: 1;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--startup-line);
+    overflow: hidden;
+}
+#workplan-startup .startup-tracks span::after {
+    content: "";
+    display: block;
+    height: 100%;
+    background: var(--startup-accent);
+    animation: startup-track 1600ms ease-in-out infinite;
+}
+#workplan-startup .startup-tracks span:nth-child(2)::after { animation-delay: 130ms; }
+#workplan-startup .startup-tracks span:nth-child(3)::after { animation-delay: 260ms; }
+#workplan-startup .startup-status {
+    position: absolute;
+    inset-inline: 20px;
+    bottom: max(9vh, env(safe-area-inset-bottom));
+    text-align: center;
+    font-size: 12px;
+    color: var(--startup-muted);
+}
+#workplan-startup .startup-status p { margin: 0; }
+#workplan-startup .startup-status button {
+    margin-top: 14px;
+    padding: 9px 18px;
+    border: 1px solid var(--startup-line);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--startup-accent);
+    font: inherit;
+    cursor: pointer;
+}
+#workplan-startup .startup-status button:focus-visible { outline: 2px solid var(--startup-accent); outline-offset: 3px; }
+#workplan-startup.startup-leaving { opacity: 0; visibility: hidden; pointer-events: none; }
+#workplan-startup.startup-failed *, #workplan-startup.startup-failed *::after { animation-play-state: paused; }
+
+/* Android uses a compact, centered icon-to-workspace handoff, not the PC lockup. */
+html[data-startup-platform="android"] #workplan-startup .startup-stage {
+    flex-direction: column;
+    gap: 25px;
+    text-align: center;
+    transform: translateY(-24px);
+}
+html[data-startup-platform="android"] #workplan-startup .startup-mark {
+    width: 88px;
+    height: 88px;
+    border-radius: 26px;
+    animation: startup-android-mark 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+html[data-startup-platform="android"] #workplan-startup .startup-mark::before {
+    content: "";
+    position: absolute;
+    inset: -11px;
+    border: 1px solid var(--startup-line);
+    border-top-color: var(--startup-accent);
+    border-radius: 36px;
+    animation: startup-orbit 2400ms linear infinite;
+}
+html[data-startup-platform="android"] #workplan-startup .startup-brand { font-size: 29px; }
+html[data-startup-platform="android"] #workplan-startup .startup-tagline { font-size: 10px; letter-spacing: 2px; }
+html[data-startup-platform="android"] #workplan-startup .startup-tracks { justify-content: center; width: auto; margin-top: 27px; gap: 7px; }
+html[data-startup-platform="android"] #workplan-startup .startup-tracks span { flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; }
+html[data-startup-platform="android"] #workplan-startup .startup-tracks span::after { animation-name: startup-dot; }
+@keyframes startup-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes startup-check { from { stroke-dashoffset: 32; } to { stroke-dashoffset: 0; } }
+@keyframes startup-track { 0%, 100% { transform: translateX(-105%); } 55% { transform: translateX(0); } }
+@keyframes startup-dot { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@keyframes startup-orbit { to { transform: rotate(360deg); } }
+@keyframes startup-android-mark { from { opacity: 0; transform: scale(0.86); } to { opacity: 1; transform: scale(1); } }
+html[data-startup-reduced="true"] #workplan-startup *, html[data-startup-reduced="true"] #workplan-startup *::after, html[data-startup-reduced="true"] #workplan-startup *::before { animation: none !important; }
+html[data-startup-reduced="true"] #workplan-startup { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+    #workplan-startup, #workplan-startup *, #workplan-startup *::before, #workplan-startup *::after { animation: none !important; transition: none !important; }
+}
+@media (max-width: 420px) {
+    html[data-startup-platform="desktop"] #workplan-startup .startup-stage { gap: 18px; padding: 20px; }
+    html[data-startup-platform="desktop"] #workplan-startup .startup-brand { font-size: 28px; }
+    html[data-startup-platform="desktop"] #workplan-startup .startup-mark { width: 58px; height: 58px; border-radius: 18px; }
+    html[data-startup-platform="desktop"] #workplan-startup .startup-mark svg { width: 36px; height: 36px; }
+}

@@ -2,6 +2,7 @@
     import SegmentedControl from './SegmentedControl.svelte';
     import { onMount, tick } from "svelte";
     import {
+        captureAiOperationGuard,
         aiChatHistory,
         aiChatSessions,
         activeAiChatSessionId,
@@ -39,7 +40,9 @@
         getNavigationDepth,
     } from "../stores/navigation.js";
     import { openExternalUrl } from "../utils/open-external.js";
-    import { resizeTextarea } from "../utils/textarea-autosize.js";
+    import { safeImageUrl, safeMediaDataUrl } from "../utils/safe-content.js";
+    import { resizeTextarea, observeTextareaResize } from "../utils/textarea-autosize.js";
+    import { captureMessageApproval } from "../utils/ai-message-approval.js";
     import { exportToMarkdown, describeSavedLocation } from "../utils/export.js";
     import {
         normalizeStatus,
@@ -393,17 +396,21 @@
 
     async function handleSend() {
         if ((!inputText.trim() && !$aiChatComposerAttachments.length) || $isAiLoading) return;
+        const draft = inputText;
         const text = inputText.trim() || "请阅读并分析这些附件。";
         const attachments = $aiChatComposerAttachments;
         try {
-            await sendChatMessage(text, chatStyle, null, { attachments });
+            const sending = sendChatMessage(text, chatStyle, null, { attachments });
+            aiChatDraft.set("");
             inputText = "";
+            scrollToBottom();
+            await sending;
             clearAiChatDraft();
             scrollToBottom();
         } catch (error) {
             // Keep the draft so a failed send (e.g. missing API key) does not
             // silently throw away what the user typed.
-            inputText = text;
+            inputText = draft;
             console.error("Send failed:", error);
         }
     }
@@ -429,6 +436,8 @@
         });
         if (confirmed) {
             clearAiChatHistory();
+            clearAiChatDraft();
+            inputText = "";
         }
     }
 
@@ -452,6 +461,7 @@
     function handleCreateSession() {
         if ($isAiLoading) return;
         createAiChatSession();
+        inputText = "";
         showSessionDrawer = false;
     }
 
@@ -467,6 +477,7 @@
         if ($isAiLoading) return;
         const before = sessionRects();
         selectAiChatSession(sessionId);
+        inputText = "";
         showSessionDrawer = false;
         await tick();
         if (document.documentElement.classList.contains('reduce-animations')
@@ -607,7 +618,7 @@
     function normalizeScopedItem(data, index = 0) {
         return {
             ...data,
-            id: data.id || `${Date.now() + index}_${Math.random().toString(36).slice(2, 7)}`,
+            id: `ai_${Date.now() + index}_${Array.from(crypto.getRandomValues(new Uint32Array(2)), value => value.toString(36)).join('')}`,
             status: normalizeStatus(data.status),
             priority: normalizePriority(data.priority),
             subtasks: (data.subtasks || []).map((item) => ({
@@ -668,6 +679,17 @@
             return;
         }
         taskStore.deleteTask(id);
+    }
+
+
+    function captureApproval(index) {
+        const message = get(aiChatHistory)[index];
+        const source = getMessageSource(message);
+        return captureMessageApproval({
+            message, getMessage: () => get(aiChatHistory)[index],
+            getItems: () => { const state = get(taskStore); return source === 'templates' ? state.templates : source === 'scheduled' ? state.scheduledTasks : state.tasks; },
+            getContext: () => get(aiChatContext), isOperationCurrent: captureAiOperationGuard()
+        });
     }
 
     function formatDateTime(value) {
@@ -758,6 +780,8 @@
     }
 
     async function handleConfirmTask(data, index, source) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         addScopedItem(data, source);
         replaceChatMessage(index, {
             role: "assistant",
@@ -767,6 +791,8 @@
     }
 
     async function handleConfirmMultiTask(msg, index) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         const pendingTasks = msg.tasks.filter((_, taskIndex) => !(msg.confirmedIndexes || []).includes(taskIndex));
         const source = getMessageSource(msg);
         const normalized = pendingTasks.map((task, taskIndex) => normalizeScopedItem(task, taskIndex));
@@ -787,6 +813,8 @@
     }
 
     async function handleDeleteConfirm(msg, index) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         const taskNames = msg.tasks.map((task) => `• ${task.title}`).join("\n");
         const confirmed = await showConfirm({
             title: get(_)("ai_panel.confirm_delete"),
@@ -795,7 +823,7 @@
             cancelText: get(_)("common.cancel"),
             variant: "danger",
         });
-        if (!confirmed) return;
+        if (!confirmed || !isCurrent()) return;
 
         msg.tasks.forEach((task) => deleteScopedItem(task.id, getMessageSource(msg)));
         replaceChatMessage(index, {
@@ -806,6 +834,8 @@
     }
 
     async function handleUpdateConfirm(msg, index) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         const updateDescriptions = buildUpdateDescriptions(msg.updates);
         const confirmed = await showConfirm({
             title: get(_)("ai_panel.confirm_modify"),
@@ -819,7 +849,7 @@
             cancelText: get(_)("common.cancel"),
             variant: "warning",
         });
-        if (!confirmed) return;
+        if (!confirmed || !isCurrent()) return;
 
         updateScopedItem(msg.task.id, msg.updates, getMessageSource(msg));
         replaceChatMessage(index, {
@@ -835,6 +865,8 @@
     }
 
     async function handleMultiUpdateConfirm(msg, index) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         const summaryLines = msg.operations
             .map((operation) => {
                 const updates = buildUpdateDescriptions(operation.updates);
@@ -849,7 +881,7 @@
             cancelText: get(_)("common.cancel"),
             variant: "warning",
         });
-        if (!confirmed) return;
+        if (!confirmed || !isCurrent()) return;
 
         msg.operations.forEach((operation) => updateScopedItem(operation.task.id, operation.updates, getMessageSource(msg)));
         replaceChatMessage(index, {
@@ -860,6 +892,8 @@
     }
 
     async function handleBatchCompleteConfirm(msg, index) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         const taskNames = msg.operations.map((operation) => `• ${operation.task.title}`).join("\n");
         const confirmed = await showConfirm({
             title: get(_)("ai_panel.mark_complete"),
@@ -868,7 +902,7 @@
             cancelText: get(_)("common.cancel"),
             variant: "success",
         });
-        if (!confirmed) return;
+        if (!confirmed || !isCurrent()) return;
 
         msg.operations.forEach((operation) => updateScopedItem(operation.task.id, operation.updates, getMessageSource(msg)));
         replaceChatMessage(index, {
@@ -879,6 +913,8 @@
     }
 
     async function handleMixedConfirm(msg, index) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         const summaryLines = [];
         if (msg.updateOps?.length) {
             summaryLines.push(`[${get(_)("ai_panel.modify_section")}]`);
@@ -898,7 +934,7 @@
             cancelText: get(_)("common.cancel"),
             variant: "warning",
         });
-        if (!confirmed) return;
+        if (!confirmed || !isCurrent()) return;
 
         msg.updateOps?.forEach((operation) => updateScopedItem(operation.task.id, operation.updates, getMessageSource(msg)));
         msg.deleteOps?.forEach((task) => deleteScopedItem(task.id, getMessageSource(msg)));
@@ -913,6 +949,8 @@
     }
 
     async function handleSubtaskConfirm(msg, index) {
+        const isCurrent = captureApproval(index);
+        if (!isCurrent()) return;
         let newSubtasks = [...(msg.task.subtasks || [])];
 
         for (const change of msg.subtaskChanges || []) {
@@ -952,7 +990,11 @@
         scrollToBottom();
         syncComposerHeight();
         window.addEventListener('resize', handleViewportResize);
-        return () => window.removeEventListener('resize', handleViewportResize);
+        const unobserveComposer = observeTextareaResize(composerTextarea, syncComposerHeight);
+        return () => {
+            window.removeEventListener('resize', handleViewportResize);
+            unobserveComposer();
+        };
     });
 
     $: if ($aiChatHistory.length) scrollToBottom();
@@ -1042,7 +1084,7 @@
                         <div class="min-w-0 flex-1 flex items-start gap-3">
                             <div class="w-9 h-9 rounded-xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700">
                                 <img
-                                    src={session.assistantAvatar}
+                                    src={safeImageUrl(session.assistantAvatar) || "/avatars/assistant-orbit-1.svg"}
                                     alt={session.title || $_("ai_chat.title")}
                                     class="w-full h-full object-cover"
                                 />
@@ -1095,7 +1137,7 @@
                     class="w-8 h-8 md:w-10 md:h-10 rounded-xl overflow-hidden shadow-lg shrink-0 border border-indigo-100/70 dark:border-indigo-900/70 bg-white/80 dark:bg-slate-700/80"
                 >
                     <img
-                        src={currentSession?.assistantAvatar || "/avatars/assistant-orbit-1.svg"}
+                        src={safeImageUrl(currentSession?.assistantAvatar) || "/avatars/assistant-orbit-1.svg"}
                         alt={$_("ai_chat.title")}
                         class="w-full h-full object-cover"
                     />
@@ -1247,7 +1289,7 @@
                         class="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/50 dark:to-purple-900/50 rounded-2xl flex items-center justify-center mb-3 md:mb-4"
                     >
                         <i
-                            class="ph-fill ph-sparkle text-3xl md:text-4xl text-indigo-500 dark:text-indigo-400"
+                            class="ph-fill ph-chat-teardrop-dots text-3xl md:text-4xl text-indigo-500 dark:text-indigo-400"
                         ></i>
                     </div>
                     <h3 class="text-base md:text-lg font-bold text-slate-700 dark:text-slate-200 mb-2">
@@ -1306,7 +1348,7 @@
                                 class="w-8 h-8 md:w-9 md:h-9 rounded-xl shrink-0 overflow-hidden shadow-sm border border-blue-200/70 bg-blue-50"
                             >
                                 <img
-                                    src={currentSession?.userAvatar || "/avatars/user-orbit-1.svg"}
+                                    src={safeImageUrl(currentSession?.userAvatar) || "/avatars/user-orbit-1.svg"}
                                     alt="User avatar"
                                     class="w-full h-full object-cover"
                                 />
@@ -1316,13 +1358,16 @@
                                 class="w-8 h-8 md:w-9 md:h-9 rounded-xl shrink-0 overflow-hidden shadow-sm border border-indigo-200/70 bg-indigo-50"
                             >
                                 <img
-                                    src={currentSession?.assistantAvatar || "/avatars/assistant-orbit-1.svg"}
+                                    src={safeImageUrl(currentSession?.assistantAvatar) || "/avatars/assistant-orbit-1.svg"}
                                     alt="Assistant avatar"
                                     class="w-full h-full object-cover"
                                 />
                             </div>
                         {/if}
                         <div class="min-w-0 max-w-[85%] md:max-w-[80%] group chat-message-content">
+                            {#if msg.assistantSource === 'templates' || msg.assistantSource === 'scheduled'}
+                                <div class="mb-1 text-[10px] font-bold text-indigo-600">{$_(msg.assistantSource === 'templates' ? 'nav.templates_full' : 'nav.scheduled')}</div>
+                            {/if}
                             {#if msg.role === "user"}
                                 <div
                                     class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-blue-600 text-white rounded-tr-none markdown-message user-markdown break-words overflow-hidden"
@@ -1334,11 +1379,11 @@
                                                 {#if attachment.mediaType === 'image' && attachment.thumbnailUrl}
                                                     <div class="rounded-xl overflow-hidden border border-white/15">
                                                         <button
-                                                            on:click={() => lightboxUrl = attachment.thumbnailUrl}
+                                                            on:click={() => lightboxUrl = safeImageUrl(attachment.thumbnailUrl)}
                                                             class="block w-full"
                                                         >
                                                             <img
-                                                                src={attachment.thumbnailUrl}
+                                                                src={safeImageUrl(attachment.thumbnailUrl)}
                                                                 alt={attachment.name}
                                                                 class="max-w-full max-h-60 rounded-xl object-contain cursor-pointer hover:opacity-90 transition"
                                                             />
@@ -1355,7 +1400,7 @@
                                                             <span class="text-[10px] text-blue-100/80">{formatAttachmentSize(attachment.size)}</span>
                                                         </div>
                                                         <audio controls class="w-full h-8" preload="none">
-                                                            <source src="data:{attachment.mimeType};base64,{attachment.base64Data}" type={attachment.mimeType} />
+                                                            <source src={safeMediaDataUrl(attachment.mimeType, attachment.base64Data, 'audio')} type={attachment.mimeType} />
                                                         </audio>
                                                     </div>
                                                 {:else if attachment.mediaType === 'video'}
@@ -1970,22 +2015,23 @@
                                 <div class="p-2.5 md:p-3 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-tl-none max-w-sm">
                                     {#if msg.base64Data}
                                         <button
-                                            on:click={() => lightboxUrl = `data:${msg.mimeType || 'image/png'};base64,${msg.base64Data}`}
+                                            on:click={() => lightboxUrl = safeMediaDataUrl(msg.mimeType || 'image/png', msg.base64Data)}
                                             class="block w-full"
                                         >
                                             <img
-                                                src="data:{msg.mimeType || 'image/png'};base64,{msg.base64Data}"
+                                                src={safeMediaDataUrl(msg.mimeType || 'image/png', msg.base64Data)}
                                                 alt={msg.prompt || 'Generated image'}
                                                 class="w-full rounded-xl cursor-pointer hover:opacity-90 transition"
                                             />
                                         </button>
                                     {:else if msg.url}
                                         <button
-                                            on:click={() => lightboxUrl = msg.url}
+                                            on:click={() => lightboxUrl = safeImageUrl(msg.url)}
                                             class="block w-full"
                                         >
                                             <img
-                                                src={msg.url}
+                                                src={safeImageUrl(msg.url)}
+                                                referrerpolicy="no-referrer"
                                                 alt={msg.prompt || 'Generated image'}
                                                 class="w-full rounded-xl cursor-pointer hover:opacity-90 transition"
                                             />
@@ -2016,7 +2062,7 @@
                                     </div>
                                     {#if msg.base64Data}
                                         <audio controls class="w-full" preload="none">
-                                            <source src="data:{msg.mimeType || 'audio/mpeg'};base64,{msg.base64Data}" type={msg.mimeType || 'audio/mpeg'} />
+                                            <source src={safeMediaDataUrl(msg.mimeType || 'audio/mpeg', msg.base64Data, 'audio')} type={msg.mimeType || 'audio/mpeg'} />
                                         </audio>
                                     {/if}
                                     {#if msg.content}
@@ -2155,7 +2201,7 @@
                         <div class="max-w-full flex items-start gap-2 rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/70 px-3 py-2">
                             {#if attachment.thumbnailUrl}
                                 <img
-                                    src={attachment.thumbnailUrl}
+                                    src={safeImageUrl(attachment.thumbnailUrl)}
                                     alt={attachment.name}
                                     class="w-10 h-10 rounded-lg object-cover shrink-0"
                                 />
@@ -2270,7 +2316,8 @@
         on:keydown={(e) => e.key === 'Escape' && (lightboxUrl = null)}
     >
         <img
-            src={lightboxUrl}
+            src={safeImageUrl(lightboxUrl)}
+            referrerpolicy="no-referrer"
             alt="Preview"
             class="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
         />

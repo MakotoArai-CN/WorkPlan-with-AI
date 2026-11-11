@@ -16,11 +16,8 @@ export function buildAutocompleteContext({ title = '', text = '' } = {}) {
         ? body.slice(-AUTOCOMPLETE_TAIL_LIMIT)
         : body;
     const cleanTitle = String(title || '').trim();
-    return [
-        cleanTitle ? `笔记标题：${cleanTitle}` : '',
-        '以下是笔记结尾的内容，请直接接着写：',
-        tail.trim()
-    ].filter(Boolean).join('\n\n');
+    // Content remains data even when it contains role-like delimiters or instructions.
+    return JSON.stringify({ noteTitle: cleanTitle, noteTail: tail });
 }
 
 /**

@@ -50,7 +50,9 @@ import {
     disableBiometric
 } from '../utils/device-auth.js';
 import { validateMasterPassword } from '../utils/master-password-policy.js';
-import { PROTECTION_KEY, readProtection, writeProtection, nextProtectionFailure, executeProtectionErase } from '../utils/vault-protection.js';
+import { PROTECTION_KEY, readProtection, writeProtection, nextProtectionFailure, PROTECTION_ACTIONS } from '../utils/vault-protection.js';
+import { isTauriRuntime } from '../utils/runtime.js';
+import { DEFAULT_PASSWORD_CATEGORIES, collectPasswordCategories, validatePasswordCategory } from '../utils/password-categories.js';
 
 const STORAGE_KEY = 'workplan_passwords';
 const MASTER_KEY = 'workplan_master_hash';
@@ -60,7 +62,7 @@ const SETTINGS_KEY = 'workplan_passwords_settings';
 function createPasswordsStore() {
     const { subscribe, set, update } = writable({
         passwords: [],
-        categories: ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
+        categories: [...DEFAULT_PASSWORD_CATEGORIES],
         isUnlocked: false,
         masterPasswordHash: null,
         rememberSession: false,
@@ -86,36 +88,49 @@ function createPasswordsStore() {
 
     function quickUnlockBlocked() {
         const protection = readProtection();
-        return protection.enabled && (protection.failures > 10 || Date.now() < protection.lockedUntil);
+        return protection.enabled && Date.now() < protection.lockedUntil;
     }
 
     async function verifyMaster(password, hash) {
         if (verificationBusy) throw new Error('请等待当前验证完成');
         const generation = secretsGeneration;
         const protection = readProtection();
-        if (protection.enabled && protection.failures > 10) {
-            await executeProtectionErase();
-            return false;
-        }
         if (protection.enabled && Date.now() < protection.lockedUntil) {
             throw new Error(`强制冷静中，请在 ${Math.ceil((protection.lockedUntil - Date.now()) / 60000)} 分钟后重试`);
         }
         verificationBusy = true;
         try {
-            const valid = await verifyPassword(password, hash);
+            if (typeof password !== 'string' || !password || new TextEncoder().encode(password).length > 4096) return false;
+            let valid;
+            if (isTauriRuntime) {
+                const { flushLocalDatabase } = await import('../utils/local-db.js');
+                await flushLocalDatabase();
+                if (generation !== secretsGeneration) return false;
+                const { invoke } = await import('@tauri-apps/api/core');
+                const verification = await invoke('vault_verify_master', { password });
+                if (verification.attempted === false && verification.retryAfterMs > 0) {
+                    throw new Error(`验证请求过于频繁，请在 ${Math.ceil(verification.retryAfterMs / 1000)} 秒后重试`);
+                }
+                valid = verification.valid === true;
+            } else {
+                valid = await verifyPassword(password, hash);
+            }
             // A native KDF may finish after locking or switching accounts.
             if (generation !== secretsGeneration) return false;
             if (protection.enabled) {
-                const next = valid ? { enabled: true, failures: 0, lockedUntil: 0 } : nextProtectionFailure(protection);
+                const next = valid ? { ...protection, failures: 0, lockedUntil: 0 } : nextProtectionFailure(protection);
                 writeProtection(next);
                 const { flushLocalDatabase } = await import('../utils/local-db.js');
                 await flushLocalDatabase();
                 if (generation !== secretsGeneration) return false;
                 if (next.failures > 10) {
+                    if (next.action === 'disable_quick_unlock') {
+                        clearPin();
+                        disableBiometric();
+                        clearSession();
+                    }
                     clearActiveSecrets();
-                    clearSession();
-                    update(s => ({ ...s, passwords: [], isUnlocked: false }));
-                    await executeProtectionErase();
+                    update(s => ({ ...s, isUnlocked: false }));
                 }
             }
             return valid;
@@ -284,7 +299,9 @@ function createPasswordsStore() {
             // the vault contains hundreds/thousands of passwords.
             hydrated.push(next);
         }
-        const nextState = { ...state, passwords: hydrated };
+        const categories = collectPasswordCategories(state.categories, hydrated);
+        const nextState = { ...state, passwords: hydrated, categories };
+        saveSettings({ categories });
         update(() => nextState);
         migrationDone = true;
     }
@@ -344,9 +361,7 @@ function createPasswordsStore() {
 
         set({
             passwords,
-            categories: Array.isArray(settings.categories) && settings.categories.length > 0
-                ? settings.categories
-                : ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
+            categories: collectPasswordCategories(settings.categories, passwords),
             isUnlocked: sessionUnlocked,
             masterPasswordHash: masterHash,
             rememberSession: settings.rememberSession || false,
@@ -365,11 +380,14 @@ function createPasswordsStore() {
         }
         saveTimer = setTimeout(() => {
             if (!vaultEntryKey) return;
+            // Category-only edits may occur while an entry write is debounced.
+            // Persist the committed store, not the earlier captured settings.
+            state = get({ subscribe });
             localStorage.setItem(STORAGE_KEY, JSON.stringify(encodePasswordsForStorage(state.passwords)));
             if (state.masterPasswordHash) {
                 localStorage.setItem(MASTER_KEY, state.masterPasswordHash);
             }
-            saveSettings({ rememberSession: state.rememberSession });
+            saveSettings({ rememberSession: state.rememberSession, categories: state.categories });
         }, 100);
     }
 
@@ -383,7 +401,7 @@ function createPasswordsStore() {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(encodePasswordsForStorage(state.passwords)));
             if (state.masterPasswordHash) localStorage.setItem(MASTER_KEY, state.masterPasswordHash);
-            saveSettings({ rememberSession: state.rememberSession });
+            saveSettings({ rememberSession: state.rememberSession, categories: state.categories });
         } catch (error) {
             // Keep verifier and ciphertext in the same generation on write failure.
             if (previousEntries === null) localStorage.removeItem(STORAGE_KEY);
@@ -452,10 +470,11 @@ function createPasswordsStore() {
         subscribe,
         load,
         getProtection: readProtection,
-        setProtection: async (enabled, masterPassword) => {
+        setProtection: async (enabled, masterPassword, action = 'cooldown') => {
             if (!get({ subscribe }).isUnlocked || !currentMasterPassword) return { success: false, error: '请先解锁密码库' };
+            if (!PROTECTION_ACTIONS.includes(action)) return { success: false, error: '无效的防护选项' };
             if (!(await verifyMaster(masterPassword, get({ subscribe }).masterPasswordHash))) return { success: false, error: '原密码错误' };
-            writeProtection({ enabled: !!enabled, failures: 0, lockedUntil: 0 });
+            writeProtection({ enabled: !!enabled, action, failures: 0, lockedUntil: 0 });
             const { flushLocalDatabase } = await import('../utils/local-db.js');
             await flushLocalDatabase();
             return { success: true };
@@ -592,7 +611,7 @@ function createPasswordsStore() {
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
-            const newState = { ...s, passwords: [newEntry, ...s.passwords] };
+            const newState = { ...s, passwords: [newEntry, ...s.passwords], categories: collectPasswordCategories(s.categories, [newEntry]) };
             save(newState);
             return newState;
         }),
@@ -610,7 +629,7 @@ function createPasswordsStore() {
                 updatedAt: new Date().toISOString()
             }));
             update(s => {
-                const newState = { ...s, passwords: [...encryptedEntries, ...s.passwords] };
+                const newState = { ...s, passwords: [...encryptedEntries, ...s.passwords], categories: collectPasswordCategories(s.categories, encryptedEntries) };
                 saveImmediate(newState);
                 return newState;
             });
@@ -626,7 +645,7 @@ function createPasswordsStore() {
                 }
                 return newEntry;
             });
-            const newState = { ...s, passwords };
+            const newState = { ...s, passwords, categories: collectPasswordCategories(s.categories, passwords) };
             save(newState);
             return newState;
         }),
@@ -722,9 +741,10 @@ function createPasswordsStore() {
                     ...entry,
                     password: entry.password ? (vaultEntryKey ? encryptVaultPayload(entry.password, vaultEntryKey) : encrypt(entry.password, vaultSecret)) : ''
                 }));
-            const categories = Array.isArray(payload.categories) && payload.categories.length > 0
-                ? payload.categories
-                : get({ subscribe }).categories;
+            const categories = collectPasswordCategories([
+                ...get({ subscribe }).categories,
+                ...(Array.isArray(payload.categories) ? payload.categories : [])
+            ], passwords);
             update(s => {
                 const next = { ...s, passwords, categories };
                 saveImmediate(next);
@@ -740,9 +760,10 @@ function createPasswordsStore() {
             const passwords = payload.passwords.filter(entry => (
                 entry && typeof entry.id === 'string' && typeof entry.password === 'string'
             ));
-            const categories = Array.isArray(payload.categories) && payload.categories.length > 0
-                ? payload.categories
-                : get({ subscribe }).categories;
+            const categories = collectPasswordCategories([
+                ...get({ subscribe }).categories,
+                ...(Array.isArray(payload.categories) ? payload.categories : [])
+            ], passwords);
             update(s => {
                 const next = { ...s, passwords, categories };
                 saveImmediate(next);
@@ -756,12 +777,16 @@ function createPasswordsStore() {
             const deviceKey = await getDeviceKey();
             return deriveSyncSecret(vaultSecret, deviceKey || '', accessKey || '');
         },
-        addCategory: (category) => update(s => {
-            if (s.categories.includes(category)) return s;
-            const categories = [...s.categories, category];
+        addCategory: (category) => {
+            const state = get({ subscribe });
+            if (!state.isUnlocked || !vaultSecret) return { success: false, error: 'category_locked' };
+            const result = validatePasswordCategory(category, state.categories);
+            if (!result.success) return result;
+            const categories = [...state.categories, result.category];
             saveSettings({ categories });
-            return { ...s, categories };
-        }),
+            update(s => ({ ...s, categories }));
+            return result;
+        },
         suspendForAccountSwitch: () => {
             if (saveTimer) {
                 clearTimeout(saveTimer);
@@ -806,7 +831,7 @@ function createPasswordsStore() {
             }
             set({
                 passwords: [],
-                categories: ['默认', '社交', '工作', '金融', '购物', 'Cookie', 'API密钥', '服务器', '邮箱', '数据库', '其他'],
+                categories: [...DEFAULT_PASSWORD_CATEGORIES],
                 isUnlocked: false,
                 masterPasswordHash: null,
                 rememberSession: false,

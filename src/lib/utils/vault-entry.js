@@ -6,6 +6,7 @@ import CryptoJS from 'crypto-js';
 const META_KEY = 'workplan_vault_meta';
 const FORMAT = 'v4';
 const ITERATIONS = 600000;
+const MAX_ITERATIONS = 2000000;
 const SALT_BYTES = 16;
 
 let cached = null;
@@ -21,17 +22,26 @@ function hexToBytes(hex) {
     return bytes;
 }
 
+export function validateVaultMeta(meta) {
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta) || meta.version !== 2
+        || typeof meta.salt !== 'string' || !/^[0-9a-f]{32}$/i.test(meta.salt)
+        || !Number.isInteger(meta.iterations) || meta.iterations < ITERATIONS || meta.iterations > MAX_ITERATIONS) {
+        throw new Error('密码库密钥参数损坏或不受支持，请恢复原始元数据或备份；未改动密码数据');
+    }
+    return meta;
+}
+
 function readMeta() {
     if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(META_KEY);
+    if (raw === null) return null;
+    let parsed;
     try {
-        const raw = localStorage.getItem(META_KEY);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed?.salt || !parsed?.iterations) return null;
-        return parsed;
+        parsed = JSON.parse(raw);
     } catch {
-        return null;
+        throw new Error('密码库密钥参数不是有效JSON，未改动密码数据');
     }
+    return validateVaultMeta(parsed);
 }
 
 function writeMeta(meta) {
@@ -66,7 +76,7 @@ async function deriveKeyPair(secret, meta) {
         {
             name: 'PBKDF2',
             salt: hexToBytes(meta.salt),
-            iterations: Number(meta.iterations) || ITERATIONS,
+            iterations: meta.iterations,
             hash: 'SHA-256'
         },
         material,
@@ -82,6 +92,9 @@ async function deriveKeyPair(secret, meta) {
 export async function ensureVaultEntryKey(secret, saltOverride = '') {
     if (!secret) return null;
     let meta = readMeta();
+    if (saltOverride !== '' && (typeof saltOverride !== 'string' || !/^[0-9a-f]{32}$/i.test(saltOverride))) {
+        throw new Error('密码条目的密钥盐无效，未改动密码数据');
+    }
     if (saltOverride && meta?.salt !== saltOverride) {
         // Recovery may only have the encrypted entries, so every entry carries
         // the public KDF salt. Persist it again for future unlocks.

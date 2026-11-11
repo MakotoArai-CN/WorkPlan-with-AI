@@ -8,6 +8,7 @@ import {
 } from './g4f-client.js';
 import { isTauriRuntime } from './runtime.js';
 import { resolveRequestHeaders } from './ai-request-fingerprint.js';
+import { abortable, addEndpointQuery, boundedNumber, createAiStreamParser, MAX_AI_RESPONSE_CHARS, readAiResponseJson, readAiResponseText, providerHttpError, safeProviderError, throwIfAborted } from './ai-transport.js';
 
 const PROVIDER_CONFIGS = {
     openai: {
@@ -410,7 +411,7 @@ const PROVIDER_CONFIGS = {
     }
 };
 
-let baiduTokenCache = { token: null, expireTime: 0 };
+let baiduTokenCache = { token: null, expireTime: 0, credentials: '' };
 let modelCache = {};
 const ALLOWED_ENDPOINT_PROTOCOLS = new Set(['http:', 'https:']);
 const NATIVE_TOOL_BODY_FORMATS = new Set(['openai']);
@@ -426,6 +427,7 @@ function normalizeHttpEndpoint(url) {
         if (!ALLOWED_ENDPOINT_PROTOCOLS.has(parsed.protocol)) {
             throw new Error('仅支持 http/https 协议');
         }
+        if (parsed.username || parsed.password) throw new Error('API 地址不能包含凭据');
         return parsed.toString();
     } catch {
         throw new Error('无效的 API 地址，仅支持 http/https 协议');
@@ -433,6 +435,10 @@ function normalizeHttpEndpoint(url) {
 }
 
 async function fetchWithTauri(url, options = {}) {
+    throwIfAborted(options.signal);
+    const deadline = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(120000) : null;
+    const signal = options.signal && deadline && typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([options.signal, deadline]) : options.signal || deadline;
     const safeUrl = normalizeHttpEndpoint(url);
     const headers = {};
     if (options.headers) {
@@ -444,7 +450,8 @@ async function fetchWithTauri(url, options = {}) {
     }
     const fetchOptions = {
         method: options.method || 'GET',
-        headers
+        headers,
+        ...(signal ? { signal } : {})
     };
     if (options.body) {
         fetchOptions.body = typeof options.body === 'string'
@@ -461,17 +468,10 @@ async function fetchWithTauri(url, options = {}) {
 
     try {
         const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-        const response = await tauriFetch(safeUrl, fetchOptions);
-        return {
-            ok: response.ok,
-            status: response.status,
-            json: async () => response.json(),
-            text: async () => response.text(),
-            body: response.body
-        };
+        return await tauriFetch(safeUrl, fetchOptions);
     } catch (e) {
-        const errorMsg = e.message || String(e);
-        console.error('Tauri fetch error:', errorMsg);
+        throwIfAborted(options.signal);
+        const errorMsg = safeProviderError(e);
         if (errorMsg.includes('not allowed on the configured scope')) {
             throw new Error('网络权限受限：请确保应用配置允许访问此 API 地址');
         }
@@ -482,21 +482,25 @@ async function fetchWithTauri(url, options = {}) {
     }
 }
 
-async function getBaiduAccessToken(apiKey, secretKey) {
+async function getBaiduAccessToken(apiKey, secretKey, signal) {
     const now = Date.now();
-    if (baiduTokenCache.token && baiduTokenCache.expireTime > now) {
+    const credentials = JSON.stringify([apiKey, secretKey]);
+    if (baiduTokenCache.credentials === credentials && baiduTokenCache.token && baiduTokenCache.expireTime > now) {
         return baiduTokenCache.token;
     }
     const tokenUrl = `https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${encodeURIComponent(apiKey)}&client_secret=${encodeURIComponent(secretKey)}`;
     const response = await fetchWithTauri(tokenUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, signal
     });
     if (!response.ok) throw new Error('获取百度 access_token 失败: ' + response.status);
-    const data = await response.json();
-    if (data.error) throw new Error('百度认证错误: ' + data.error_description);
+    const data = await readAiResponseJson(response);
+    throwIfAborted(signal);
+    if (data.error) throw new Error('百度认证错误: ' + safeProviderError(data.error_description, [apiKey, secretKey]));
+    if (typeof data.access_token !== 'string' || !data.access_token) throw new Error('百度认证未返回有效访问令牌');
     baiduTokenCache.token = data.access_token;
-    baiduTokenCache.expireTime = now + (data.expires_in - 300) * 1000;
+    baiduTokenCache.credentials = credentials;
+    baiduTokenCache.expireTime = now + Math.max(0, (Number(data.expires_in) || 0) - 300) * 1000;
     return data.access_token;
 }
 
@@ -512,7 +516,7 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
             modelCache[cacheKey] = { models, expireTime: Date.now() + 300000 };
             return models;
         } catch (e) {
-            console.error(`Failed to fetch G4F models for ${providerId}:`, e);
+            console.warn(`Failed to fetch G4F models for ${providerId}:`, safeProviderError(e, [apiKey]));
             return getG4FDefaultModels(providerId);
         }
     }
@@ -552,7 +556,7 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         }
         let endpoint = modelsEndpoint;
         if (provider.authType === 'query_key' && apiKey) {
-            endpoint += '?key=' + encodeURIComponent(apiKey);
+            endpoint = addEndpointQuery(endpoint, 'key', apiKey);
         }
         const response = await fetchWithTauri(endpoint, { method: 'GET', headers });
         if (!response.ok) {
@@ -586,7 +590,7 @@ export async function fetchProviderModels(providerId, apiKey = '', customEndpoin
         }
         return provider.defaultModels;
     } catch (e) {
-        console.error(`Failed to fetch models for ${providerId}:`, e);
+        console.warn(`Failed to fetch models for ${providerId}:`, safeProviderError(e, [apiKey]));
         return provider.defaultModels;
     }
 }
@@ -698,8 +702,8 @@ function validateModel(provider, model, cachedModels = [], isCustomProvider = fa
 
 function buildRequestBody(provider, model, messages, options) {
     const format = provider.bodyFormat || 'openai';
-    const temperature = options.temperature || 0.7;
-    const maxTokens = options.maxTokens || 2048;
+    const temperature = boundedNumber(options.temperature, 0.7, 0, 2);
+    const maxTokens = Math.floor(boundedNumber(options.maxTokens, 2048, 1, 262144));
     const stream = options.stream || false;
     const tools = Array.isArray(options.tools) ? options.tools : [];
     const toolChoice = options.toolChoice || 'auto';
@@ -713,7 +717,7 @@ function buildRequestBody(provider, model, messages, options) {
                     role: m.role,
                     content: Array.isArray(m.content) ? m.content : m.content
                 })),
-                system: messages.find(m => m.role === 'system')?.content,
+                system: messages.filter(m => m.role === 'system').map(m => String(m.content || '')).join('\n\n') || undefined,
                 max_tokens: maxTokens,
                 temperature,
                 stream
@@ -762,8 +766,8 @@ function buildRequestBody(provider, model, messages, options) {
                     role: m.role === 'assistant' ? 'model' : 'user',
                     parts: m.parts || [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
                 })),
-                systemInstruction: messages.find(m => m.role === 'system') ? {
-                    parts: [{ text: messages.find(m => m.role === 'system').content }]
+                systemInstruction: messages.some(m => m.role === 'system') ? {
+                    parts: [{ text: messages.filter(m => m.role === 'system').map(m => String(m.content || '')).join('\n\n') }]
                 } : undefined,
                 generationConfig: { temperature, maxOutputTokens: maxTokens }
             };
@@ -779,17 +783,18 @@ function buildRequestBody(provider, model, messages, options) {
     }
 }
 
-function parseResponse(provider, responseData) {
+function parseResponse(provider, responseData, secrets = []) {
     const format = provider.bodyFormat || 'openai';
+    if (!responseData || typeof responseData !== 'object') throw new Error('AI response is not a JSON object');
     if (responseData.error) {
-        throw new Error('API 错误: ' + (responseData.error.message || JSON.stringify(responseData.error)));
+        throw new Error('API 错误: ' + safeProviderError(responseData.error, secrets));
     }
     switch (format) {
         case 'baidu':
-            if (responseData.error_code) throw new Error('百度 API 错误: ' + responseData.error_msg);
+            if (responseData.error_code) throw new Error('百度 API 错误: ' + safeProviderError(responseData.error_msg, secrets));
             return responseData.result || '';
         case 'anthropic':
-            return responseData.content?.[0]?.text || '';
+            return responseData.content?.filter?.(part => part.type === 'text').map(part => part.text || '').join('') || '';
         case 'cohere':
             return responseData.text || '';
         case 'cohere-v2':
@@ -811,21 +816,25 @@ function parseResponse(provider, responseData) {
         case 'ollama':
             return responseData.message?.content || '';
         case 'google':
-            return responseData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            return responseData.candidates?.[0]?.content?.parts?.filter?.(part => !part.thought && typeof part.text === 'string').map(part => part.text).join('') || '';
         default:
-            return responseData.choices?.[0]?.message?.content || '';
+            {
+                const content = responseData.choices?.[0]?.message?.content;
+                return Array.isArray(content) ? content.filter(part => part.type === 'text').map(part => part.text || '').join('') : typeof content === 'string' ? content : '';
+            }
     }
 }
 
-function parseResponseWithToolCalls(provider, responseData) {
+function parseResponseWithToolCalls(provider, responseData, secrets = []) {
     const format = provider.bodyFormat || 'openai';
+    if (!responseData || typeof responseData !== 'object') throw new Error('AI response is not a JSON object');
     if (responseData.error) {
-        throw new Error('API 错误: ' + (responseData.error.message || JSON.stringify(responseData.error)));
+        throw new Error('API 错误: ' + safeProviderError(responseData.error, secrets));
     }
 
     if (format !== 'openai') {
         return {
-            content: parseResponse(provider, responseData),
+            content: parseResponse(provider, responseData, secrets),
             toolCalls: [],
             raw: responseData
         };
@@ -833,14 +842,27 @@ function parseResponseWithToolCalls(provider, responseData) {
 
     const choice = responseData.choices?.[0] || {};
     const message = choice.message || {};
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 8) throw new Error('AI returned too many tool calls');
+    const ids = new Set();
     const toolCalls = Array.isArray(message.tool_calls)
-        ? message.tool_calls.map((call, index) => ({
-            id: call.id || `tool_call_${index}`,
+        ? message.tool_calls.map((call, index) => {
+            if (!call || typeof call !== 'object' || (call.type && call.type !== 'function')
+                || typeof call.function?.name !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(call.function.name)) {
+                throw new Error('AI returned an invalid tool call');
+            }
+            const id = call.id || `tool_call_${index}`;
+            if (typeof id !== 'string' || id.length > 128 || /[\u0000-\u0020\u007f]/.test(id) || ids.has(id)) throw new Error('AI returned an invalid or repeated tool call id');
+            ids.add(id);
+            const args = call.function.arguments;
+            if (typeof args !== 'string' || args.length > 32000) throw new Error('AI returned invalid tool arguments');
+            return {
+            id,
             type: call.type || 'function',
             name: call.function?.name || '',
-            arguments: call.function?.arguments || '{}',
+            arguments: args,
             raw: call
-        })).filter(call => call.name)
+            };
+        })
         : [];
 
     return {
@@ -876,7 +898,7 @@ function parseStreamChunk(provider, chunk) {
         case 'ollama':
             return chunk.message?.content || '';
         case 'google':
-            return chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            return chunk.candidates?.[0]?.content?.parts?.filter?.(part => !part.thought && typeof part.text === 'string').map(part => part.text).join('') || '';
         default:
             return chunk.choices?.[0]?.delta?.content || '';
     }
@@ -917,6 +939,7 @@ export function normalizeChatEndpoint(raw, providerId = 'custom') {
     }
 
     const path = url.pathname.replace(/\/+$/, '');
+    if (/\/(?:chat\/completions|api\/chat|messages|responses)$/i.test(path) || /:(?:streamGenerateContent|generateContent)$/i.test(path)) return url.toString();
     if (providerId === 'ollama') {
         url.pathname = path.endsWith('/api') ? path + '/chat' : path + '/api/chat';
         return url.toString();
@@ -937,12 +960,15 @@ export function normalizeChatEndpoint(raw, providerId = 'custom') {
 
 function getEffectiveEndpoint(provider, providerId, config) {
     if (config.customEndpoint) {
+        if (provider.bodyFormat === 'google' || provider.bodyFormat === 'perplexity-agent') return config.customEndpoint;
         return normalizeChatEndpoint(config.customEndpoint, providerId);
     }
     return provider.endpoint;
 }
 
-export async function callAI(config, userMessage, systemPrompt) {
+export async function callAI(config, userMessage, systemPrompt, options = {}) {
+    const signal = options.signal || config.signal;
+    throwIfAborted(signal);
     const providerId = config.provider || 'g4f-default';
 
     if (isG4FProvider(providerId)) {
@@ -950,11 +976,12 @@ export async function callAI(config, userMessage, systemPrompt) {
         if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
         messages.push({ role: 'user', content: userMessage });
 
-        return await chatWithG4F(providerId, config.model, messages, {
+        return await abortable(chatWithG4F(providerId, config.model, messages, {
             apiKey: config.apiKey,
             temperature: config.temperature,
-            maxTokens: config.maxTokens
-        });
+            maxTokens: config.maxTokens,
+            signal
+        }), signal);
     }
 
     const provider = PROVIDER_CONFIGS[providerId];
@@ -988,8 +1015,8 @@ export async function callAI(config, userMessage, systemPrompt) {
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: userMessage });
     const requestBody = buildRequestBody(provider, model, messages, {
-        temperature: config.temperature || 0.7,
-        maxTokens: config.maxTokens || 2048,
+        temperature: config.temperature ?? 0.7,
+        maxTokens: config.maxTokens ?? 2048,
         stream: false
     });
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
@@ -999,8 +1026,8 @@ export async function callAI(config, userMessage, systemPrompt) {
     Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
-        const accessToken = await getBaiduAccessToken(apiKey, secretKey);
-        finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
+        const accessToken = await getBaiduAccessToken(apiKey, secretKey, signal);
+        finalEndpoint = addEndpointQuery(endpoint, 'access_token', accessToken);
     } else if (provider.authType === 'bearer' && apiKey) {
         headers['Authorization'] = 'Bearer ' + apiKey;
     } else if (provider.authType === 'x-api-key' && apiKey) {
@@ -1008,22 +1035,27 @@ export async function callAI(config, userMessage, systemPrompt) {
     } else if (provider.authType === 'api-key' && apiKey) {
         headers['api-key'] = apiKey;
     } else if (provider.authType === 'query_key' && apiKey) {
-        finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
+        finalEndpoint = addEndpointQuery(endpoint, 'key', apiKey);
     }
     const response = await fetchWithTauri(finalEndpoint, {
         method: 'POST',
         headers,
-        body: requestBody
+        body: requestBody,
+        signal
     });
     if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
+        const errorText = await readAiResponseText(response);
+        throw providerHttpError(response.status, errorText, [apiKey, secretKey]);
     }
-    const responseData = await response.json();
-    return parseResponse(provider, responseData);
+    const responseData = await readAiResponseJson(response);
+    throwIfAborted(signal);
+    return parseResponse(provider, responseData, [apiKey, secretKey]);
 }
 
 export async function callAIWithMessagesAndTools(config, messages, tools = [], options = {}) {
+    const signal = options.signal || config.signal;
+    throwIfAborted(signal);
+    if (!Array.isArray(tools) || tools.length > 64 || JSON.stringify(tools).length > 128000) throw new Error("Invalid AI tool definitions");
     const providerId = config.provider || 'g4f-default';
 
     if (!canProviderUseNativeTools(providerId, config)) {
@@ -1073,8 +1105,8 @@ export async function callAIWithMessagesAndTools(config, messages, tools = [], o
     Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
-        const accessToken = await getBaiduAccessToken(apiKey, secretKey);
-        finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
+        const accessToken = await getBaiduAccessToken(apiKey, secretKey, signal);
+        finalEndpoint = addEndpointQuery(endpoint, 'access_token', accessToken);
     } else if (provider.authType === 'bearer' && apiKey) {
         headers['Authorization'] = 'Bearer ' + apiKey;
     } else if (provider.authType === 'x-api-key' && apiKey) {
@@ -1082,34 +1114,39 @@ export async function callAIWithMessagesAndTools(config, messages, tools = [], o
     } else if (provider.authType === 'api-key' && apiKey) {
         headers['api-key'] = apiKey;
     } else if (provider.authType === 'query_key' && apiKey) {
-        finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
+        finalEndpoint = addEndpointQuery(endpoint, 'key', apiKey);
     }
     const response = await fetchWithTauri(finalEndpoint, {
         method: 'POST',
         headers,
-        body: requestBody
+        body: requestBody,
+        signal
     });
     if (!response.ok) {
-        const errorText = await response.text();
-        const error = new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
-        if (/tool|function|unsupported|not support|不支持/i.test(errorText)) {
+        const errorText = await readAiResponseText(response);
+        const error = providerHttpError(response.status, errorText, [apiKey, secretKey]);
+        if ([400, 404, 422].includes(response.status) && /(?:tools?|function)[\s\S]{0,80}(?:unsupported|not support|not allowed)|(?:unsupported|not support|unknown)[\s\S]{0,80}(?:tools?|function)|不支持[\s\S]{0,40}(?:工具|函数)/i.test(errorText)) {
             error.nativeToolUnsupported = true;
         }
         throw error;
     }
-    const responseData = await response.json();
-    return parseResponseWithToolCalls(provider, responseData);
+    const responseData = await readAiResponseJson(response);
+    throwIfAborted(signal);
+    return parseResponseWithToolCalls(provider, responseData, [apiKey, secretKey]);
 }
 
-export async function callAIWithMessages(config, messages) {
+export async function callAIWithMessages(config, messages, options = {}) {
+    const signal = options.signal || config.signal;
+    throwIfAborted(signal);
     const providerId = config.provider || 'g4f-default';
 
     if (isG4FProvider(providerId)) {
-        return await chatWithG4F(providerId, config.model, messages, {
+        return await abortable(chatWithG4F(providerId, config.model, messages, {
             apiKey: config.apiKey,
             temperature: config.temperature,
-            maxTokens: config.maxTokens
-        });
+            maxTokens: config.maxTokens,
+            signal
+        }), signal);
     }
 
         const provider = PROVIDER_CONFIGS[providerId];
@@ -1140,8 +1177,8 @@ export async function callAIWithMessages(config, messages) {
     const requiresApiKey = provider.authType !== 'none' && !isLocal && !isCustomProvider;
     if (requiresApiKey && !apiKey) throw new Error('未配置 API Key');
     const requestBody = buildRequestBody(provider, model, messages, {
-        temperature: config.temperature || 0.7,
-        maxTokens: config.maxTokens || 2048,
+        temperature: config.temperature ?? 0.7,
+        maxTokens: config.maxTokens ?? 2048,
         stream: false
     });
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
@@ -1151,8 +1188,8 @@ export async function callAIWithMessages(config, messages) {
     Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
-        const accessToken = await getBaiduAccessToken(apiKey, secretKey);
-        finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
+        const accessToken = await getBaiduAccessToken(apiKey, secretKey, signal);
+        finalEndpoint = addEndpointQuery(endpoint, 'access_token', accessToken);
     } else if (provider.authType === 'bearer' && apiKey) {
         headers['Authorization'] = 'Bearer ' + apiKey;
     } else if (provider.authType === 'x-api-key' && apiKey) {
@@ -1160,36 +1197,41 @@ export async function callAIWithMessages(config, messages) {
     } else if (provider.authType === 'api-key' && apiKey) {
         headers['api-key'] = apiKey;
     } else if (provider.authType === 'query_key' && apiKey) {
-        finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
+        finalEndpoint = addEndpointQuery(endpoint, 'key', apiKey);
     }
     const response = await fetchWithTauri(finalEndpoint, {
         method: 'POST',
         headers,
-        body: requestBody
+        body: requestBody,
+        signal
     });
     if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
+        const errorText = await readAiResponseText(response);
+        throw providerHttpError(response.status, errorText, [apiKey, secretKey]);
     }
-    const responseData = await response.json();
-    return parseResponse(provider, responseData);
+    const responseData = await readAiResponseJson(response);
+    throwIfAborted(signal);
+    return parseResponse(provider, responseData, [apiKey, secretKey]);
 }
 
-export async function callAIWithMessagesStream(config, messages, onChunk, { signal } = {}) {
+export async function callAIWithMessagesStream(config, messages, onChunk, options = {}) {
+    const signal = options.signal || config.signal;
+    throwIfAborted(signal);
     const providerId = config.provider || 'g4f-default';
 
     if (isG4FProvider(providerId)) {
-        return await streamChatWithG4F(
+        return await abortable(streamChatWithG4F(
             providerId,
             config.model,
             messages,
             {
                 apiKey: config.apiKey,
                 temperature: config.temperature,
-                maxTokens: config.maxTokens
+                maxTokens: config.maxTokens,
+                signal
             },
-            onChunk
-        );
+            (delta, content) => { if (!signal?.aborted) onChunk?.(delta, content); }
+        ), signal);
     }
 
         const provider = PROVIDER_CONFIGS[providerId];
@@ -1220,8 +1262,8 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
     const requiresApiKey = provider.authType !== 'none' && !isLocal && !isCustomProvider;
     if (requiresApiKey && !apiKey) throw new Error('未配置 API Key');
     const requestBody = buildRequestBody(provider, model, messages, {
-        temperature: config.temperature || 0.7,
-        maxTokens: config.maxTokens || 2048,
+        temperature: config.temperature ?? 0.7,
+        maxTokens: config.maxTokens ?? 2048,
         stream: true
     });
     const headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' };
@@ -1231,8 +1273,8 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
     Object.assign(headers, resolveRequestHeaders(config));
     let finalEndpoint = endpoint;
     if (provider.authType === 'baidu_token') {
-        const accessToken = await getBaiduAccessToken(apiKey, secretKey);
-        finalEndpoint = endpoint + '?access_token=' + encodeURIComponent(accessToken);
+        const accessToken = await getBaiduAccessToken(apiKey, secretKey, signal);
+        finalEndpoint = addEndpointQuery(endpoint, 'access_token', accessToken);
     } else if (provider.authType === 'bearer' && apiKey) {
         headers['Authorization'] = 'Bearer ' + apiKey;
     } else if (provider.authType === 'x-api-key' && apiKey) {
@@ -1240,116 +1282,82 @@ export async function callAIWithMessagesStream(config, messages, onChunk, { sign
     } else if (provider.authType === 'api-key' && apiKey) {
         headers['api-key'] = apiKey;
     } else if (provider.authType === 'query_key' && apiKey) {
-        finalEndpoint = endpoint + '?key=' + encodeURIComponent(apiKey);
+        finalEndpoint = addEndpointQuery(endpoint, 'key', apiKey);
     }
     let fullContent = '';
     const safeUrl = normalizeHttpEndpoint(finalEndpoint);
     const bodyStr = JSON.stringify(requestBody);
-    console.log('[Stream] callAIWithMessagesStream called, url:', safeUrl, 'stream:', requestBody.stream, 'TAURI:', isTauriRuntime);
-
+    let reader;
+    const publish = delta => {
+        throwIfAborted(signal);
+        if (!delta) return;
+        if (typeof delta !== 'string') throw new Error('AI returned invalid text content');
+        if (fullContent.length + delta.length > MAX_AI_RESPONSE_CHARS) throw new Error('AI response exceeds the supported size');
+        fullContent += delta;
+        onChunk?.(delta, fullContent);
+    };
     try {
-        let response;
-        if (isTauriRuntime) {
-            const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-            const tauriHeaders = {};
-            for (const [k, v] of Object.entries(headers)) {
-                if (v !== undefined && v !== null) tauriHeaders[k] = String(v);
-            }
-            response = await tauriFetch(safeUrl, {
-                method: 'POST',
-                headers: tauriHeaders,
-                body: bodyStr,
-                ...(signal ? { signal } : {})
-            });
-        } else {
-            response = await fetch(safeUrl, {
-                method: 'POST',
-                headers,
-                body: bodyStr,
-                ...(signal ? { signal } : {})
-            });
-        }
+        const response = await fetchWithTauri(safeUrl, {
+            method: 'POST', headers, body: bodyStr, signal
+        });
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error('HTTP ' + response.status + ': ' + errorText.substring(0, 500));
+            throw providerHttpError(response.status, await readAiResponseText(response), [apiKey, secretKey]);
         }
         const contentType = response.headers?.get?.('content-type') || '';
-        console.log('[Stream] response ok, content-type:', contentType, 'body type:', typeof response.body, 'hasGetReader:', typeof response.body?.getReader);
-
-        const isJsonResponse = contentType.includes('application/json');
-        if (!response.body || typeof response.body.getReader !== 'function' || isJsonResponse) {
-            console.log('[Stream] non-stream response detected, parsing as whole response');
-            const text = await response.text();
-            try {
-                const json = JSON.parse(text);
-                fullContent = parseResponse(provider, json);
-                if (onChunk && fullContent) onChunk(fullContent, fullContent);
-            } catch {
-                fullContent = text;
-                if (onChunk && fullContent) onChunk(fullContent, fullContent);
-            }
-            return fullContent || await callAIWithMessages(config, messages);
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let chunkCount = 0;
-        while (true) {
-            if (signal?.aborted) {
-                await reader.cancel();
-                break;
-            }
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunkCount++;
-            const text = decoder.decode(value, { stream: true });
-            if (chunkCount <= 3) console.log('[Stream] chunk #' + chunkCount + ', length:', text.length, 'preview:', text.substring(0, 100));
-            buffer += text;
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            for (const line of lines) {
-                const trimmedLine = line.trim();
-                if (!trimmedLine || trimmedLine === 'data: [DONE]') continue;
-                if (trimmedLine.startsWith('data: ')) {
-                    try {
-                        const jsonStr = trimmedLine.slice(6);
-                        const chunk = JSON.parse(jsonStr);
-                        const delta = parseStreamChunk(provider, chunk);
-                        if (delta) {
-                            fullContent += delta;
-                            if (onChunk) onChunk(delta, fullContent);
-                        }
-                    } catch (e) {
-                        continue;
-                    }
-                }
-            }
-        }
-        if (buffer.trim()) {
-            const trimmedLine = buffer.trim();
-            if (trimmedLine.startsWith('data: ') && trimmedLine !== 'data: [DONE]') {
-                try {
-                    const chunk = JSON.parse(trimmedLine.slice(6));
-                    const delta = parseStreamChunk(provider, chunk);
-                    if (delta) {
-                        fullContent += delta;
-                        if (onChunk) onChunk(delta, fullContent);
-                    }
-                } catch (e) { /* ignore */ }
-            }
-        }
-    } catch (e) {
-        if (signal?.aborted) {
-            console.log('[Stream] aborted by user, returning partial content');
+        if (!response.body?.getReader || contentType.includes('application/json')) {
+            const text = await readAiResponseText(response);
+            throwIfAborted(signal);
+            if (text.length > MAX_AI_RESPONSE_CHARS) throw new Error('AI response exceeds the supported size');
+            let data;
+            try { data = JSON.parse(text); } catch { throw new Error('AI returned an invalid JSON response'); }
+            publish(parseResponse(provider, data, [apiKey, secretKey]));
+            if (!fullContent) throw new Error('AI returned no text content');
             return fullContent;
         }
-        console.warn('[Stream] streaming failed, falling back to non-stream:', e.message || e, e);
-        if (fullContent) return fullContent;
-        return await callAIWithMessages(config, messages);
+        reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const parsePayload = payload => {
+            let data;
+            try { data = JSON.parse(payload); } catch { throw new Error('AI returned malformed stream data'); }
+            if (data.error || data.type === 'error') throw new Error('API error: ' + safeProviderError(data.error || data, [apiKey, secretKey]));
+            publish(parseStreamChunk(provider, data));
+        };
+        const parser = createAiStreamParser(payload => {
+            try { JSON.parse(payload); } catch {
+                // A few compatible gateways omit SSE's blank-line delimiter.
+                // Accept complete JSON per line, but never discard malformed data.
+                const lines = payload.split('\n');
+                if (lines.length < 2) throw new Error('AI returned malformed stream data');
+                for (const line of lines) parsePayload(line);
+                return;
+            }
+            parsePayload(payload);
+        }, { jsonLines: provider.bodyFormat === 'ollama' || contentType.includes('ndjson') });
+        while (!parser.ended) {
+            throwIfAborted(signal);
+            const { done, value } = await abortable(reader.read(), signal);
+            if (done) break;
+            parser.feed(decoder.decode(value, { stream: true }));
+        }
+        parser.feed(decoder.decode());
+        parser.finish();
+        throwIfAborted(signal);
+        if (!fullContent) throw new Error('AI returned no text content');
+        return fullContent;
+    } catch (error) {
+        if (signal?.aborted) return fullContent;
+        // Do not silently resend an accepted request on auth/rate errors, malformed
+        // responses or stream interruption. The UI offers an explicit retry.
+        const failure = new Error(safeProviderError(error, [apiKey, secretKey]));
+        if (error?.status) failure.status = error.status;
+        if (fullContent) failure.partialContent = fullContent;
+        throw failure;
+    } finally {
+        if (reader) {
+            try { await reader.cancel(); } catch { /* Request may already be closed. */ }
+            reader.releaseLock();
+        }
     }
-    console.log('[Stream] completed, fullContent length:', fullContent.length);
-    return fullContent || await callAIWithMessages(config, messages);
 }
 
 export async function testConnection(config) {

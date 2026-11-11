@@ -15,6 +15,7 @@
     import { pickTrustedDirectory } from "../utils/local-file-tools.js";
     import VaultwardenImport from "./VaultwardenImport.svelte";
     import DataRepairModal from "./DataRepairModal.svelte";
+    import VaultProtectionSettings from './VaultProtectionSettings.svelte';
     import {
         DATABASE_PROVIDER_CATALOG,
         DATABASE_SETUP_SQL,
@@ -505,6 +506,8 @@
         class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 overscroll-contain pb-32 md:pb-40 min-h-0"
         style="-webkit-overflow-scrolling: touch;"
     >
+        <VaultProtectionSettings />
+
         <!-- 外观设置 -->
         <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
             <div class="px-4 md:px-6 py-3 md:py-4 border-b border-slate-50 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
@@ -1070,9 +1073,12 @@
                                         value={$settingsStore.databaseConfig?.apiKey || ''}
                                         on:input={(e) => updateDatabaseField('apiKey', e.target.value)}
                                         type="password"
-                                        placeholder="service role / anon / gateway token"
+                                        placeholder="publishable / anon 公钥（禁止 secret / service_role）"
                                         class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400 font-mono"
                                     />
+                                    <p class="mt-1.5 text-xs text-amber-700 dark:text-amber-300">
+                                        客户端只能使用公钥；请在数据库后台启用 RLS 并执行 docs/sql/rls_security.sql。切勿填入管理密钥。
+                                    </p>
                                 </div>
                                 <div>
                                     <label for="database-table-name" class="text-xs font-bold text-slate-500 uppercase mb-2 block">

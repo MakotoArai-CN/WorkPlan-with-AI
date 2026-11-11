@@ -1,5 +1,6 @@
 <script>
     import { buildAutocompleteContext, normalizeSuggestion } from '../utils/notes-autocomplete.js';
+    import { createLatestEditorRequest, noteDraftChanged, rangeAtBlockStart, rangeAtEditorEnd } from '../utils/notes-editor.js';
     import { isTableRowLine, tableFromRow } from '../utils/markdown-table.js';
     import { matchesSearchQuery } from '../utils/search-text.js';
     import SelectMenu from './SelectMenu.svelte';
@@ -7,6 +8,8 @@
     import { notesStore, activeNote, notesList, noteCategories } from "../stores/notes.js";
     import { showConfirm, showToast } from "../stores/modal.js";
     import { renderMarkdown } from "../utils/markdown.js";
+    import { sanitizeEditorPreview, hardenVditorLute } from "../utils/safe-html.js";
+    import { safeImageUrl, safeLinkUrl } from "../utils/safe-content.js";
     import {
         exportToMarkdown,
         exportNotesToWord,
@@ -52,6 +55,8 @@
     let editorInitializing = false;
     let editorError = '';
     let autoSaveTimer = null;
+    let editingNoteId = null;
+    let editorComposing = false;
     let selectedCategory = null;
     let selectMode = false;
     let selectedNoteIds = new Set();
@@ -60,8 +65,9 @@
     let showCategoryPanel = false;
     let newCategoryName = '';
     let aiSuggestion = '';
-    let aiSuggestionToken = 0;
     let aiSuggestionTimer = null;
+    let aiAutocompleteEnabled = false;
+    const suggestionRequest = createLatestEditorRequest();
     let autoSaveEnabled = true;
     export let openDetailPanel = null;
 
@@ -104,6 +110,7 @@
         if (saved !== null) {
             autoSaveEnabled = saved === "true";
         }
+        aiAutocompleteEnabled = localStorage.getItem('workplan_notes_ai_autocomplete') === 'true';
     });
 
     onDestroy(() => {
@@ -111,9 +118,7 @@
         document.removeEventListener("keydown", handleKeydown);
         flushPendingEdits();
         void destroyEditor();
-        if (aiSuggestionTimer) {
-            clearTimeout(aiSuggestionTimer);
-        }
+        cancelAiSuggestion();
     });
 
     function measureNotePill() {
@@ -131,7 +136,7 @@
     }
 
     function handleKeydown(e) {
-        if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        if (!e.isComposing && !editorComposing && (e.ctrlKey || e.metaKey) && e.key === "s") {
             e.preventDefault();
             if (editMode && $activeNote) {
                 saveNote();
@@ -146,12 +151,44 @@
 
     function toggleAutoSave() {
         autoSaveEnabled = !autoSaveEnabled;
+        if (!autoSaveEnabled) cancelAutoSave();
+        else if (editMode) scheduleAutoSave();
         localStorage.setItem("workplan_notes_autosave", String(autoSaveEnabled));
         const t = get(_);
         showToast({
             message: autoSaveEnabled ? t('notes.auto_save_on') : t('notes.auto_save_off'),
             type: "info",
             duration: 1500,
+        });
+    }
+
+    function toggleAiAutocomplete() {
+        aiAutocompleteEnabled = !aiAutocompleteEnabled;
+        localStorage.setItem('workplan_notes_ai_autocomplete', String(aiAutocompleteEnabled));
+        cancelAiSuggestion();
+        if (aiAutocompleteEnabled && editMode) scheduleAiSuggestion(editContent);
+    }
+
+    function cancelAiSuggestion() {
+        if (aiSuggestionTimer) clearTimeout(aiSuggestionTimer);
+        aiSuggestionTimer = null;
+        suggestionRequest.invalidate();
+        aiSuggestion = '';
+    }
+
+    function handleCompositionStart() {
+        editorComposing = true;
+        cancelAutoSave();
+        cancelAiSuggestion();
+    }
+
+    function handleCompositionEnd() {
+        editorComposing = false;
+        queueMicrotask(() => {
+            if (!editMode || !editingNoteId) return;
+            syncContentFromEditor();
+            scheduleAutoSave();
+            scheduleAiSuggestion(editContent);
         });
     }
 
@@ -200,7 +237,13 @@
             icon: "material",
             placeholder: get(_)('notes.start_typing'),
             cache: { enable: false },
-            value: editContent,
+            // Install the live-preview policy before exposing any stored note.
+            value: '',
+            preview: {
+                markdown: { sanitize: true, codeBlockPreview: false, mathBlockPreview: true },
+                transform: sanitizeEditorPreview,
+                render: { media: { enable: false } },
+            },
             tab: "\t", // Insert tab character on Tab key
             toolbarConfig: {
                 pin: true,
@@ -241,7 +284,7 @@
                 handler: async (files) => {
                     const file = files[0];
                     if (!file) return;
-                    if (!file.type.startsWith("image/")) {
+                    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/bmp'].includes(file.type)) {
                         showToast({
                             message: get(_)('notes.only_image'),
                             type: "warning",
@@ -250,6 +293,7 @@
                     }
                     try {
                         const dataUrl = await readFileAsDataUrl(file);
+                        if (!safeImageUrl(dataUrl)) throw new Error('unsupported_image');
                         const safeName = sanitizeUploadName(
                             file.name.replace(/\.[^.]+$/, ""),
                         );
@@ -271,12 +315,12 @@
                 if (autoSaveEnabled) {
                     scheduleAutoSave();
                 }
-                if (aiSuggestionTimer) clearTimeout(aiSuggestionTimer);
-                aiSuggestion = '';
-                aiSuggestionTimer = setTimeout(() => requestAiSuggestion(value), 600);
+                scheduleAiSuggestion(value);
             },
             keydown: (e) => {
                 if (instance !== vditorInstance) return;
+                if (e.isComposing || editorComposing || e.keyCode === 229) return;
+                if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Escape'].includes(e.key)) cancelAiSuggestion();
                 // Backspace at the start of a paragraph used to swallow the
                 // blank line above it in one press. Step into that empty line
                 // first; a second press then merges, which is what users expect.
@@ -288,7 +332,7 @@
                             const node = range.startContainer;
                             const element = node.nodeType === 3 ? node.parentElement : node;
                             const block = element?.closest?.('p');
-                            if (block && range.startOffset === 0) {
+                            if (block && rangeAtBlockStart(range, block)) {
                                 const previous = block.previousElementSibling;
                                 const previousEmpty = previous
                                     && previous.tagName === 'P'
@@ -319,16 +363,33 @@
                         const anchor = selection?.anchorNode;
                         if (anchor) {
                             const element = anchor.nodeType === 3 ? anchor.parentElement : anchor;
-                            const block = element?.closest?.('p, li, div');
+                            const block = element?.closest?.('p[data-block]');
                             const text = (block?.textContent || '').trim();
-                            if (block && isTableRowLine(text) && vditorInstance) {
-                                const value = vditorInstance.getValue();
-                                const lines = value.split('\n');
-                                const index = lines.findIndex((line) => line.trim() === text);
-                                if (index >= 0) {
+                            if (block && block.parentElement === instance.vditor.ir.element
+                                && isTableRowLine(text) && vditorInstance && selection.isCollapsed) {
+                                const range = selection.getRangeAt(0);
+                                if (rangeAtEditorEnd(range, block)) {
                                     e.preventDefault();
-                                    lines.splice(index, 1, ...tableFromRow(text).split('\n'));
-                                    vditorInstance.setValue(lines.join('\n'));
+                                    instance.vditor.undo.addToUndoStack(instance.vditor);
+                                    range.selectNode(block);
+                                    selection.removeAllRanges();
+                                    selection.addRange(range);
+                                    // Replace only this block through an editable transaction.
+                                    // A full setValue() replaced the first duplicate row and reset undo/caret.
+                                    const html = instance.vditor.lute.Md2VditorIRDOM(tableFromRow(text));
+                                    instance.updateValue(html);
+                                    const anchorElement = selection.anchorNode?.nodeType === 3
+                                        ? selection.anchorNode.parentElement : selection.anchorNode;
+                                    const table = anchorElement?.closest?.('table');
+                                    const firstCell = table?.querySelector('tbody td');
+                                    if (firstCell) {
+                                        const caret = document.createRange();
+                                        caret.selectNodeContents(firstCell);
+                                        caret.collapse(true);
+                                        selection.removeAllRanges();
+                                        selection.addRange(caret);
+                                    }
+                                    instance.vditor.undo.addToUndoStack(instance.vditor);
                                     return true;
                                 }
                             }
@@ -340,9 +401,9 @@
                 if (e.key === 'Tab' && aiSuggestion && !e.shiftKey) {
                     e.preventDefault();
                     if (vditorInstance) {
-                        const cur = vditorInstance.getValue();
-                        vditorInstance.insertValue(aiSuggestion);
-                        aiSuggestion = '';
+                        // insertValue() accepts raw HTML. AI suggestions must enter as text.
+                        document.execCommand('insertText', false, aiSuggestion);
+                        cancelAiSuggestion();
                     }
                     return true;
                 }
@@ -352,11 +413,15 @@
                     instance.destroy();
                     return;
                 }
+                hardenVditorLute(instance.vditor.lute);
                 vditorInstance = instance;
                 activeEditorType = 'vditor';
                 if (editContent) {
                     instance.setValue(editContent);
                 }
+                // The first undo must return to this note, not the empty
+                // constructor buffer when typing begins before undoDelay.
+                instance.clearStack();
                 normalizeVditorEditable(container, token, { focus: true });
             },
         });
@@ -387,6 +452,7 @@
                     if (autoSaveEnabled) {
                         scheduleAutoSave();
                     }
+                    scheduleAiSuggestion(markdown);
                 });
             })
             .use(commonmark)
@@ -403,26 +469,22 @@
     }
 
     function scheduleAutoSave() {
-        if (!autoSaveEnabled) return;
+        if (!autoSaveEnabled || editorComposing) return;
         if (autoSaveTimer) {
             clearTimeout(autoSaveTimer);
         }
-        const noteId = $activeNote?.id;
+        const noteId = editingNoteId;
         if (!noteId) return;
         autoSaveTimer = setTimeout(() => {
             autoSaveTimer = null;
             // Only write back to the note that was active when the edit happened;
             // a pending save must never land on a note the user just switched to.
-            if (!editMode || $activeNote?.id !== noteId) return;
-            syncContentFromEditor();
+            if (!editMode || editorComposing || editingNoteId !== noteId) return;
+            const note = get(notesStore).notes.find(item => item.id === noteId);
+            if (!noteDraftChanged(note, editTitle, editContent)) return;
             notesStore.updateNote(noteId, {
                 title: editTitle,
                 content: editContent,
-            });
-            showToast({
-                message: get(_)('notes.auto_saved'),
-                type: "success",
-                duration: 1000,
             });
         }, 2000);
     }
@@ -440,7 +502,7 @@
     function flushPendingEdits() {
         cancelAutoSave();
         if (!editMode) return;
-        const note = $activeNote;
+        const note = get(notesStore).notes.find(item => item.id === editingNoteId);
         if (!note) return;
         syncContentFromEditor();
         notesStore.updateNote(note.id, {
@@ -500,6 +562,7 @@
         }
         const defaultTitle = $_('notes.new_note_title');
         notesStore.addNote({ title: defaultTitle, content: "" });
+        editingNoteId = $activeNote?.id;
         editMode = true;
         editTitle = defaultTitle;
         editContent = "";
@@ -521,6 +584,7 @@
 
     async function startEdit() {
         if ($activeNote) {
+            editingNoteId = $activeNote.id;
             editTitle = $activeNote.title;
             editContent = $activeNote.content;
             editMode = true;
@@ -556,6 +620,9 @@
     }
 
     async function destroyEditor({ cancelPending = true } = {}) {
+        cancelAiSuggestion();
+        editorComposing = false;
+        if (cancelPending) cancelAutoSave();
         if (cancelPending) {
             editorInitToken += 1;
             editorInitializing = false;
@@ -614,8 +681,9 @@
             let payload = item.payload;
             if (item.prompt) {
                 const href = window.prompt('URL');
-                if (!href) return;
-                payload = { href };
+                const safeHref = safeLinkUrl(href);
+                if (!safeHref) return;
+                payload = { href: safeHref };
             }
 
             milkdownEditor.action((ctx) => {
@@ -652,38 +720,44 @@
     }
 
     async function saveNote() {
-        if ($activeNote) {
+        if (editorComposing) return;
+        if (editingNoteId) {
             cancelAutoSave();
             syncContentFromEditor();
-            notesStore.updateNote($activeNote.id, {
+            notesStore.updateNote(editingNoteId, {
                 title: editTitle,
                 content: editContent,
             });
             await destroyEditor();
             editMode = false;
             editingTitle = false;
+            editingNoteId = null;
         }
     }
 
     async function cancelEdit() {
+        cancelAutoSave();
         await destroyEditor();
         editMode = false;
         editTitle = "";
         editContent = "";
         editingTitle = false;
+        editingNoteId = null;
     }
 
     async function deleteNote() {
-        if (!$activeNote) return;
+        const note = $activeNote;
+        if (!note) return;
+        const accountKey = localStorage.getItem('workplan_access_key');
         const confirmed = await showConfirm({
             title: $_('notes.delete_note'),
-            message: $_('notes.delete_confirm', { values: { title: $activeNote.title } }),
+            message: $_('notes.delete_confirm', { values: { title: note.title } }),
             confirmText: $_('common.delete'),
             cancelText: $_('common.cancel'),
             variant: "danger",
         });
-        if (confirmed) {
-            notesStore.deleteNote($activeNote.id);
+        if (confirmed && accountKey === localStorage.getItem('workplan_access_key')) {
+            notesStore.deleteNote(note.id);
         }
     }
 
@@ -698,8 +772,8 @@
         const noteCategory = $activeNote.category || $_('notes.category_all');
         const noteContent = ($activeNote.content || '').trim();
         const draft = mode === 'summary'
-            ? `我正在整理一篇工作笔记，请基于下面的内容生成一份结构清晰的摘要，并给出后续可执行建议。\n\n标题：${noteTitle}\n分类：${noteCategory}\n内容：\n${noteContent || '（当前为空）'}`
-            : `我正在处理一篇工作笔记，请结合下面这篇笔记继续协助我。你可以帮我总结、扩写、润色、拆分行动项，或者回答与内容相关的问题。\n\n标题：${noteTitle}\n分类：${noteCategory}\n内容：\n${noteContent || '（当前为空）'}`;
+            ? $_('notes.ai_panel_quick_summary')
+            : $_('notes.ai_panel_general_draft');
 
         configureAiPanel({
             scope: 'notes',
@@ -811,15 +885,33 @@
         tick().then(measureNotePill);
     }
 
-    async function requestAiSuggestion(currentText) {
-        if (!currentText || currentText.length < 20) return;
+    function editorCaretAtEnd() {
+        const selection = window.getSelection();
+        const editable = vditorInstance?.vditor?.ir?.element
+            || milkdownContainer?.querySelector('.ProseMirror');
+        return !!selection?.rangeCount && rangeAtEditorEnd(selection.getRangeAt(0), editable);
+    }
+
+    function scheduleAiSuggestion(currentText) {
+        cancelAiSuggestion();
+        if (!aiAutocompleteEnabled || editorComposing || !editMode || $activeNote?.aiLocked || currentText.length < 20) return;
+        const noteId = editingNoteId;
+        aiSuggestionTimer = setTimeout(() => {
+            aiSuggestionTimer = null;
+            if (noteId !== editingNoteId || currentText !== editContent || !editorCaretAtEnd()) return;
+            void requestAiSuggestion(currentText, noteId);
+        }, 1400);
+    }
+
+    async function requestAiSuggestion(currentText, noteId) {
+        if (!aiAutocompleteEnabled || editorComposing || $activeNote?.aiLocked) return;
         const config = getEffectiveConfig();
         const needsApiKey = providerRequiresApiKey(config.provider);
         if (needsApiKey && !config.apiKey) return;
-        const tail = currentText.split('\n').slice(-3).join('\n');
+        const tail = currentText.slice(-1200).split('\n').slice(-3).join('\n');
         if (tail.trim().length < 8) return;
 
-        const token = ++aiSuggestionToken;
+        const request = suggestionRequest.begin();
         try {
             const { callAIWithMessages } = await import('../utils/ai-providers.js');
             const context = buildAutocompleteContext({
@@ -831,14 +923,16 @@
                 [
                     { role: 'system', content: t('notes.ai_autocomplete_system_prompt') },
                     { role: 'user', content: context }
-                ]
+                ],
+                { signal: request.signal, maxTokens: 300 }
             );
             // Ignore responses that arrive after newer typing or an editor swap.
-            if (token !== aiSuggestionToken) return;
+            if (!suggestionRequest.isCurrent(request) || noteId !== editingNoteId || !editMode
+                || $activeNote?.aiLocked || currentText !== editContent || !editorCaretAtEnd()) return;
             const suggestion = normalizeSuggestion(result || '', tail);
             aiSuggestion = suggestion;
         } catch (e) {
-            if (token === aiSuggestionToken) aiSuggestion = '';
+            if (suggestionRequest.isCurrent(request)) aiSuggestion = '';
         }
     }
 
@@ -889,6 +983,15 @@
             </div>
         </div>
         <div class="flex items-center gap-2">
+            <button type="button" on:click={toggleAiAutocomplete}
+                class="h-9 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                class:bg-blue-50={aiAutocompleteEnabled} class:text-blue-700={aiAutocompleteEnabled}
+                class:text-slate-400={!aiAutocompleteEnabled}
+                aria-label={$_('notes.ai_autocomplete_toggle')} aria-pressed={aiAutocompleteEnabled}
+                title={aiAutocompleteEnabled ? $_('notes.ai_autocomplete_on') : $_('notes.ai_autocomplete_off')}>
+                <i class="ph ph-pencil-line"></i>
+                <span class="hidden md:inline">{$_('notes.ai_autocomplete_toggle')}</span>
+            </button>
             <button
                 on:click={toggleAutoSave}
                 class="h-9 px-3 rounded-lg text-sm font-medium flex items-center gap-1.5 transition"
@@ -1172,7 +1275,8 @@
                         </div>
                     </div>
                 {/if}
-                <div class="flex-1 overflow-hidden flex flex-col relative">
+                <div class="flex-1 min-h-0 overflow-hidden flex flex-col relative"
+                    on:compositionstart={handleCompositionStart} on:compositionend={handleCompositionEnd}>
                     {#if editMode}
                         {#if aiSuggestion}
                             <div class="absolute bottom-4 left-4 right-4 z-10 pointer-events-none">

@@ -33,7 +33,7 @@
         { id: 'paste', label: $_('context_menu.paste'), icon: 'ph-clipboard', shortcut: 'Ctrl+V', show: frozenState.hasFocusedInput },
         { id: 'divider2', type: 'divider', show: true },
         { id: 'createTask', label: $_('context_menu.create_task'), icon: 'ph-plus-circle', shortcut: 'Ctrl+N', show: true },
-        { id: 'aiChat', label: $_('nav.ai_chat'), icon: 'ph-robot', shortcut: 'Ctrl+I', show: true },
+        { id: 'aiChat', label: $_('nav.ai_chat'), icon: 'ph-chat-teardrop-dots', shortcut: 'Ctrl+I', show: true },
         { id: 'divider3', type: 'divider', show: true },
         { id: 'dailyReport', label: $_('context_menu.daily_report'), icon: 'ph-sun', shortcut: '', show: true },
         { id: 'weeklyReport', label: $_('context_menu.weekly_report'), icon: 'ph-calendar-check', shortcut: '', show: true },

@@ -1,4 +1,5 @@
 import g4fConfig from '../../../g4f.dev/dist/js/providers.json';
+import { safeProviderError, throwIfAborted } from './ai-transport.js';
 
 let g4fModule = null;
 let g4fLoadPromise = null;
@@ -468,7 +469,9 @@ function extractContentFromG4FResponse(result) {
 }
 
 export async function chatWithG4F(providerId, model, messages, options = {}) {
+    throwIfAborted(options.signal);
     const client = await createG4FClient(providerId, options);
+    throwIfAborted(options.signal);
     let fullContent = '';
     let streamWorked = false;
 
@@ -480,6 +483,7 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
         });
 
         for await (const chunk of stream) {
+            throwIfAborted(options.signal);
             const delta = extractDeltaFromChunk(chunk);
             if (delta) {
                 fullContent += delta;
@@ -491,10 +495,13 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
             return fullContent;
         }
     } catch (streamError) {
-        console.warn('G4F stream failed, trying non-stream:', streamError.message);
+        throwIfAborted(options.signal);
+        if (fullContent) throw new Error('G4F stream interrupted; retry explicitly to avoid a duplicated request');
+        console.warn('G4F stream unavailable; trying non-stream');
     }
 
     if (!streamWorked) {
+        throwIfAborted(options.signal);
         try {
             const result = await client.chat.completions.create({
                 model: model || client.defaultModel || 'auto',
@@ -502,18 +509,14 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
                 stream: false
             });
 
+            throwIfAborted(options.signal);
             const content = extractContentFromG4FResponse(result);
             if (content) {
                 return content;
             }
         } catch (nonStreamError) {
-            const errorMessage = nonStreamError.message || String(nonStreamError);
-            if (errorMessage.includes('not valid JSON')) {
-                const match = errorMessage.match(/"([^"]+)"/);
-                if (match && match[1]) {
-                    return `${match[1]}...（响应被截断，请重试）`;
-                }
-            }
+            throwIfAborted(options.signal);
+            const errorMessage = safeProviderError(nonStreamError, [options.apiKey]);
             throw new Error(`G4F 请求失败: ${errorMessage}`);
         }
     }
@@ -522,7 +525,9 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
 }
 
 export async function streamChatWithG4F(providerId, model, messages, options = {}, onChunk) {
+    throwIfAborted(options.signal);
     const client = await createG4FClient(providerId, options);
+    throwIfAborted(options.signal);
     let fullContent = '';
     let streamWorked = false;
 
@@ -534,6 +539,7 @@ export async function streamChatWithG4F(providerId, model, messages, options = {
         });
 
         for await (const chunk of stream) {
+            throwIfAborted(options.signal);
             const delta = extractDeltaFromChunk(chunk);
             if (delta) {
                 fullContent += delta;
@@ -548,10 +554,17 @@ export async function streamChatWithG4F(providerId, model, messages, options = {
             return fullContent;
         }
     } catch (streamError) {
-        console.warn('G4F stream failed, fallback to non-stream:', streamError.message);
+        throwIfAborted(options.signal);
+        if (fullContent) {
+            const error = new Error('G4F stream interrupted; retry explicitly to avoid a duplicated request');
+            error.partialContent = fullContent;
+            throw error;
+        }
+        console.warn('G4F stream unavailable; trying non-stream');
     }
 
     if (!streamWorked || !fullContent) {
+        throwIfAborted(options.signal);
         try {
             const result = await client.chat.completions.create({
                 model: model || client.defaultModel || 'auto',
@@ -559,20 +572,15 @@ export async function streamChatWithG4F(providerId, model, messages, options = {
                 stream: false
             });
 
+            throwIfAborted(options.signal);
             const content = extractContentFromG4FResponse(result);
             if (content) {
-                if (onChunk) {
-                    let accumulated = '';
-                    for (const char of content.split('')) {
-                        accumulated += char;
-                        onChunk(char, accumulated);
-                        await new Promise((resolve) => setTimeout(resolve, 20));
-                    }
-                }
+                onChunk?.(content, content);
                 return content;
             }
         } catch (nonStreamError) {
-            const errorMessage = nonStreamError.message || String(nonStreamError);
+            throwIfAborted(options.signal);
+            const errorMessage = safeProviderError(nonStreamError, [options.apiKey]);
             throw new Error(`G4F 请求失败: ${errorMessage}`);
         }
     }

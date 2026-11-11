@@ -285,6 +285,12 @@
         max-width: 100%;
         height: auto;
     }
+    :global(.markdown-content .mermaid-container img) {
+        max-width: 100%;
+        height: auto;
+        box-shadow: none;
+        margin: 0 auto;
+    }
     :global(.markdown-content .mermaid-error) {
         background: #fef2f2;
         border: 1px solid #fecaca;

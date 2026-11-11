@@ -1,17 +1,26 @@
 export const PROTECTION_KEY = 'workplan_vault_protection';
+// Retained only to cancel pre-v2 deletion journals and prevent backup resurrection.
 export const ERASE_KEY = 'workplan_protection_erase';
+export const PROTECTION_ACTIONS = ['cooldown', 'disable_quick_unlock'];
 
 export function readProtection() {
     try {
         const value = JSON.parse(localStorage.getItem(PROTECTION_KEY) || '{}');
-        return { enabled: value.enabled === true, failures: Math.max(0, Number(value.failures) || 0), lockedUntil: Number(value.lockedUntil) || 0 };
+        // A destructive v1 policy is never silently carried into the new scheme.
+        if (value.version !== 2) return { version: 2, enabled: false, action: 'cooldown', failures: 0, lockedUntil: 0 };
+        return {
+            version: 2, enabled: value.enabled === true,
+            action: PROTECTION_ACTIONS.includes(value.action) ? value.action : 'cooldown',
+            failures: Math.max(0, Math.floor(Number(value.failures) || 0)),
+            lockedUntil: Math.max(0, Number(value.lockedUntil) || 0)
+        };
     } catch {
-        return { enabled: false, failures: 0, lockedUntil: 0 };
+        return { version: 2, enabled: false, action: 'cooldown', failures: 0, lockedUntil: 0 };
     }
 }
 
 export function writeProtection(value) {
-    localStorage.setItem(PROTECTION_KEY, JSON.stringify(value));
+    localStorage.setItem(PROTECTION_KEY, JSON.stringify({ ...value, version: 2 }));
 }
 
 export function nextProtectionFailure(state, now = Date.now()) {
@@ -21,70 +30,21 @@ export function nextProtectionFailure(state, now = Date.now()) {
     return { ...state, failures, lockedUntil: minutes ? now + minutes * 60000 : 0 };
 }
 
-export function readPendingErase() {
+export function migrateLegacyProtection() {
+    const state = readProtection();
+    writeProtection(state);
     try {
-        const value = JSON.parse(localStorage.getItem(ERASE_KEY) || 'null');
-        return value?.completed ? null : value;
-    } catch { return null; }
-}
-
-export function cloudRecordErased(key) {
-    return !!readPendingErase();
-}
-
-export function eraseRecordKeys(accessKey) {
-    if (!accessKey) return [];
-    return [accessKey, `__workplan_key_bundle_v2__:${accessKey}`,
-        ...['notes', 'vault', 'worklog'].flatMap(domain => [
-            `__workplan_secure_${domain}_v1__:${accessKey}`,
-            `__workplan_secure_${domain}_v2__:${accessKey}`
-        ])];
-}
-
-let retrying = null;
-
-// Keep a durable deletion journal, not vault content. Offline deletes retry on boot/online.
-export function retryPendingErase() {
-    if (retrying) return retrying;
-    retrying = (async () => {
-        const pending = readPendingErase();
-        if (!pending) return;
-        // A crash may have happened after journaling but before removing backups.
-        if (!pending.localErased) return;
-        const { deleteCloudRecord, waitForCloudWrites } = await import('../stores/tasks.js');
-        await waitForCloudWrites();
-        const results = await Promise.allSettled(pending.records.map(key => deleteCloudRecord(key, pending.databaseConfig)));
-        const remaining = pending.records.filter((_, index) => results[index].status === 'rejected');
-        const { persistEraseJournal } = await import('./local-db.js');
-        await persistEraseJournal(remaining.length ? { ...pending, records: remaining } : { completed: true, createdAt: pending.createdAt });
-    })().finally(() => { retrying = null; });
-    return retrying;
-}
-
-export async function executeProtectionErase() {
-    const { readDatabaseConfig, waitForCloudWrites } = await import('../stores/tasks.js');
-    const databaseConfig = readDatabaseConfig();
-    const pending = readPendingErase() || {
-        records: databaseConfig.url && databaseConfig.apiKey ? eraseRecordKeys(localStorage.getItem('workplan_access_key')) : [],
-        databaseConfig, createdAt: Date.now(), localErased: false
-    };
-    // Fence cloud reads/writes before yielding or touching the local database.
-    localStorage.setItem(ERASE_KEY, JSON.stringify(pending));
-    const { eraseLocalDatabase } = await import('./local-db.js');
-    await eraseLocalDatabase(pending);
-    const { persistEraseJournal } = await import('./local-db.js');
-    await persistEraseJournal({ ...pending, localErased: true });
-    await waitForCloudWrites();
-    // Boot retries cloud deletion after all old in-memory stores are gone.
-    location.reload();
-}
-
-export async function resumeProtectionErase() {
-    const pending = readPendingErase();
-    const protection = readProtection();
-    if ((pending && !pending.localErased) || (protection.enabled && protection.failures > 10)) {
-        await executeProtectionErase();
-        return true;
+        const old = JSON.parse(localStorage.getItem(ERASE_KEY) || 'null');
+        if (old && !old.completed) {
+            // Drop the cloud credentials and cancel every queued destructive action.
+            localStorage.setItem(ERASE_KEY, JSON.stringify({ completed: true, canceled: true, createdAt: old.createdAt }));
+        }
+    } catch {
+        localStorage.removeItem(ERASE_KEY);
     }
-    return false;
+    return state;
 }
+
+// Compatibility with existing sync/UI callers: automated deletion is retired.
+export function readPendingErase() { return null; }
+export function cloudRecordErased() { return false; }

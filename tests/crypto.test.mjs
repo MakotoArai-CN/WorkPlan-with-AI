@@ -92,6 +92,38 @@ describe('tamper detection', () => {
     });
 });
 
+describe('strict verifier compatibility', () => {
+    test('rejects malformed, fractional and excessive KDF work before verification', async () => {
+        const salt = 'ab'.repeat(16);
+        const digest = 'cd'.repeat(32);
+        for (const stored of [
+            `v2:${salt}:1:${digest}`, `v2:${salt}:1.9:${digest}`, `v2:${salt}:9999:${digest}`,
+            `v2:${salt}:2000001:${digest}`, `v2:${salt}:6e5:${digest}`, `v2:${salt}:NaN:${digest}`,
+            `v2:${'zz'.repeat(16)}:600000:${digest}`, `v2:${salt}:600000:bad`, `v2:${salt}:600000:${digest}:extra`
+        ]) {
+            expect(await verifyPassword('synthetic master', stored)).toBe(false);
+            expect(verifierNeedsUpgrade(stored)).toBe(true);
+        }
+    });
+
+    test('valid low-iteration and historical salted verifiers unlock and request an upgrade', async () => {
+        const secret = 'synthetic-compatible-master';
+        const salt = 'ab'.repeat(16);
+        const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), 'PBKDF2', false, ['deriveBits']);
+        const bytes = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new Uint8Array(16).fill(0xab), iterations: 10000, hash: 'SHA-256' }, material, 256);
+        const digest = [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        const verifier = `v2:${salt}:10000:${digest}`;
+        expect(await verifyPassword(secret, verifier)).toBe(true);
+        expect(await verifyPassword(secret, verifier.toUpperCase().replace('V2:', 'v2:'))).toBe(true);
+        expect(verifierNeedsUpgrade(verifier)).toBe(true);
+        const legacySalt = 'old-salt';
+        const legacyDigest = CryptoJS.PBKDF2(secret, legacySalt, { keySize: 8, iterations: 10000, hasher: CryptoJS.algo.SHA256 }).toString();
+        expect(await verifyPassword(secret, `${legacySalt}:${legacyDigest}`)).toBe(true);
+        expect(verifierNeedsUpgrade(`${legacySalt}:${legacyDigest}`)).toBe(true);
+        expect(verifierNeedsUpgrade(await hashPassword(secret))).toBe(false);
+    });
+});
+
 describe('legacy vault compatibility', () => {
     const password = 'old-pw';
 

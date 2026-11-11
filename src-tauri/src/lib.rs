@@ -26,6 +26,7 @@ use base64::Engine;
 mod autostart;
 mod device;
 mod local_db;
+mod vault_guard;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
 
@@ -1461,7 +1462,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler({
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             check_update,
             set_autostart,
             get_autostart_status,
@@ -1488,13 +1490,22 @@ pub fn run() {
             device::reset_device_key,
             local_db::local_db_load,
             local_db::local_db_save,
-            local_db::local_db_erase,
+            vault_guard::vault_verify_master,
             local_db::local_db_info,
             local_db::local_db_backup,
             local_db::local_db_restore,
             local_db::local_db_open_folder,
             local_db::local_db_recover
-        ]);
+            ];
+            move |invoke| {
+                let webview = invoke.message.webview_ref();
+                if webview.label() != "main" || !webview.url().map(|url| vault_guard::trusted_origin(&url)).unwrap_or(false) {
+                    invoke.resolver.reject("Untrusted application command origin");
+                    return true;
+                }
+                handler(invoke)
+            }
+        });
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
