@@ -316,7 +316,7 @@ export async function syncPasswordsNow({ manual = false } = {}) {
     try {
         const accessKey = getAccessKey();
         const accountKey = await portableAccountKey();
-        const local = passwordsStore.getPortableSyncPayload();
+        const local = await passwordsStore.getPortableSyncPayloadAsync();
         if (!local) throw new Error('请先解锁密码库');
         const cloud = await loadCloudRecord(domainRecordKey('vault', accessKey));
         const legacyCloud = cloud?.content?.ciphertext
@@ -515,17 +515,22 @@ function scheduleNotesSync() {
     }, DEBOUNCE_MS);
 }
 
+let lastScheduledPasswords = null;
+let lastScheduledCategories = null;
 function schedulePasswordsSync() {
     if (suppressPasswords > 0) return;
     if (!get(settingsStore).syncPasswords) return;
     const vault = get(passwordsStore);
     if (!vault.isUnlocked) return;
+    if (lastScheduledPasswords === vault.passwords && lastScheduledCategories === vault.categories) return;
+    lastScheduledPasswords = vault.passwords;
+    lastScheduledCategories = vault.categories;
     if (passwordsTimer) clearTimeout(passwordsTimer);
-    passwordsTimer = setTimeout(() => {
+    passwordsTimer = setTimeout(async () => {
         passwordsTimer = null;
         let payload = null;
         try {
-            payload = passwordsStore.getPortableSyncPayload();
+            payload = await passwordsStore.getPortableSyncPayloadAsync();
         } catch {
             return;
         }
@@ -548,7 +553,11 @@ export function initSecureSync() {
     const unsubscribeNotes = notesStore.subscribe(() => scheduleNotesSync());
     const unsubscribePasswords = passwordsStore.subscribe((vault) => {
         const unlocked = !!vault?.isUnlocked;
-        if (!unlocked) clearPortableKeyCache();
+        if (!unlocked) {
+            clearPortableKeyCache();
+            lastScheduledPasswords = null;
+            lastScheduledCategories = null;
+        }
         if (unlocked && !wasUnlocked) {
             // Notes and worklog need the master password too; retry them when
             // the vault is unlocked after a cold start.

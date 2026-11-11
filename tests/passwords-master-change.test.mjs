@@ -14,8 +14,9 @@ describe('master password change', () => {
         expect(store).toContain('主密码更新失败');
         expect(store).toContain('vaultSecret = oldSecret;');
         expect(store).toContain('currentMasterPassword = oldPassword;');
-        // two rollback sites: secret swap + state update
-        expect(store.match(/vaultSecret = oldSecret;/g).length).toBeGreaterThanOrEqual(2);
+        // Derive without changing live secrets; swap only after the session fence.
+        expect(store).toContain('newEntryKey = await ensureVaultEntryKey(newSecret)');
+        expect(store).toContain('if (!unchanged())');
     });
 
     test('never throws past the caller', () => {

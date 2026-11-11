@@ -6,6 +6,7 @@
     import '@phosphor-icons/web/fill';
     import { taskStore, activeTasks, today, viewDate } from '$lib/stores/tasks.js';
     import { settingsStore } from '$lib/stores/settings.js';
+    import { reloadConnectorConfig } from '$lib/stores/connector.js';
     import { loadAiConfig } from '$lib/stores/ai.js';
     import { notesStore } from '$lib/stores/notes.js';
     import { passwordsStore } from '$lib/stores/passwords.js';
@@ -17,7 +18,9 @@
     import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
-    import BackupModal from '$lib/components/BackupModal.svelte';
+    import { retryPendingErase, resumeProtectionErase } from '$lib/utils/vault-protection.js';
+    const loadBackupModal = () => import('$lib/components/BackupModal.svelte');
+    let backupModule;
     import { backupModal, closeBackupModal } from '$lib/stores/backup-modal.js';
     import { get } from 'svelte/store';
     import { setupI18n } from '$lib/i18n/index.js';
@@ -26,6 +29,8 @@
     let i18nReady = false;
 
     onMount(() => {
+        const retryErase = () => { void retryPendingErase().catch(error => console.warn('Protection deletion pending:', error)); };
+        window.addEventListener('online', retryErase);
         let destroyed = false;
         let unlistenNotification = () => {};
         let unlistenAutostart = () => {};
@@ -53,24 +58,25 @@
 
             try {
                 const localDb = await initLocalDatabase();
-                if (localDb.reloaded) {
-                    location.reload();
-                    return;
-                }
                 await installLocalDatabaseMirror();
+                if (await resumeProtectionErase()) return;
             } catch (error) {
                 console.warn('Local database init failed:', error);
+                // Do not initialize stores if a destructive operation is unfinished.
+                if (localStorage.getItem('workplan_protection_erase') || passwordsStore.getProtection().failures > 10) return;
             }
 
             i18nReady = true;
             // Specular highlight for the liquid glass theme (no-op elsewhere).
             uninstallGlassPointer = installGlassPointer();
             taskStore.loadFromLocal();
+            reloadConnectorConfig();
             await settingsStore.init();
             loadAiConfig();
             notesStore.load();
-            passwordsStore.load();
+            // Vault entries are loaded on first use, not on the startup critical path.
             initSecureSync();
+            void retryPendingErase().catch(error => console.warn('Protection deletion pending:', error));
             if (isWebDemo || destroyed) return;
 
             const currentSettings = get(settingsStore);
@@ -151,6 +157,7 @@
 
         return () => {
             destroyed = true;
+            window.removeEventListener('online', retryErase);
             unlistenNotification();
             unlistenAutostart();
             unlistenUpdate();
@@ -174,7 +181,11 @@
         </div>
     {/if}
     <slot />
-    <BackupModal show={$backupModal.show} mode={$backupModal.mode} onClose={closeBackupModal} />
+    {#if $backupModal.show}
+        {#await (backupModule ||= loadBackupModal()) then module}
+            <svelte:component this={module.default} show={$backupModal.show} mode={$backupModal.mode} onClose={closeBackupModal} />
+        {/await}
+    {/if}
 {/if}
 
 <style>

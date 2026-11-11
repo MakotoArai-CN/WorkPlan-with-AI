@@ -1,12 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauriRuntime } from './runtime.js';
+import { ERASE_KEY } from './vault-protection.js';
 
 const SNAPSHOT_FORMAT = 'workplan-local-db';
 const SNAPSHOT_VERSION = 1;
 const PREFIX = 'workplan_';
 const MARKER_KEY = 'workplan_db_saved_at';
-const HYDRATED_FLAG = 'workplan_db_hydrated_once';
-const HYDRATED_SNAPSHOT = 'workplan_db_hydrated_snapshot';
 const LEGACY_PREFIX = 'planpro_';
 const EXCLUDED = new Set(['workplan_passwords_session', MARKER_KEY]);
 
@@ -49,22 +48,6 @@ function hasBusinessData(keys) {
     ));
 }
 
-function readSessionFlag(key) {
-    try {
-        return sessionStorage.getItem(key);
-    } catch {
-        return null;
-    }
-}
-
-function writeSessionFlag(key, value) {
-    try {
-        sessionStorage.setItem(key, value);
-    } catch {
-        // sessionStorage may be unavailable in restricted WebViews.
-    }
-}
-
 function hasWorkingCopy(keys) {
     const normalized = normalizeKeys(keys);
     if (typeof normalized.workplan_access_key === 'string' && normalized.workplan_access_key.trim()) {
@@ -93,6 +76,9 @@ let saveChain = Promise.resolve();
 // Original Storage#setItem, kept so a failed database write can still leave a
 // WebView copy behind instead of losing the pending change.
 let originalSetItem = null;
+let originalRemoveItem = null;
+let erasing = false;
+let persistedKeys = null;
 
 function restoreWebViewCopy() {
     if (!originalSetItem || typeof localStorage === 'undefined') return;
@@ -164,14 +150,17 @@ function readSnapshot(raw) {
 
 async function saveSnapshot(keys = collectKeys()) {
     if (!isTauriRuntime) return null;
+    const fingerprint = JSON.stringify(keys);
+    if (fingerprint === persistedKeys) return null;
     const snapshot = buildSnapshot(keys);
     const info = await invoke('local_db_save', { content: JSON.stringify(snapshot) });
+    persistedKeys = fingerprint;
     localStorage.setItem(MARKER_KEY, String(snapshot.savedAt));
     return info;
 }
 
 function scheduleMirror() {
-    if (!isTauriRuntime || mirroring || hydrating) return;
+    if (!isTauriRuntime || mirroring || hydrating || erasing) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(async () => {
         timer = null;
@@ -188,7 +177,7 @@ async function flushPendingMirror() {
         clearTimeout(timer);
         timer = null;
     }
-    if (!isTauriRuntime || hydrating) return null;
+    if (!isTauriRuntime || hydrating || erasing) return null;
     const keys = collectKeys();
     return enqueueSave(() => keys);
 }
@@ -250,6 +239,7 @@ export async function installLocalDatabaseMirror() {
     const originalRemove = Storage.prototype.removeItem;
     const originalClear = Storage.prototype.clear;
     originalSetItem = originalSet;
+    originalRemoveItem = originalRemove;
     const isLocal = (self) => self === window.localStorage;
     Storage.prototype.getItem = function (key) {
         if (isLocal(this) && String(key).startsWith(PREFIX) && !EXCLUDED.has(key)) {
@@ -258,7 +248,9 @@ export async function installLocalDatabaseMirror() {
         return originalGet.call(this, key);
     };
     Storage.prototype.setItem = function (key, value) {
+        if (isLocal(this) && erasing && String(key).startsWith(PREFIX) && key !== ERASE_KEY) return;
         if (isLocal(this) && String(key).startsWith(PREFIX) && key !== MARKER_KEY) {
+            if (memoryKeys.get(String(key)) === String(value)) return;
             memoryKeys.set(String(key), String(value));
             scheduleMirror();
             return;
@@ -266,6 +258,7 @@ export async function installLocalDatabaseMirror() {
         return originalSet.call(this, key, value);
     };
     Storage.prototype.removeItem = function (key) {
+        if (isLocal(this) && erasing && String(key).startsWith(PREFIX) && key !== ERASE_KEY) return;
         if (isLocal(this) && String(key).startsWith(PREFIX) && key !== MARKER_KEY) {
             memoryKeys.delete(String(key));
             scheduleMirror();
@@ -275,6 +268,7 @@ export async function installLocalDatabaseMirror() {
     };
     Storage.prototype.clear = function () {
         if (isLocal(this)) {
+            if (erasing) return;
             memoryKeys.clear();
             scheduleMirror();
             return;
@@ -293,7 +287,7 @@ export async function installLocalDatabaseMirror() {
 /**
  * Load the home-directory database before stores make decisions.
  * - DB absent + localStorage present -> migrate localStorage into DB (Rust keeps a backup).
- * - DB present + local storage empty/older -> hydrate localStorage, then reload once.
+ * - DB present + local storage empty/older -> hydrate before explicitly loading stores.
  */
 export async function initLocalDatabase() {
     if (!isTauriRuntime) return { supported: false, migrated: false, reloaded: false };
@@ -301,16 +295,18 @@ export async function initLocalDatabase() {
     try {
         let raw = await invoke('local_db_load');
         let snapshot = readSnapshot(raw);
+        let recoveredFromBackup = false;
         // A rename bug once flushed only incidental keys over a good snapshot.
         // If the current snapshot has no business data but a backup still has
         // an account, restore that backup instead of accepting the empty state.
-        if (!snapshot || !hasBusinessData(snapshot.keys)) {
+        if (!snapshot || (!snapshot.keys?.[ERASE_KEY] && !hasBusinessData(snapshot.keys))) {
             try {
                 const recovered = await invoke('local_db_recover');
                 const recoveredSnapshot = readSnapshot(recovered);
                 if (recoveredSnapshot && hasBusinessData(recoveredSnapshot.keys)) {
                     snapshot = recoveredSnapshot;
                     raw = recovered;
+                    recoveredFromBackup = true;
                 }
             } catch (error) {
                 console.warn('[LocalDB] backup recovery failed:', error);
@@ -320,6 +316,7 @@ export async function initLocalDatabase() {
         const hasLocal = hasWorkingCopy(localKeys);
         if (!snapshot) {
             dbAuthoritative = true;
+            persistedKeys = null;
             if (hasLocal) {
                 await enqueueSave(() => localKeys);
                 return { supported: true, migrated: true, reloaded: false };
@@ -328,6 +325,19 @@ export async function initLocalDatabase() {
         }
 
         dbAuthoritative = true;
+        // A recovered backup is not necessarily the current on-disk snapshot.
+        persistedKeys = recoveredFromBackup ? null : JSON.stringify(normalizeKeys(snapshot.keys));
+        if (snapshot.keys?.[ERASE_KEY]) {
+            // A deliberate wipe always wins over a stale WebView working copy.
+            let journal;
+            try { journal = JSON.parse(snapshot.keys[ERASE_KEY]); } catch { journal = null; }
+            if (journal && (!journal.completed || Object.keys(snapshot.keys).length === 1)) {
+                const existing = Object.keys(localKeys);
+                for (const key of existing) localStorage.removeItem(key);
+                applyKeys(snapshot.keys);
+                return { supported: true, migrated: false, reloaded: false };
+            }
+        }
         if (hasLocal) {
             // Writes are mirrored continuously, so an existing WebView copy is
             // the current working copy. Never overwrite it with the database.
@@ -339,23 +349,9 @@ export async function initLocalDatabase() {
         if (changed === 0) {
             return { supported: true, migrated: false, reloaded: false, applied: 0 };
         }
-        // Hydrate at most once per app session. Without this guard a snapshot
-        // that holds no access key (logged out, or a partial map) triggered
-        // `reload()` on every boot because the WebView copy never became a
-        // "working copy" again. Re-applying the same snapshot now reports 0
-        // changes, and this flag blocks the second reload in the same session.
-        const snapshotId = String(Number(snapshot.savedAt) || 0);
-        const alreadyHydrated = readSessionFlag(HYDRATED_FLAG) === '1';
-        const sameSnapshot = readSessionFlag(HYDRATED_SNAPSHOT) === snapshotId;
-        writeSessionFlag(HYDRATED_SNAPSHOT, snapshotId);
-        if (alreadyHydrated || sameSnapshot) {
-            return { supported: true, migrated: false, reloaded: false, applied: changed };
-        }
-        writeSessionFlag(HYDRATED_FLAG, '1');
-        // Stores have not read the database yet; one reload lets them
-        // initialize from it. The next pass activates memory storage and
-        // removes this temporary WebView copy.
-        return { supported: true, migrated: false, reloaded: true, applied: changed };
+        // The layout re-reads import-time settings/connector state explicitly.
+        // A second full WebView boot is unnecessary, even for partial snapshots.
+        return { supported: true, migrated: false, reloaded: false, applied: changed };
     } catch (error) {
         console.warn('[LocalDB] initialization failed:', error);
         return { supported: true, error: String(error?.message || error), migrated: false, reloaded: false };
@@ -398,6 +394,7 @@ export async function replaceLocalDatabaseKeys(keys = {}) {
 }
 
 export async function flushLocalDatabase() {
+    if (erasing) return null;
     if (!isTauriRuntime) return null;
     try {
         return await flushPendingMirror();
@@ -408,6 +405,42 @@ export async function flushLocalDatabase() {
         if (memoryMode) restoreWebViewCopy();
         return null;
     }
+}
+
+export async function persistEraseJournal(pending) {
+    if (pending) localStorage.setItem(ERASE_KEY, JSON.stringify(pending));
+    else localStorage.removeItem(ERASE_KEY);
+    if (isTauriRuntime) await enqueueSave();
+}
+
+export async function eraseLocalDatabase(pending) {
+    erasing = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    await saveChain.catch(() => {});
+    const keys = { [ERASE_KEY]: JSON.stringify(pending) };
+    if (isTauriRuntime) {
+        await invoke('local_db_erase', { content: JSON.stringify(buildSnapshot(keys)) });
+        persistedKeys = JSON.stringify(keys);
+    }
+    // Use the original methods: normal writes are fenced while erasing.
+    memoryKeys = new Map(Object.entries(keys));
+    const remove = originalRemoveItem;
+    // Bypass the fence only for synchronous removal of the WebView working copy.
+    const existing = [];
+    for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index);
+        if (key?.startsWith(PREFIX) || key?.startsWith(LEGACY_PREFIX)) existing.push(key);
+    }
+    for (const key of existing) {
+        if (remove) remove.call(localStorage, key);
+        else localStorage.removeItem(key);
+    }
+    localStorage.setItem(ERASE_KEY, keys[ERASE_KEY]);
+    sessionStorage.clear();
+    if (timer) clearTimeout(timer);
+    timer = null;
+    erasing = true;
 }
 
 export async function localDatabaseInfo() {

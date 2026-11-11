@@ -6,6 +6,7 @@ import { buildScheduledInstances, normalizeRepeatDays } from '../utils/schedule.
 import { normalizeLeaveRecord, normalizeOvertimeRecord } from '../utils/overtime.js';
 import { mergeSyncState, normalizeSyncPayload } from '../utils/task-sync.js';
 import { clearAccountScopedData, restoreAccountData, stashCurrentAccount } from '../utils/account-scope.js';
+import { cloudRecordErased, readPendingErase } from '../utils/vault-protection.js';
 
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const DEFAULT_SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
@@ -15,7 +16,7 @@ const LOCAL_CACHE_KEY = 'workplan_tasks_local_cache';
 let supabase = null;
 let supabaseCacheKey = '';
 
-function readDatabaseConfig() {
+export function readDatabaseConfig() {
     const fallback = {
         ...getDefaultDatabaseConfig(),
         enabled: Boolean(DEFAULT_SUPABASE_URL && DEFAULT_SUPABASE_KEY),
@@ -188,6 +189,7 @@ async function getSupabaseClient(databaseConfig, accessKey = '') {
 
 export async function loadCloudRecord(accessKey) {
     if (typeof window === 'undefined') return null;
+    if (cloudRecordErased(accessKey)) return null;
     const databaseConfig = readDatabaseConfig();
     if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
         console.warn('Database configuration missing. Cloud sync disabled.');
@@ -214,7 +216,20 @@ export async function loadCloudRecord(accessKey) {
     return firstRow(data);
 }
 
-export async function saveCloudRecord(accessKey, content, updatedAt) {
+const cloudWrites = new Set();
+export async function waitForCloudWrites() {
+    await Promise.allSettled([...cloudWrites]);
+}
+
+export function saveCloudRecord(accessKey, content, updatedAt) {
+    if (readPendingErase()) return Promise.resolve(false);
+    const write = writeCloudRecord(accessKey, content, updatedAt);
+    cloudWrites.add(write);
+    write.finally(() => cloudWrites.delete(write)).catch(() => {});
+    return write;
+}
+
+async function writeCloudRecord(accessKey, content, updatedAt) {
     if (typeof window === 'undefined') return false;
     const databaseConfig = readDatabaseConfig();
     if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
@@ -238,37 +253,41 @@ export async function saveCloudRecord(accessKey, content, updatedAt) {
     return true;
 }
 
-async function deleteCloudRecord(accessKey) {
+export async function deleteCloudRecord(accessKey, configOverride = null) {
     if (typeof window === 'undefined') return;
-    const databaseConfig = readDatabaseConfig();
-    if (!databaseConfig.enabled || !databaseConfig.url || !databaseConfig.apiKey) {
+    const databaseConfig = configOverride || readDatabaseConfig();
+    if (!databaseConfig.url || !databaseConfig.apiKey || (!configOverride && !databaseConfig.enabled)) {
+        if (configOverride) throw new Error('Cloud deletion configuration unavailable');
         return;
     }
 
     if (shouldUseCustomHttpAdapter(databaseConfig)) {
         await deleteRestRecord(databaseConfig, accessKey);
+        if (await requestRestRecord(databaseConfig, accessKey)) throw new Error('Cloud deletion was not applied; check delete permissions');
         return;
     }
 
     const client = await getSupabaseClient(databaseConfig, accessKey);
     if (!client) return;
-    // Resolve the row through RLS, then delete by non-secret id. This keeps the
-    // access key out of URLs and avoids an unfiltered delete if RLS is broken.
-    const { data: rows, error: lookupError } = await client
-        .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
-        .select('id')
-        .eq('user_key', accessKey)
-        .limit(1);
-    if (lookupError) throw lookupError;
-    const row = firstRow(rows);
-    if (!row?.id) return;
-    const { error } = await client
-        .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
-        .delete()
-        .eq('id', row.id);
-
-    if (error) {
-        throw error;
+    // Old databases may contain duplicate rows. Delete every matching id and
+    // verify removal; RLS can otherwise silently make DELETE affect zero rows.
+    let previousIds = new Set();
+    while (true) {
+        const { data: rows, error: lookupError } = await client
+            .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
+            .select('id')
+            .eq('user_key', accessKey)
+            .limit(500);
+        if (lookupError) throw lookupError;
+        const ids = (Array.isArray(rows) ? rows : rows ? [rows] : []).map(row => row.id).filter(id => id != null);
+        if (!ids.length) return;
+        if (ids.some(id => previousIds.has(id))) throw new Error('Cloud deletion was not applied; check delete permissions');
+        previousIds = new Set(ids);
+        const { error } = await client
+            .from(databaseConfig.tableName || DEFAULT_TABLE_NAME)
+            .delete()
+            .in('id', ids);
+        if (error) throw error;
     }
 }
 

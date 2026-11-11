@@ -18,21 +18,27 @@
     import Sidebar from '$lib/components/Sidebar.svelte';
     import MobileNav from '$lib/components/MobileNav.svelte';
     import Dashboard from '$lib/components/Dashboard.svelte';
-    import Templates from '$lib/components/Templates.svelte';
-    import Scheduled from '$lib/components/Scheduled.svelte';
-    import Statistics from '$lib/components/Statistics.svelte';
-    import Worklog from '$lib/components/Worklog.svelte';
-    import Settings from '$lib/components/Settings.svelte';
-    import AiChat from '$lib/components/AiChat.svelte';
-    import Notes from '$lib/components/Notes.svelte';
-    import Passwords from '$lib/components/Passwords.svelte';
-    import MoreMenu from '$lib/components/MoreMenu.svelte';
+    const loadTemplates = () => import('$lib/components/Templates.svelte');
+    const loadScheduled = () => import('$lib/components/Scheduled.svelte');
+    const loadStatistics = () => import('$lib/components/Statistics.svelte');
+    const loadWorklog = () => import('$lib/components/Worklog.svelte');
+    const loadSettings = () => import('$lib/components/Settings.svelte');
+    const loadAiChat = () => import('$lib/components/AiChat.svelte');
+    const loadNotes = () => import('$lib/components/Notes.svelte');
+    const loadPasswords = () => import('$lib/components/Passwords.svelte');
+    const loadMoreMenu = () => import('$lib/components/MoreMenu.svelte');
     import TaskDetail from '$lib/components/TaskDetail.svelte';
     import MobileTaskDetail from '$lib/components/MobileTaskDetail.svelte';
     import TaskModal from '$lib/components/TaskModal.svelte';
-    import AiPanel from '$lib/components/AiPanel.svelte';
-    import AiSettings from '$lib/components/AiSettings.svelte';
+    const loadAiPanel = () => import('$lib/components/AiPanel.svelte');
+    const loadAiSettings = () => import('$lib/components/AiSettings.svelte');
     import AgreementModal from '$lib/components/AgreementModal.svelte';
+
+    const lazyModules = new Map();
+    function lazy(loader) {
+        if (!lazyModules.has(loader)) lazyModules.set(loader, loader().catch(error => { lazyModules.delete(loader); throw error; }));
+        return lazyModules.get(loader);
+    }
 
     const DESKTOP_DETAIL_VIEWS = new Set(['dashboard', 'templates', 'scheduled', 'statistics', 'notes']);
     const MOBILE_ROOT_VIEWS = new Set(['dashboard', 'templates', 'scheduled', 'notes', 'more']);
@@ -312,23 +318,41 @@
             {#if $currentView === 'dashboard'}
                 <Dashboard {openModal} openDetailPanel={openDesktopDetailPanel} />
             {:else if $currentView === 'aichat'}
-                <AiChat onBack={handleAiChatBack} />
+                {#await lazy(loadAiChat) then module}
+                    <svelte:component this={module.default} onBack={handleAiChatBack} />
+                {/await}
             {:else if $currentView === 'templates'}
-                <Templates {openModal} openDetailPanel={openDesktopDetailPanel} />
+                {#await lazy(loadTemplates) then module}
+                    <svelte:component this={module.default} {openModal} openDetailPanel={openDesktopDetailPanel} />
+                {/await}
             {:else if $currentView === 'scheduled'}
-                <Scheduled {openModal} openDetailPanel={openDesktopDetailPanel} />
+                {#await lazy(loadScheduled) then module}
+                    <svelte:component this={module.default} {openModal} openDetailPanel={openDesktopDetailPanel} />
+                {/await}
             {:else if $currentView === 'statistics'}
-                <Statistics openDetailPanel={openDesktopDetailPanel} />
+                {#await lazy(loadStatistics) then module}
+                    <svelte:component this={module.default} openDetailPanel={openDesktopDetailPanel} />
+                {/await}
             {:else if $currentView === 'worklog'}
-                <Worklog />
+                {#await lazy(loadWorklog) then module}
+                    <svelte:component this={module.default}  />
+                {/await}
             {:else if $currentView === 'notes'}
-                <Notes openDetailPanel={openDesktopDetailPanel} />
+                {#await lazy(loadNotes) then module}
+                    <svelte:component this={module.default} openDetailPanel={openDesktopDetailPanel} />
+                {/await}
             {:else if $currentView === 'passwords'}
-                <Passwords />
+                {#await lazy(loadPasswords) then module}
+                    <svelte:component this={module.default}  />
+                {/await}
             {:else if $currentView === 'settings'}
-                <Settings />
+                {#await lazy(loadSettings) then module}
+                    <svelte:component this={module.default}  />
+                {/await}
             {:else if $currentView === 'more'}
-                <MoreMenu />
+                {#await lazy(loadMoreMenu) then module}
+                    <svelte:component this={module.default}  />
+                {/await}
             {/if}
             {#snippet failed(error)}
                 <div class="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
@@ -353,7 +377,11 @@
             >
             <TaskDetail {openModal} closePanel={closeDesktopDetailPanel}>
                 <svelte:fragment slot="ai-panel">
-                    <AiPanel />
+                    {#if $showAiPanel}
+                    {#await lazy(loadAiPanel) then module}
+                    <svelte:component this={module.default}  />
+                {/await}
+                    {/if}
                 </svelte:fragment>
             </TaskDetail>
             </div>
@@ -380,13 +408,19 @@
                         </button>
                     </div>
                 </div>
-                <AiPanel />
+                {#await lazy(loadAiPanel) then module}
+                    <svelte:component this={module.default}  />
+                {/await}
             </div>
         {/if}
 
         <MobileNav />
         <TaskModal bind:show={showModal} {editTask} on:close={closeModal} />
-        <AiSettings />
+        {#if $showAiSettings}
+        {#await lazy(loadAiSettings) then module}
+                    <svelte:component this={module.default}  />
+                {/await}
+        {/if}
         <AgreementModal isFirstTime={false} />
     {/if}
 

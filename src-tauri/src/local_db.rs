@@ -4,7 +4,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAGIC: &[u8; 5] = b"WPDB1";
@@ -14,6 +14,8 @@ const SAVED_AT_KEY: &[u8] = b"saved_at";
 // zstd and encrypted with AES-256-GCM; copying it to another app is useless.
 const APP_DB_SECRET: &[u8] = b"WorkPlan::LocalDatabase::sled::AES-GCM::v1";
 static DB: OnceLock<sled::Db> = OnceLock::new();
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+static HIDDEN: OnceLock<()> = OnceLock::new();
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +55,7 @@ fn ensure_dirs() -> Result<(), String> {
     fs::create_dir_all(root_dir()?).map_err(|e| format!("创建数据目录失败: {e}"))?;
     fs::create_dir_all(db_dir()?).map_err(|e| format!("创建数据库目录失败: {e}"))?;
     fs::create_dir_all(backup_dir()?).map_err(|e| format!("创建备份目录失败: {e}"))?;
-    hide_dir(&root_dir()?);
+    HIDDEN.get_or_init(|| { if let Ok(root) = root_dir() { hide_dir(&root); } });
     Ok(())
 }
 
@@ -89,7 +91,7 @@ fn cipher() -> Result<Aes256Gcm, String> {
 }
 
 fn seal_json(json: &str) -> Result<Vec<u8>, String> {
-    let compressed = zstd::encode_all(json.as_bytes(), 6).map_err(|e| format!("压缩数据库失败: {e}"))?;
+    let compressed = zstd::encode_all(json.as_bytes(), 3).map_err(|e| format!("压缩数据库失败: {e}"))?;
     let mut nonce_bytes = [0u8; 12];
     getrandom::fill(&mut nonce_bytes).map_err(|e| format!("生成数据库随机数失败: {e}"))?;
     let ciphertext = cipher()?
@@ -149,7 +151,12 @@ fn rotate_backups() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn local_db_load() -> Result<Option<String>, String> {
+pub async fn local_db_load() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(local_db_load_impl).await.map_err(|e| e.to_string())?
+}
+
+fn local_db_load_impl() -> Result<Option<String>, String> {
+    let _guard = WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     let db = open_db()?;
     if let Some(blob) = db.get(SNAPSHOT_KEY).map_err(|e| e.to_string())? {
         return open_json(blob.as_ref()).map(Some);
@@ -195,7 +202,12 @@ fn protect_account_snapshot(db: &sled::Db, next: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn local_db_save(content: String) -> Result<LocalDbInfo, String> {
+pub async fn local_db_save(content: String) -> Result<LocalDbInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || local_db_save_impl(content)).await.map_err(|e| e.to_string())?
+}
+
+fn local_db_save_impl(content: String) -> Result<LocalDbInfo, String> {
+    let _guard = WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     if content.len() > 64 * 1024 * 1024 {
         return Err("本地数据库超过 64MB，已拒绝写入".to_string());
     }
@@ -210,12 +222,61 @@ pub fn local_db_save(content: String) -> Result<LocalDbInfo, String> {
     local_db_info()
 }
 
+/// Intentional protection erase must bypass backup/recovery preservation.
+#[tauri::command]
+pub async fn local_db_erase(content: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || local_db_erase_impl(content)).await.map_err(|e| e.to_string())?
+}
+
+fn local_db_erase_impl(content: String) -> Result<(), String> {
+    let value: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let keys = value.get("keys").and_then(|v| v.as_object()).ok_or("Invalid erase snapshot")?;
+    if keys.len() != 1 || !keys.contains_key("workplan_protection_erase") {
+        return Err("Erase snapshot may only contain a deletion journal".into());
+    }
+    let _guard = WRITE_LOCK.lock().map_err(|e| e.to_string())?;
+    let db = open_db()?;
+    let sealed = seal_json(&content)?;
+    let mut batch = sled::Batch::default();
+    for entry in db.iter() {
+        let (key, _) = entry.map_err(|e| e.to_string())?;
+        batch.remove(key);
+    }
+    batch.insert(SNAPSHOT_KEY, sealed);
+    db.apply_batch(batch).map_err(|e| e.to_string())?;
+    db.flush().map_err(|e| e.to_string())?;
+    // Only app-owned, explicitly named files; never follow directory links.
+    for name in ["data.json", "data.legacy.json", "account-recovery.wpb"] {
+        let path = root_dir()?.join(name);
+        if path.exists() { fs::remove_file(path).map_err(|e| e.to_string())?; }
+    }
+    for entry in fs::read_dir(backup_dir()?).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().map_err(|e| e.to_string())?.is_file()
+            && entry.path().extension().map(|ext| ext == "wpb").unwrap_or(false) {
+            fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Recovery for the `planpro_` → `workplan_` rename: the JS mirror briefly
 /// flushed a snapshot containing only incidental keys, hiding the account
 /// while the previous good snapshot was still in `backups/`. Prefer the stable
 /// protected copy (backups rotate), then scan backups newest-first.
 #[tauri::command]
 pub fn local_db_recover() -> Result<Option<String>, String> {
+    let _guard = WRITE_LOCK.lock().map_err(|e| e.to_string())?;
+    let db = open_db()?;
+    if let Some(blob) = db.get(SNAPSHOT_KEY).map_err(|e| e.to_string())? {
+        if let Ok(json) = open_json(blob.as_ref()) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                if value.get("keys").and_then(|keys| keys.get("workplan_protection_erase")).is_some() {
+                    return Ok(None);
+                }
+            }
+        }
+    }
     fn has_account(json: &str) -> bool {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
             return false;
@@ -320,7 +381,7 @@ pub fn local_db_restore(source: String) -> Result<String, String> {
     if value.get("format").and_then(|v| v.as_str()) != Some("workplan-local-db") {
         return Err("不是 WorkPlan 本地数据库备份".to_string());
     }
-    local_db_save(content.clone())?;
+    local_db_save_impl(content.clone())?;
     Ok(content)
 }
 
