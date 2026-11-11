@@ -13,8 +13,8 @@ permissions:
   contents: write
 
 env:
-  G4F_DEV_REPOSITORY: gpt4free/g4f.dev
-  G4F_DEV_REF: f0f09e3716a0ce108b5d1acdd0f6523a21baab90
+  G4F_DEV_REPOSITORY: MakotoArai-CN/g4f.dev
+  G4F_DEV_REF: d9de8c2c5691a8e21b2d6fc60e7f38ae9a2382d0
 
 jobs:
   quality:

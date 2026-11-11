@@ -24,8 +24,8 @@ jobs:
       - name: Checkout pinned G4F assets
         uses: actions/checkout@v4
         with:
-          repository: gpt4free/g4f.dev
-          ref: f0f09e3716a0ce108b5d1acdd0f6523a21baab90
+          repository: MakotoArai-CN/g4f.dev
+          ref: d9de8c2c5691a8e21b2d6fc60e7f38ae9a2382d0
           path: g4f.dev
           fetch-depth: 1
           sparse-checkout: dist

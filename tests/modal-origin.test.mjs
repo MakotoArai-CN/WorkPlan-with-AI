@@ -18,5 +18,7 @@ test('all custom category entry points capture their own clicked button for line
     }
     expect(vault).toContain('customCategoryOrigin = trigger?.getBoundingClientRect()');
     expect(vault).toContain('origin={customCategoryOrigin} animationEasing="linear"');
+    expect(vault).toContain('durationScale={0.6}');
+    expect(modal).toContain('duration(300) + 10');
     expect(modal).toContain("animationEasing || 'cubic-bezier(0.22, 0.8, 0.24, 1)'");
 });

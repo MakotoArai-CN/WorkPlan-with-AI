@@ -51,7 +51,6 @@ const G4F_PROVIDER_ORDER = [
     'community',
     'crowllm',
     'eaon',
-    'orcarouter',
     'relayrouter',
     'llm7',
     'kilo',
@@ -202,6 +201,8 @@ async function loadG4FModule() {
 }
 
 function getProviderClass(module, providerKey) {
+    const configuredClass = G4F_PROVIDER_SETTINGS[providerKey]?.provider;
+    if (configuredClass && typeof module[configuredClass] === 'function') return module[configuredClass];
     const providerClasses = {
         default: module.Client,
         pollinations: module.Pollinations,
@@ -262,6 +263,9 @@ export async function getG4FProvidersList() {
 
 export async function createG4FClient(providerId, options = {}) {
     const providerKey = normalizeG4FProviderKey(providerId.replace('g4f-', ''));
+    if (providerKey === 'orcarouter' && !G4F_PROVIDER_SETTINGS[providerKey] && !options.baseUrl) {
+        throw new Error('OrcaRouter 已从上游服务列表移除，请在 AI 设置中选择其他服务或配置有效的自定义端点；原连接配置未改动');
+    }
     const module = await loadG4FModule();
 
     if (!module) {
@@ -282,6 +286,7 @@ export async function createG4FClient(providerId, options = {}) {
 
     const {
         backupUrl,
+        workerUrl,
         tags: _tags,
         label: _label,
         provider: _provider,
@@ -290,8 +295,11 @@ export async function createG4FClient(providerId, options = {}) {
 
     const clientOptions = {
         ...config,
+        // Upstream's default logger prints full request/response payloads.
+        logCallback: () => {},
         ...options
     };
+    if (!clientOptions.baseUrl && workerUrl) clientOptions.baseUrl = workerUrl;
 
     if (providerKey === 'default') {
         clientOptions.modelAliases = g4fConfig?.defaultModels || {};
@@ -479,6 +487,7 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
         const stream = await client.chat.completions.create({
             model: model || client.defaultModel || 'auto',
             messages,
+            signal: options.signal,
             stream: true
         });
 
@@ -506,6 +515,7 @@ export async function chatWithG4F(providerId, model, messages, options = {}) {
             const result = await client.chat.completions.create({
                 model: model || client.defaultModel || 'auto',
                 messages,
+                signal: options.signal,
                 stream: false
             });
 
@@ -535,6 +545,7 @@ export async function streamChatWithG4F(providerId, model, messages, options = {
         const stream = await client.chat.completions.create({
             model: model || client.defaultModel || 'auto',
             messages,
+            signal: options.signal,
             stream: true
         });
 
@@ -569,6 +580,7 @@ export async function streamChatWithG4F(providerId, model, messages, options = {
             const result = await client.chat.completions.create({
                 model: model || client.defaultModel || 'auto',
                 messages,
+                signal: options.signal,
                 stream: false
             });
 

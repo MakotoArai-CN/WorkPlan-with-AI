@@ -58,10 +58,10 @@ WorkPlan with AI 是一个跨平台的任务管理和计划制定工具，支持
 
 ### 安装与运行
 
-> G4F 资源从仓库根目录 `g4f.dev/dist` 加载，版本固定 `0.2.7`。本地开发需要该目录存在。
+> G4F 资源从仓库根目录 `g4f.dev/dist` 加载，固定到子模块提交 `d9de8c2`，CI 使用相同提交。本地首次克隆需要初始化子模块；已有仓库可运行 `git submodule update --init g4f.dev`。
 
 ```bash
-git clone https://github.com/MakotoArai-CN/WorkPlan-with-AI.git
+git clone --recurse-submodules https://github.com/MakotoArai-CN/WorkPlan-with-AI.git
 cd WorkPlan-with-AI
 bun install
 ```

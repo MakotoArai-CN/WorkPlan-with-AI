@@ -16,6 +16,7 @@
     import VaultwardenImport from "./VaultwardenImport.svelte";
     import DataRepairModal from "./DataRepairModal.svelte";
     import VaultProtectionSettings from './VaultProtectionSettings.svelte';
+    import { selectionIndicatorBounds } from '../utils/selection-indicator.js';
     import {
         DATABASE_PROVIDER_CATALOG,
         DATABASE_SETUP_SQL,
@@ -50,22 +51,27 @@
     let editorPill = { left: 0, top: 0, width: 0, height: 0, ready: false };
 
     function measurePill(container, attribute, value) {
-        if (!container) return { left: 0, top: 0, width: 0, height: 0, ready: false };
-        const target = container.querySelector(`[data-${attribute}="${value}"]`);
-        if (!target) return { left: 0, top: 0, width: 0, height: 0, ready: false };
-        return {
-            left: target.offsetLeft,
-            top: target.offsetTop,
-            width: target.offsetWidth,
-            height: target.offsetHeight,
-            ready: true
-        };
+        const target = container?.querySelector(`[data-${attribute}="${value}"]`);
+        return selectionIndicatorBounds(container, target);
     }
 
     function updateAppearancePills() {
         themePill = measurePill(themeGridEl, 'theme-id', get(settingsStore).theme);
         languagePill = measurePill(languageGridEl, 'language', get(locale));
         editorPill = measurePill(editorGridEl, 'editor-id', get(settingsStore).markdownEditor);
+    }
+
+    function observeAppearanceGrid(node) {
+        let frame = null;
+        const schedule = () => {
+            if (frame !== null) return;
+            frame = requestAnimationFrame(() => { frame = null; updateAppearancePills(); });
+        };
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+        observer?.observe(node);
+        node.querySelectorAll('button').forEach(button => observer?.observe(button));
+        schedule();
+        return { destroy() { observer?.disconnect(); if (frame !== null) cancelAnimationFrame(frame); } };
     }
 
     $: if (themeGridEl) {
@@ -515,7 +521,7 @@
                 <div>
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.theme_mode')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.theme_desc')}</div>
-                    <div bind:this={themeGridEl} class="relative grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div bind:this={themeGridEl} use:observeAppearanceGrid class="relative isolate overflow-hidden rounded-xl grid grid-cols-2 md:grid-cols-4 gap-2">
                         <div data-pill="theme" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                             style={`width:${themePill.width}px;height:${themePill.height}px;transform:translate3d(${themePill.left}px, ${themePill.top}px, 0);opacity:${themePill.ready ? 1 : 0}`}></div>
                         {#each themeOptions as theme}
@@ -553,7 +559,7 @@
                 <i class="ph ph-translate text-lg"></i> {$_('settings.language')}
             </div>
             <div class="p-4 md:p-6">
-                <div bind:this={languageGridEl} class="relative grid grid-cols-3 gap-2">
+                <div bind:this={languageGridEl} use:observeAppearanceGrid class="relative isolate overflow-hidden rounded-xl grid grid-cols-3 gap-2">
                     <div data-pill="language" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                         style={`width:${languagePill.width}px;height:${languagePill.height}px;transform:translate3d(${languagePill.left}px, ${languagePill.top}px, 0);opacity:${languagePill.ready ? 1 : 0}`}></div>
                     {#each supportedLocales as lang}
@@ -578,7 +584,7 @@
                 <div>
                     <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base mb-2">{$_('settings.markdown_editor')}</div>
                     <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 mb-3">{$_('settings.editor_desc')}</div>
-                    <div bind:this={editorGridEl} class="relative grid grid-cols-2 gap-2">
+                    <div bind:this={editorGridEl} use:observeAppearanceGrid class="relative isolate overflow-hidden rounded-xl grid grid-cols-2 gap-2">
                         <div data-pill="editor" class="appearance-pill pointer-events-none absolute rounded-xl bg-blue-50 dark:bg-blue-900/30"
                             style={`width:${editorPill.width}px;height:${editorPill.height}px;transform:translate3d(${editorPill.left}px, ${editorPill.top}px, 0);opacity:${editorPill.ready ? 1 : 0}`}></div>
                         <button

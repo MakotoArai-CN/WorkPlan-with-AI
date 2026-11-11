@@ -11,6 +11,7 @@
     export let ariaLabel = '';
     export let origin = null;
     export let animationEasing = null;
+    export let durationScale = 1;
 
     let panel;
     let content;
@@ -21,6 +22,10 @@
     let animationToken = 0;
     let animations = [];
     let originRect = null;
+
+    function duration(milliseconds) {
+        return milliseconds * Math.max(0.1, Math.min(2, Number(durationScale) || 1));
+    }
 
     function reducedMotion() {
         if (typeof window === 'undefined') return true;
@@ -76,7 +81,7 @@
         if (backdrop) backdrop.style.opacity = '0';
         if (content) content.style.opacity = '0';
 
-        const duration = 420;
+        const openDuration = duration(420);
         const dx = startRect ? startRect.left + startRect.width / 2 - (target.left + target.width / 2) : 0;
         const dy = startRect ? startRect.top + startRect.height / 2 - (target.top + target.height / 2) : 0;
         const sx = startRect ? Math.max(0.06, Math.min(1, startRect.width / Math.max(target.width, 1))) : 0.92;
@@ -85,18 +90,18 @@
         animate(backdrop, [
             { opacity: 0 },
             { opacity: 1 }
-        ], { duration: 260, easing: 'ease-out', fill: 'both' });
+        ], { duration: duration(260), easing: 'ease-out', fill: 'both' });
 
         animate(panel, [
             { opacity: 0, transform: `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})` },
             { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1, 1)' }
-        ], { duration, easing: animationEasing || 'cubic-bezier(0.22, 0.8, 0.24, 1)', fill: 'both' });
+        ], { duration: openDuration, easing: animationEasing || 'cubic-bezier(0.22, 0.8, 0.24, 1)', fill: 'both' });
 
         animate(content, [
             { opacity: 0.15, filter: animationEasing === 'linear' ? 'none' : 'blur(10px)' },
             { opacity: 0.15, filter: animationEasing === 'linear' ? 'none' : 'blur(10px)', offset: 0.5 },
             { opacity: 1, filter: 'blur(0px)' }
-        ], { duration, easing: 'ease-out', fill: 'both' });
+        ], { duration: openDuration, easing: 'ease-out', fill: 'both' });
     }
 
     async function close(notify = true) {
@@ -121,14 +126,14 @@
         animate(panel, [
             { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1, 1)' },
             { opacity: 0, transform: `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})` }
-        ], { duration: 300, easing: animationEasing || 'cubic-bezier(0.4, 0, 0.8, 0.2)', fill: 'both' });
-        animate(backdrop, [{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: 'ease-in', fill: 'both' });
+        ], { duration: duration(300), easing: animationEasing || 'cubic-bezier(0.4, 0, 0.8, 0.2)', fill: 'both' });
+        animate(backdrop, [{ opacity: 1 }, { opacity: 0 }], { duration: duration(260), easing: 'ease-in', fill: 'both' });
         animate(content, [
             { opacity: 1, filter: 'blur(0px)' },
             { opacity: 0, filter: 'blur(6px)' }
-        ], { duration: 260, easing: 'ease-in', fill: 'both' });
+        ], { duration: duration(260), easing: 'ease-in', fill: 'both' });
 
-        await new Promise(resolve => setTimeout(resolve, 310));
+        await new Promise(resolve => setTimeout(resolve, duration(300) + 10));
         if (token !== animationToken) return;
         closing = false;
 

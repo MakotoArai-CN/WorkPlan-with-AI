@@ -2514,7 +2514,7 @@ async function handleChangeMasterPassword() {
 </AnimatedModal>
 
 <AnimatedModal show={showCustomCategoryModal} onClose={() => (showCustomCategoryModal = false)} zIndex={65}
-    origin={customCategoryOrigin} animationEasing="linear"
+    origin={customCategoryOrigin} animationEasing="linear" durationScale={0.6}
     ariaLabel={$_('passwords.custom_category')} panelClass="max-w-sm password-panel p-5 md:p-6">
     <h3 class="text-xl font-bold mb-2">{$_('passwords.custom_category')}</h3>
     <p id="password-category-hint" class="text-sm text-slate-500 mb-4">{$_('passwords.custom_category_hint')}</p>
