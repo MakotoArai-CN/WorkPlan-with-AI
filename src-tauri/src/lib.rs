@@ -9,7 +9,7 @@ use tauri::Manager;
 use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 use std::path::{Component, PathBuf};
@@ -543,7 +543,8 @@ async fn search_local_files(
     query: String,
     max_results: Option<usize>,
     trusted_dirs: Option<Vec<String>>,
-) -> Result<Vec<LocalFileEntry>, String> {
+    include_report: Option<bool>,
+) -> Result<serde_json::Value, String> {
     let trusted_dirs = trusted_dirs.unwrap_or_default();
     let root_path = match root {
         Some(value) if !value.trim().is_empty() => {
@@ -556,17 +557,38 @@ async fn search_local_files(
     }
 
     let limit = max_results.unwrap_or(40).clamp(1, 200);
+    tauri::async_runtime::spawn_blocking(move || {
+        let report = search_file_report(&root_path, &query, limit)?;
+        if include_report.unwrap_or(false) { Ok(report) } else { Ok(report["entries"].clone()) }
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn search_file_report(root_path: &std::path::Path, query: &str, limit: usize) -> Result<serde_json::Value, String> {
+    if !root_path.is_dir() { return Err("搜索目标不是有效目录".into()); }
     let needle = query.trim().to_lowercase();
     let mut entries = Vec::new();
-
-    for entry in WalkDir::new(&root_path)
+    let excluded = ["node_modules", ".git", ".venv", "venv", "target", ".workplan", ".ssh", ".gnupg", "appdata"];
+    let mut scanned = 0usize;
+    let mut errors = 0usize;
+    let mut depth_limited = false;
+    let mut stop_reason = "complete";
+    let started = std::time::Instant::now();
+    for entry in WalkDir::new(root_path)
         .follow_links(false)
+        .max_depth(12)
         .into_iter()
-        .filter_map(|item| item.ok())
+        .filter_entry(|entry| entry.depth() == 0 || !entry.file_type().is_dir()
+            || !excluded.contains(&entry.file_name().to_string_lossy().to_lowercase().as_str()))
     {
+        if scanned >= 20000 { stop_reason = "entry_limit"; break; }
+        if started.elapsed() >= std::time::Duration::from_secs(3) { stop_reason = "time_limit"; break; }
         if entries.len() >= limit {
+            stop_reason = "result_limit";
             break;
         }
+        let entry = match entry { Ok(value) => value, Err(_) => { errors += 1; continue; } };
+        scanned += 1;
+        if entry.depth() == 12 && entry.file_type().is_dir() { depth_limited = true; }
         let path = entry.path();
         if path == root_path {
             continue;
@@ -591,7 +613,13 @@ async fn search_local_files(
         });
     }
 
-    Ok(entries)
+    Ok(serde_json::json!({
+        "root": root_path.to_string_lossy(), "query": query, "entries": entries,
+        "recursive": true, "maxDepth": 12, "scanned": scanned, "skippedErrors": errors,
+        "stopReason": if stop_reason == "complete" && depth_limited { "depth_limit" } else { stop_reason },
+        "truncated": stop_reason != "complete" || errors > 0 || depth_limited,
+        "excludedDirectories": excluded
+    }))
 }
 
 #[tauri::command]
@@ -602,23 +630,18 @@ async fn read_local_file(
 ) -> Result<LocalFileReadResult, String> {
     let trusted_dirs = trusted_dirs.unwrap_or_default();
     let normalized = ensure_local_path_allowed(&path, &trusted_dirs)?;
-    let bytes = fs::read(&normalized)
-        .map_err(|e| format!("读取文件失败 {}: {}", normalized.to_string_lossy(), e))?;
     let limit = max_bytes.unwrap_or(16_000).clamp(512, 256_000);
-    let truncated = bytes.len() > limit;
-    let slice = if truncated {
-        &bytes[..limit]
-    } else {
-        bytes.as_slice()
-    };
-    let content = String::from_utf8_lossy(slice).to_string();
-
-    Ok(LocalFileReadResult {
-        path: normalized.to_string_lossy().to_string(),
-        content,
-        size: bytes.len(),
-        truncated,
-    })
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = fs::File::open(&normalized).map_err(|e| format!("读取文件失败 {}: {}", normalized.to_string_lossy(), e))?;
+        let size = file.metadata().map_err(|e| e.to_string())?.len();
+        let mut bytes = Vec::new();
+        file.take(limit as u64).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        if bytes.contains(&0) { return Err("目标不是可安全读取的文本文件，请先转换为文本".into()); }
+        Ok(LocalFileReadResult {
+            path: normalized.to_string_lossy().into_owned(), content: String::from_utf8_lossy(&bytes).into_owned(),
+            size: usize::try_from(size).unwrap_or(usize::MAX), truncated: size > bytes.len() as u64
+        })
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1402,6 +1425,28 @@ mod tests {
         assert!(!normalized.starts_with(&workspace));
         assert!(!normalized.components().any(|part| matches!(part, Component::ParentDir)));
         assert!(ensure_local_path_allowed(&candidate.to_string_lossy(), &[]).is_err());
+    }
+
+    #[test]
+    fn file_search_reports_scope_recursion_limits_and_excludes_dependency_trees() {
+        let mut random=[0u8;16];getrandom::fill(&mut random).unwrap();
+        let root=std::env::temp_dir().join(format!("workplan-search-{}",random.iter().map(|b|format!("{b:02x}")).collect::<String>()));
+        let project=root.join("Desktop").join("GPT");
+        let dependencies=project.join("node_modules");
+        fs::create_dir_all(&dependencies).unwrap();
+        fs::write(project.join("README.md"),"synthetic project fixture").unwrap();
+        fs::write(dependencies.join("hidden.js"),"dependency fixture").unwrap();
+        let report=search_file_report(&root.join("Desktop"),"GPT",40).unwrap();
+        assert_eq!(report["recursive"],true);
+        assert!(report["entries"].as_array().unwrap().iter().any(|entry|entry["name"]=="README.md"));
+        assert!(!report["entries"].to_string().contains("hidden.js"));
+        let capped=search_file_report(&root.join("Desktop"),"",1).unwrap();
+        assert_eq!(capped["stopReason"],"result_limit");assert_eq!(capped["truncated"],true);
+        let empty=search_file_report(&root.join("Desktop"),"unmatched-unique-file",40).unwrap();
+        assert_eq!(empty["entries"].as_array().unwrap().len(),0);assert_eq!(empty["query"],"unmatched-unique-file");
+        fs::remove_file(dependencies.join("hidden.js")).unwrap();fs::remove_dir(dependencies).unwrap();
+        fs::remove_file(project.join("README.md")).unwrap();fs::remove_dir(project).unwrap();
+        fs::remove_dir(root.join("Desktop")).unwrap();fs::remove_dir(root).unwrap();
     }
 
     #[test]
