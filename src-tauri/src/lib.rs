@@ -26,6 +26,7 @@ use base64::Engine;
 mod autostart;
 mod device;
 mod local_db;
+mod local_paths;
 mod vault_guard;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
@@ -272,14 +273,35 @@ fn normalize_pathbuf(path: PathBuf) -> Result<PathBuf, String> {
 
     let mut normalized = fs::canonicalize(&cursor).map_err(|e| e.to_string())?;
     for segment in missing_segments.iter().rev() {
-        normalized.push(segment);
+        if segment == "." { continue; }
+        if segment == ".." {
+            if !normalized.pop() { return Err("路径不能越过文件系统根目录".into()); }
+        } else {
+            normalized.push(segment);
+        }
     }
 
     Ok(normalized)
 }
 
 fn normalize_path(path: &str) -> Result<PathBuf, String> {
-    normalize_pathbuf(PathBuf::from(path))
+    let home = dirs::home_dir();
+    let desktop = dirs::desktop_dir();
+    normalize_pathbuf(local_paths::expand_aliases(path, home.as_deref(), desktop.as_deref(), cfg!(windows))?)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedLocalPath { path: String, exists: bool, is_directory: bool, authorized: bool }
+
+#[tauri::command]
+fn resolve_local_path(path: String) -> Result<ResolvedLocalPath, String> {
+    let normalized = normalize_path(&path)?;
+    Ok(ResolvedLocalPath {
+        exists: normalized.exists(), is_directory: normalized.is_dir(),
+        authorized: ensure_local_path_allowed(&path, &[]).is_ok(),
+        path: normalized.to_string_lossy().into_owned()
+    })
 }
 
 fn allowed_local_roots(_caller_supplied: &[String]) -> Result<Vec<PathBuf>, String> {
@@ -1418,6 +1440,16 @@ mod tests {
     }
 
     #[test]
+    fn nonexistent_segments_cannot_hide_parent_traversal_from_permission_checks() {
+        let workspace = normalize_pathbuf(current_workspace_root().unwrap()).unwrap();
+        let candidate = workspace.join("missing-path-security-fixture").join("..").join("..").join("outside-path-security-fixture");
+        let normalized = normalize_pathbuf(candidate.clone()).unwrap();
+        assert!(!normalized.starts_with(&workspace));
+        assert!(!normalized.components().any(|part| matches!(part, Component::ParentDir)));
+        assert!(ensure_local_path_allowed(&candidate.to_string_lossy(), &[]).is_err());
+    }
+
+    #[test]
     fn blocked_ips_cover_loopback_and_private_ranges() {
         for addr in [
             "127.0.0.1",
@@ -1469,6 +1501,7 @@ pub fn run() {
             get_autostart_status,
             get_app_version,
             get_workspace_root,
+            resolve_local_path,
             set_trusted_directories,
             search_local_files,
             read_local_file,

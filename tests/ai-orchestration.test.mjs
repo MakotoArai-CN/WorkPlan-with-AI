@@ -11,6 +11,7 @@ function scenario(body) {
         globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) };
         globalThis.fetch = async () => { throw new Error('Unexpected real network request'); };
         const settingsStore = writable({ enableAiChatTools: true, enableOvertime: true, workspaceRoot: '/workspace', localFileConfig: { enabled: true, requireConfirmation: true, trustedDirectories: [] } });
+        settingsStore.addTrustedDirectory = directory => settingsStore.update(state=>({...state,localFileConfig:{...state.localFileConfig,trustedDirectories:[...state.localFileConfig.trustedDirectories,directory]}}));
         const taskStore = Object.assign(writable({ accessKey: 'account-a', tasks: [], templates: [], scheduledTasks: [], overtimeRecords: [], leaveRecords: [{ id: 'leave-1', startDate: '2026-11-11', endDate: '2026-11-11', unit: 'day', duration: 1, type: 'annual', paid: true, note: 'original' }] }), {
             updateLeaveRecord(id, updates) { taskStore.update(state => ({ ...state, leaveRecords: state.leaveRecords.map(record => record.id === id ? { ...record, ...updates } : record) })); },
             addLeaveRecord(record) { taskStore.update(state => ({ ...state, leaveRecords: [...state.leaveRecords, record] })); }
@@ -24,6 +25,11 @@ function scenario(body) {
         let noteWriteFailure = false;
         let noteWrites = 0;
         let fileWrites = 0;
+        let fileSearches = [];
+        let pathResolutions = [];
+        let acceptedDirectories = [];
+        let acceptDirectory = true;
+        let beforeDirectorySync = async () => {};
         let lastPrompt;
         let requests = 0;
         let confirms = 0;
@@ -35,7 +41,13 @@ function scenario(body) {
         mock.module('./src/lib/stores/modal.js', () => ({ showConfirm: async () => { confirms++; return await confirm(); } }));
         mock.module('./src/lib/utils/local-file-tools.js', () => ({
             looksLikeFileIntent: text => /文件|file|workspace/.test(text),
-            searchLocalFiles: async () => [], readLocalFile: async () => ({path:'/workspace/doc.md',content:'safe'}),
+            resolveLocalPath: async path => {
+                pathResolutions.push(path);
+                if (path === '~/Desktop' || path === 'Desktop') return {path:'/isolated/OneDrive/Desktop',exists:true,isDirectory:true,authorized:acceptedDirectories.includes('/isolated/OneDrive/Desktop')};
+                return {path,exists:!path.includes('missing'),isDirectory:!path.endsWith('.md'),authorized:path.startsWith('/workspace') || acceptedDirectories.includes(path)};
+            },
+            syncTrustedDirectories: async directories => {await beforeDirectorySync();acceptedDirectories=acceptDirectory?directories:[];return acceptedDirectories;},
+            searchLocalFiles: async args => {fileSearches.push(args);return [{path:args.root+'/GPT/README.md',type:'file'}];}, readLocalFile: async () => ({path:'/workspace/doc.md',content:'safe'}),
             writeLocalFile: async args => {fileWrites++; return {path:args.path};}, deleteLocalFile: async () => ({path:'/workspace/doc.md'}),
             pickLocalTextFiles: async()=>[],readSelectedTextFiles:async()=>[],readPastedFilesAsAttachments:async()=>[],
             isContentUri: path => /^content:/.test(path || ''),pickMediaFiles:async()=>[],readSelectedMediaFiles:async()=>[],
@@ -289,4 +301,48 @@ test('task queries happen only after the native model requests the application r
     assert.equal(requests,2);
     assert.ok(!JSON.stringify(initialMessages).includes('ON_DEMAND_TASK_MARKER'));
     assert.ok(capturedMessages.some(message=>message.role==='tool' && message.content.includes('ON_DEMAND_TASK_MARKER')));
+`));
+
+test('desktop aliases resolve to the real native folder before authorization and execute after its allowlist is synchronized', () => scenario(`
+    response.toolCalls=[{name:'workplan_local_file',arguments:JSON.stringify({operation:'search',root:'~/Desktop',query:'GPT'})}];
+    await ai.sendChatMessage('桌面的GPT项目还能用吗？');
+    const card=get(ai.aiChatHistory).at(-1);
+    assert.equal(card.type,'file_confirm');
+    assert.equal(card.operation.root,'/isolated/OneDrive/Desktop');
+    assert.equal(card.operation.authorizationDirectory,'/isolated/OneDrive/Desktop');
+    assert.equal(fileSearches.length,0);
+    const result=await ai.confirmAiChatLocalFileOperation(get(ai.aiChatHistory).length-1,card.operation);
+    assert.equal(result.success,true);
+    assert.equal(fileSearches.length,1);
+    assert.equal(fileSearches[0].root,'/isolated/OneDrive/Desktop');
+    assert.ok(acceptedDirectories.includes('/isolated/OneDrive/Desktop'));
+    assert.ok(pathResolutions.includes('~/Desktop'));
+    assert.ok(!JSON.stringify(fileSearches).includes('/workspace/~'));
+`));
+
+test('a missing local directory reports its resolved location without authorizing or searching it', () => scenario(`
+    response.toolCalls=[{name:'workplan_local_file',arguments:JSON.stringify({operation:'search',root:'/missing/Desktop',query:'GPT'})}];
+    await ai.sendChatMessage('查看这个目录');
+    assert.equal(fileSearches.length,0);
+    assert.equal(acceptedDirectories.length,0);
+    assert.ok(capturedMessages.some(message=>message.role==='tool' && message.content.includes('目标路径不存在')));
+`));
+
+test('confirmation does not execute until native authorization is accepted, and a rejected grant stays blocked', () => scenario(`
+    const operation={operation:'search',root:'/isolated/OneDrive/Desktop',query:'GPT',authorizationDirectory:'/isolated/OneDrive/Desktop',originalUserText:'桌面的GPT项目还能用吗？'};
+    ai.aiChatHistory.set([{role:'assistant',type:'file_confirm',operation}]);
+    acceptDirectory=false;
+    assert.equal((await ai.confirmAiChatLocalFileOperation(0,operation)).success,false);
+    assert.equal(fileSearches.length,0);
+    assert.deepEqual(get(settingsStore).localFileConfig.trustedDirectories,[]);
+    acceptDirectory=true;
+    let release;
+    beforeDirectorySync=()=>new Promise(resolve=>{release=resolve;});
+    ai.aiChatHistory.set([{role:'assistant',type:'file_confirm',operation}]);
+    const pending=ai.confirmAiChatLocalFileOperation(0,operation);
+    while(!release) await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(fileSearches.length,0);
+    release();
+    assert.equal((await pending).success,true);
+    assert.equal(fileSearches.length,1);
 `));

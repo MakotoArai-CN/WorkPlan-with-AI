@@ -16,7 +16,9 @@ import {
     getMediaType,
     getFileExtension,
     SUPPORTED_MEDIA_EXTENSIONS,
-    isPathCoveredByContentTree
+    isPathCoveredByContentTree,
+    resolveLocalPath,
+    syncTrustedDirectories
 } from '../utils/local-file-tools.js';
 import {
     looksLikeWebSearchIntent,
@@ -3005,7 +3007,21 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
     if ([plan.path, plan.root].some(isSensitiveAiPath)) {
         return { role: 'assistant', type: 'text', content: '拒绝自动访问应用数据库、凭据或密钥文件。请选择不包含敏感信息的文件。' };
     }
-    const authorizationDirectory = resolveUnauthorizedDirectory(plan, settings);
+    // Resolve before authorization: approval must name the real OS directory,
+    // not a model-generated ~ or environment-variable string beneath workspace.
+    let resolved;
+    const target = operation === 'search' ? plan.root || settings.workspaceRoot : plan.path;
+    if (target && !isContentUri(target)) {
+        resolved = await resolveLocalPath(target);
+        if (config.isCurrent && !config.isCurrent()) throw new DOMException('操作已取消', 'AbortError');
+        if ((operation === 'search' || operation === 'read' || operation === 'delete') && !resolved.exists) {
+            return { role: 'assistant', type: 'text', content: `目标路径不存在：${resolved.path}。没有执行操作，请选择实际目录或检查项目名称。` };
+        }
+        if (operation === 'search' && !resolved.isDirectory) return { role: 'assistant', type: 'text', content: `搜索目标不是目录：${resolved.path}` };
+        plan = operation === 'search' ? { ...plan, root: resolved.path } : { ...plan, path: resolved.path };
+    }
+    if ([plan.path, plan.root].some(isSensitiveAiPath)) return { role: 'assistant', type: 'text', content: '拒绝自动访问应用数据库、凭据或密钥文件。' };
+    const authorizationDirectory = resolved?.authorized ? '' : resolveUnauthorizedDirectory(plan, settings);
 
     if (authorizationDirectory) {
         return {
@@ -3013,6 +3029,7 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
             type: 'file_confirm',
             operation: {
                 ...plan,
+                originalUserText: userText,
                 trustedDirectories,
                 authorizationDirectory
             },
@@ -3027,6 +3044,7 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
                 type: 'file_confirm',
                 operation: {
                     ...plan,
+                    originalUserText: userText,
                     trustedDirectories
                 },
                 message: plan.message || '请确认本地文件操作。'
@@ -3427,7 +3445,7 @@ function buildNativeToolDefinitions(allowLocalFiles = true, allowApplicationData
                             enum: ['search', 'read', 'write', 'delete']
                         },
                         path: { type: 'string', description: '目标文件路径。read/write/delete 使用。' },
-                        root: { type: 'string', description: '搜索根目录，可选。' },
+                        root: { type: 'string', description: '搜索根目录。桌面可用 Desktop 或 ~/Desktop，由原生端解析真实系统桌面（含OneDrive重定向）。不要猜测用户目录，不要拼接工作目录与~。读取仅在用户授权后执行。' },
                         query: { type: 'string', description: '搜索关键词。' },
                         content: { type: 'string', description: 'write 时写入的完整内容。' },
                         response_goal: { type: 'string' },
@@ -4702,6 +4720,7 @@ async function requestOnDemandReply(text, config, context = {}, attachments = []
         { role: 'system', content: `你是 WorkPlan 助手。当前时间：${getFormattedDateTime()}。${AI_TRUST_RULES}
 本轮不预载任何应用数据。根据用户当前问题自行决定是否需要数据：普通闲聊、常识、写作只直接回答；涉及当前笔记、任务等应用记录时，先用 workplan_read_data 按需查询，拿到真实内容后再回答，不要让已选择笔记的用户重复粘贴。
 当前页面类型：${context.scope === 'notes' ? '笔记页面' : '通用聊天'}，${context.activeNoteId ? '有选中笔记，可查询current_note' : '未显式选择笔记'}。标题、正文和其他记录必须查询才能获得。
+本地路径由系统原生解析：桌面使用Desktop，用户目录使用~，不猜测C盘用户名或把~拼到工作目录。目录授权只是读取权限，不代表路径存在。路径/权限失败后解释实际错误并请用户选择目录，勿自动重复相同调用。只检查项目文件和配置，不执行项目代码或声称项目已运行。
 ${context.scope === 'notes' ? '工作文档模式：通过工具取得正文后保持原有Markdown结构，直接给出草稿，不声称已保存。' : ''}
 查询其他笔记先列出标题，再按真实ID读取单篇；分页与截断必须告知范围。锁定、删除或查询失败时准确说明，不编造数据。仅用户明确要求保存/修改/删除时可请求变更工具；返回确认卡片不等于执行成功。
 回复风格：${['default', 'fun', 'professional', 'concise', 'teacher'].includes(chatStyle) ? chatStyle : 'default'}。
@@ -4869,9 +4888,18 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
     try {
         if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件确认已取消。' };
         if (operation?.authorizationDirectory) {
-            settingsStore.addTrustedDirectory(operation.authorizationDirectory);
+            const requested = operation.authorizationDirectory;
+            const resolved = await resolveLocalPath(requested);
+            if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '授权已取消。' };
+            if (!resolved.exists || !resolved.isDirectory) throw new Error(`授权目录不存在或不可用：${resolved.path}`);
+            if (normalizeComparablePath(resolved.path) !== normalizeComparablePath(requested)) throw new Error('授权目录已改变，请重新确认实际目录。');
+            const directories = [...(get(settingsStore).localFileConfig?.trustedDirectories || []), resolved.path];
+            const accepted = await syncTrustedDirectories(directories);
+            if (!accepted.some(path => normalizeComparablePath(path) === normalizeComparablePath(resolved.path))) throw new Error('原生端未接受目录授权，未执行文件操作。');
+            if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '授权已取消。' };
+            settingsStore.addTrustedDirectory(resolved.path);
         }
-        const result = await runLocalFilePlan(operation, operation.message || '', currentConfig, false);
+        const result = await runLocalFilePlan(operation, operation.originalUserText || operation.message || '', currentConfig, false);
         if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件操作结果属于已关闭的对话。' };
         aiChatHistory.update(history => {
             const nextHistory = [...history];

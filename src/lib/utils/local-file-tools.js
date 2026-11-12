@@ -220,6 +220,12 @@ export async function getWorkspaceRoot() {
     }
 }
 
+export async function resolveLocalPath(path) {
+    if (isContentUri(path)) return { path, exists: true, isDirectory: true, authorized: false };
+    if (!isTauriRuntime) throw new Error('当前环境不能解析本机目录，请在桌面应用中选择实际路径。');
+    return await invoke('resolve_local_path', { path: String(path || '') });
+}
+
 /**
  * Push the user's configured trusted directories to the backend allowlist.
  * The file commands ignore their `trustedDirs` argument, so this is the only
