@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.5.23",
+    "date": "2026-11-13",
+    "changes": {
+      "zh": [
+        "修复连续追问未携带会话历史的问题，保留近期对话和文件工具的范围回执，长历史按完整轮次整理；应用记录仍需按权限重新查询。",
+        "文件确认后结合原请求和执行回执完成回复，不再重复执行已确认的写入。",
+        "主导航展开和收起时增加文字淡入淡出与图标位移过渡，保留移动端导航及减少动态效果设置。",
+        "能力栏合并重复项目，改为应用操作、本地文件和网页搜索；应用操作状态以实际工具调用检测为准。"
+      ],
+      "en": [
+        "Restore conversation history for follow-up questions, retaining recent turns and file-operation scope receipts while compacting older turns; application records still require authorized queries.",
+        "Finish confirmed file operations using the original request and execution receipt without replaying the write.",
+        "Animate navigation labels and icon positions during collapse and expansion while preserving mobile navigation and reduced-motion preferences.",
+        "Simplify capability badges to app actions, local files and web search, and base app-action availability on actual function-call checks."
+      ],
+      "ja": [
+        "追加質問に会話履歴とファイル操作範囲を引き継ぎ、古い履歴を整理します。アプリの記録は引き続き権限を確認して照会します。",
+        "ファイル確認後は元の依頼と実行結果から返信を完了し、書き込みを繰り返しません。",
+        "ナビゲーションの開閉時に文字とアイコンを滑らかに切り替え、モバイル表示と視差効果を減らす設定を維持します。",
+        "能力表示をアプリ操作、ローカルファイル、ウェブ検索に整理し、実際のツール呼び出し検証を反映します。"
+      ]
+    }
+  },
+  {
     "version": "0.5.22",
     "date": "2026-11-12",
     "changes": {

@@ -20,6 +20,21 @@ test('long note descriptions and message content cannot set the side panel minim
     expect(detail).toContain('w-full min-w-0 min-h-0 overflow-hidden');
 });
 
+test('capability UI groups implementation details under application actions without duplicate badges', () => {
+    const chat = readFileSync(new URL('../src/lib/components/AiChat.svelte', import.meta.url), 'utf8');
+    const badges = chat.slice(chat.indexOf('$: capabilityBadges'), chat.indexOf('let isProbing'));
+    expect(badges).toContain('capability_application');
+    expect(chat).not.toContain('capability_mode_internal');
+    expect(chat).not.toContain('capability_project_tools');
+    expect(chat).not.toContain('capability_native_tools');
+    const nav = readFileSync(new URL('../src/lib/components/Sidebar.svelte', import.meta.url), 'utf8');
+    const items = nav.slice(nav.indexOf('{#each navItems'), nav.indexOf('</nav>'));
+    expect(items).not.toContain('{#if !collapsed}');
+    expect(items).toContain('aria-hidden={collapsed}');
+    expect(nav).toContain('opacity 180ms');
+    expect(nav).toContain('prefers-reduced-motion: reduce');
+});
+
 test('note shortcuts have compact translated labels while preserving the original submitted requests', () => {
     expect(panel).toContain('$: panelMeta = getPanelMeta($aiPanelContext, $_);');
     for (const language of ['zh', 'en', 'ja']) {

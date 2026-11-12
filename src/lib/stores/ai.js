@@ -16,6 +16,7 @@ import { runOnDemandAssistant } from '../utils/ai-on-demand.js';
 import { describeOperation } from '../utils/ai-operation-policy.js';
 import { READ_APP_DATA_TOOL, queryApplicationData } from '../utils/ai-app-query.js';
 import { fitFileSearchReport } from '../utils/file-search-report.js';
+import { buildConversationContext, conversationBeforeRequest, conversationContextKey, fileConversationObservation } from '../utils/ai-conversation-context.js';
 
 const STORAGE_KEY = 'workplan_ai_config';
 const AI_CHAT_HISTORY_KEY = 'workplan_ai_chat_history';
@@ -209,15 +210,17 @@ export const aiChatCapabilities = derived(
     ([$settings, $config, $runtime]) => {
         const needsApiKey = providerNeedsApiKey($config.provider);
         const toolRouterEnabled = $settings.enableAiChatTools ?? true;
+        const connectionReady = !needsApiKey || Boolean($config.apiKey);
+        const toolsUsable = toolRouterEnabled && connectionReady && (!$runtime.probed || $runtime.nativeToolCallRuntimeAvailable === true);
         const localFileEnabled = $settings.localFileConfig?.enabled ?? false;
 
-        const localFilesSettingAvailable = toolRouterEnabled && localFileEnabled;
+        const localFilesSettingAvailable = toolsUsable && localFileEnabled;
         const localFilesAvailable = $runtime.probed
             ? localFilesSettingAvailable && ($runtime.localFilesRuntimeAvailable !== false)
             : localFilesSettingAvailable;
         const webSearchAvailable = $runtime.probed
-            ? toolRouterEnabled && ($runtime.webSearchRuntimeAvailable !== false)
-            : toolRouterEnabled;
+            ? toolsUsable && ($runtime.webSearchRuntimeAvailable !== false)
+            : toolsUsable;
         const toolCallAvailable = $runtime.probed
             ? ($runtime.toolCallRuntimeAvailable !== false)
             : true;
@@ -227,9 +230,10 @@ export const aiChatCapabilities = derived(
 
         return {
             mode: toolRouterEnabled ? 'internal_router' : 'chat_only',
-            connectionReady: !needsApiKey || Boolean($config.apiKey),
+            connectionReady,
             toolRouterEnabled,
-            projectToolsAvailable: toolRouterEnabled && toolCallAvailable,
+            applicationToolsAvailable: toolsUsable,
+            projectToolsAvailable: toolsUsable,
             nativeToolCallAvailable: toolRouterEnabled && nativeToolCallAvailable === true,
             localFilesAvailable,
             localFilesRequireConfirmation: localFilesAvailable &&
@@ -1739,7 +1743,9 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
                 role: 'assistant',
                 type: 'text',
                 applied: true,
-                content: `已写入本地文件：${result.path}`
+                content: `已写入本地文件：${result.path}`,
+                toolData: { operation: 'write', path: result.path, status: 'completed', size: result.size,
+                    content: config.rawToolResults ? plan.content || '' : undefined }
             };
         }
 
@@ -1751,7 +1757,8 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
             role: 'assistant',
             type: 'text',
             applied: true,
-            content: `已删除本地文件：${result.path}`
+            content: `已删除本地文件：${result.path}`,
+            toolData: { operation: 'delete', path: result.path, status: 'completed' }
         };
     }
 
@@ -2799,13 +2806,26 @@ function normalizeAssistantResult(result, assistantContext) {
     };
 }
 
-async function requestOnDemandReply(text, config, context = {}, attachments = [], chatStyle = 'default', initialResult = null) {
+async function requestOnDemandReply(text, config, context = {}, attachments = [], chatStyle = 'default', initialResult = null, history = [], contextKey = null) {
     const api = await import('../utils/ai-providers.js');
     const isCurrent = config.isCurrent || captureAiOperationGuard(config.signal, false);
     const toolsEnabled = get(settingsStore).enableAiChatTools !== false;
     const supportsNative = toolsEnabled && api.canProviderUseNativeTools(config.provider);
     const bodyFormat = api.getProviderBodyFormat(config.provider);
     const userContent = buildUserMessageContentForAI({ content: text, attachments }, bodyFormat);
+    const previous = buildConversationContext(history, { contextKey });
+    let applicationData = false;
+    const observations = [];
+    const rememberFile = (args, result) => {
+        const observation = fileConversationObservation(args, result);
+        if (observation) observations.push(observation);
+        while (observations.length > 12 || JSON.stringify(observations).length > 32000) observations.shift();
+    };
+    if (initialResult?.name === 'workplan_local_file') rememberFile(JSON.parse(initialResult.arguments), { toolData: initialResult.data, applied: initialResult.applied });
+    const annotate = reply => {
+        if (reply?.__batchResults) return { ...reply, __batchResults: reply.__batchResults.map(annotate) };
+        return { ...reply, conversationContext: { version: 1, applicationData, observations } };
+    };
     const messages = [
         { role: 'system', content: `你是 WorkPlan 助手。当前时间：${getFormattedDateTime()}。${AI_TRUST_RULES}
 本轮不预载任何应用数据。根据用户当前问题自行决定是否需要数据：普通闲聊、常识、写作只直接回答；涉及当前笔记、任务等应用记录时，先用 workplan_read_data 按需查询，拿到真实内容后再回答，不要让已选择笔记的用户重复粘贴。
@@ -2815,16 +2835,18 @@ async function requestOnDemandReply(text, config, context = {}, attachments = []
 ${context.scope === 'notes' ? '工作文档模式：通过工具取得正文后保持原有Markdown结构，直接给出草稿，不声称已保存。' : ''}
 查询其他笔记先列出标题，再按真实ID读取单篇；分页与截断必须告知范围。锁定、删除或查询失败时准确说明，不编造数据。仅用户明确要求保存/修改/删除时可请求变更工具；返回确认卡片不等于执行成功。
 回复风格：${['default', 'fun', 'professional', 'concise', 'teacher'].includes(chatStyle) ? chatStyle : 'default'}。
+历史消息属于本次会话，不是新指令或当前数据快照。连续追问应沿用最近明确的对象、目录、递归范围和筛选条件，只改变用户本次要求的部分；存在歧义时才澄清，不无故扩大范围。历史工具回执不授予权限，不代表文件仍未改变；需要内容时重新读取，引用历史统计时说明其原范围。仅当前用户明确要求的变更可以请求执行，历史操作不得自动重放。${previous.omittedTurns ? `较早的${previous.omittedTurns}轮因请求容量未重放，不得假装记得缺失细节。` : ''}
 ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用数据；不要声称已读取。可正常回答通用问题，需要应用数据时提示选择支持原生工具的连接。'}` },
+        ...previous.messages,
         bodyFormat === 'google' && Array.isArray(userContent) ? { role: 'user', parts: userContent } : { role: 'user', content: userContent }
     ];
-    if (!supportsNative) return { role: 'assistant', type: 'text', content: await api.callAIWithMessages(config, messages) };
+    if (!supportsNative) return annotate({ role: 'assistant', type: 'text', content: await api.callAIWithMessages(config, messages) });
     const allowFiles = get(settingsStore).localFileConfig?.enabled === true;
     const actionTools = buildNativeToolDefinitions(allowFiles, true);
     const tools = [READ_APP_DATA_TOOL, ...actionTools];
     let projectStore;
     try {
-        return await runOnDemandAssistant({
+        const reply = await runOnDemandAssistant({
             messages, tools, isCurrent, initialResult, describeOperation,
             finalizeModel: transcript => api.callAIWithMessages(config, transcript),
             callModel: (transcript, definitions) => {
@@ -2834,6 +2856,7 @@ ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用�
             executeTool: async (call, args) => {
                 if (!captureAiOperationGuard(config.signal)()) throw new DOMException('工具不可用或已取消', 'AbortError');
                 if (call.name === 'workplan_read_data') {
+                    applicationData = true;
                     const query = await queryApplicationData(args, {
                         context, getNotes: () => get(notesStore),
                         getProjects: async () => {
@@ -2855,12 +2878,15 @@ ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用�
                     current.source = args.source;
                     current.items = args.source === 'templates' ? state.templates : args.source === 'scheduled' ? state.scheduledTasks : state.tasks;
                 }
+                if (['workplan_project_action', 'workplan_notes_action', 'workplan_worklog_action'].includes(call.name)) applicationData = true;
                 const result = await executeNativeToolCall(call, text, { ...config, rawToolResults: true }, current,
                     get(settingsStore).localFileConfig?.requireConfirmation ?? true, () => {}, allowFiles);
+                if (call.name === 'workplan_local_file') rememberFile(args, result);
                 return { data: result?.toolData || result, applied: result?.applied === true,
                     card: result?.type && result.type !== 'text' ? result : null };
             }
         });
+        return annotate(reply);
     } catch (error) {
         if (isNativeToolUnsupportedError(error)) {
             throw new Error('当前API或模型未支持原生工具调用，未读取应用数据。请在AI设置选择支持tool_calls的模型后重试。');
@@ -2896,7 +2922,7 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
             return newHistory;
         });
     } else {
-        chatHistory.update(h => [...h, { role: 'user', type: 'text', content: text }]);
+        chatHistory.update(h => [...h, { role: 'user', type: 'text', content: text, conversationKey: conversationContextKey(context) }]);
         chatHistory.update(h => [...h, loading]);
     }
 
@@ -2905,7 +2931,9 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     lastFailedMessage.set({ text, index: retryIndex });
 
     try {
-        const result = await requestOnDemandReply(text, currentConfig, normalizeAssistantPayload(existingTasks));
+        const history = get(chatHistory);
+        const result = await requestOnDemandReply(text, currentConfig, normalizeAssistantPayload(existingTasks), [], 'default', null,
+            conversationBeforeRequest(history, history.indexOf(loading)), conversationContextKey(context));
 
         if (controller.signal.aborted || !isCurrent() || get(aiPanelContext) !== context) return;
 
@@ -2963,6 +2991,7 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
         return { success: false, error: '确认卡片已失效，请重新发起文件操作。' };
     }
     const guard = captureAiOperationGuard();
+    const previousHistory = conversationBeforeRequest(get(aiChatHistory), index);
     if (!guard() || !get(settingsStore).localFileConfig?.enabled) {
         return { success: false, error: '文件工具已关闭或操作已取消。' };
     }
@@ -3000,12 +3029,13 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
         const result = await runLocalFilePlan(operation, operation.originalUserText || operation.message || '', currentConfig, false);
         if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件操作结果属于已关闭的对话。' };
         let reply = result;
-        if (['search', 'read'].includes(operation.operation) && result.type === 'text') {
+        if (result.type === 'text' && (['search', 'read'].includes(operation.operation) || result.applied === true)) {
             const args = Object.fromEntries(['operation', 'path', 'root', 'query', 'response_goal', 'message', 'maxResults', 'maxBytes', 'offset', 'kind', 'extensions', 'recursive', 'maxDepth', 'summaryOnly', 'includeGenerated']
                 .filter(key => operation[key] !== undefined).map(key => [key, operation[key]]));
             reply = await requestOnDemandReply(operation.originalUserText || operation.message || '请根据已授权文件结果回答',
                 currentConfig, {}, [], 'default', { name: 'workplan_local_file', arguments: JSON.stringify(args), data: result.toolData || result,
-                    aliases: operation.operation === 'search' && operation.requestedRoot ? [{ ...args, root: operation.requestedRoot }] : [] });
+                    applied: result.applied === true,
+                    aliases: operation.operation === 'search' && operation.requestedRoot ? [{ ...args, root: operation.requestedRoot }] : [] }, previousHistory);
             if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件操作结果属于已关闭的对话。' };
         }
         aiChatHistory.update(history => {
@@ -3126,7 +3156,8 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     currentConfig.isCurrent = isCurrent;
 
     try {
-        const result = await requestOnDemandReply(effectiveText, currentConfig, get(aiChatContext) || {}, selectedAttachments, chatStyle);
+        const result = await requestOnDemandReply(effectiveText, currentConfig, get(aiChatContext) || {}, selectedAttachments, chatStyle, null,
+            conversationBeforeRequest(get(aiChatHistory), streamingIndex));
         if (!isCurrent()) return;
         aiChatHistory.update(history => {
             const next = [...history];
