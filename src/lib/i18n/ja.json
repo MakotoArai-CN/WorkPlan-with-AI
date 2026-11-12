@@ -757,7 +757,7 @@
     "style_hint": "スタイル: {style} · Enter で送信",
     "stop_generating": "生成を停止",
     "capability_title": "能力",
-    "capability_mode_internal": "内蔵ツールルーター",
+    "capability_mode_internal": "ネイティブツール・必要時のみ照会",
     "capability_mode_chat_only": "チャット専用",
     "capability_project_tools": "プロジェクトツール",
     "capability_native_tools": "ネイティブツール呼び出し",

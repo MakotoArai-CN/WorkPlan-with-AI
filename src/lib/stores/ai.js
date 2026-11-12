@@ -36,8 +36,9 @@ import { TASK_STATUSES, TASK_PRIORITIES, resolveStatus, resolvePriority, normali
 import { formatLocalDateTime } from '../utils/datetime.js';
 import { AI_TRUST_RULES, MAX_NATIVE_TOOL_CALLS, isExplicitWebFetchTarget, parseToolArguments, untrustedAiContext, validateNativeToolCall } from '../utils/ai-tool-policy.js';
 import { isSensitiveAiPath, redactAiSecrets } from '../utils/ai-file-security.js';
-import { requestsApplicationData } from '../utils/ai-data-policy.js';
 import { assertChatAttachments } from '../utils/ai-attachment-policy.js';
+import { READ_APP_DATA_TOOL, runOnDemandAssistant } from '../utils/ai-on-demand.js';
+import { queryApplicationData } from '../utils/ai-app-query.js';
 
 const STORAGE_KEY = 'workplan_ai_config';
 const AI_CHAT_HISTORY_KEY = 'workplan_ai_chat_history';
@@ -2106,61 +2107,6 @@ function normalizeAssistantPayload(payload = []) {
     };
 }
 
-async function buildAiChatAssistantPayload(text = '') {
-    if (!requestsApplicationData(text)) return { ...getDefaultAiPanelContext(), items: [] };
-    let context = normalizeAssistantPayload(get(aiChatContext));
-    if (/笔记|工作文档|\bnotes?\b/i.test(text)) {
-        return context.activeNoteId
-            ? { ...context, scope: 'notes', mode: 'note', items: [] }
-            : { ...getDefaultAiPanelContext(), scope: 'notes', items: [] };
-    }
-    if (/加班|工时|请假|工资|薪资|worklog|overtime|payroll|leave record/i.test(text)) return { ...getDefaultAiPanelContext(), scope: 'worklog', items: [] };
-    if (context.mode === 'note' || context.scope === 'notes') context = getDefaultAiPanelContext();
-
-    const { taskStore } = await import('./tasks.js');
-    const taskState = get(taskStore);
-    const fallbackSource = context.source && context.source !== 'notes'
-        ? context.source
-        : 'tasks';
-    const source = CHAT_ASSISTANT_CONTEXT_SCOPES.has(context.scope)
-        ? detectAssistantSourceFromText(text, fallbackSource)
-        : fallbackSource;
-    const sourceMeta = getAssistantMetaBySource(source);
-    const items = source === 'templates'
-        ? (taskState.templates || [])
-        : source === 'scheduled'
-            ? (taskState.scheduledTasks || [])
-            : (taskState.tasks || []);
-
-    return {
-        ...getDefaultAiPanelContext(),
-        ...sourceMeta,
-        ...context,
-        scope: context.scope && CHAT_ASSISTANT_CONTEXT_SCOPES.has(context.scope)
-            ? context.scope
-            : sourceMeta.scope,
-        title: context.title || sourceMeta.title,
-        description: context.description || sourceMeta.description,
-        source,
-        entityLabel: context.entityLabel || sourceMeta.entityLabel,
-        items
-    };
-}
-
-function shouldUseAssistantToolsInChat(text = '') {
-    if (!requestsApplicationData(text)) return false;
-    const context = get(aiChatContext);
-    // Only explicitly specialized panels should force the tool router. The
-    // dashboard/project scope used by the normal AI chat must still classify
-    // the message, otherwise "今天开会好累" becomes a task-create command.
-    if (context?.scope === 'templates' || context?.scope === 'scheduled' || context?.scope === 'notes') {
-        return true;
-    }
-    if (looksLikeFileIntent(text)) return true;
-    if (looksLikeGeneralChatIntent(text)) return false;
-    return looksLikeWebSearchIntent(text) || looksLikeProjectIntent(text);
-}
-
 function extractQuotedSegment(text = '') {
     const patterns = [
         /`([^`]+)`/,
@@ -2527,10 +2473,10 @@ function formatNoteContextForAI(context = {}) {
 
     return [
         '【当前工作笔记】',
-        `标题：${context.noteTitle || '未命名笔记'}`,
-        `分类：${context.noteCategory || '全部'}`,
+        `标题：${note.title || '未命名笔记'}`,
+        `分类：${note.category || '全部'}`,
         '内容：',
-        context.noteContent || '（当前为空）'
+        note.content || '（当前为空）'
     ].join('\n');
 }
 
@@ -4063,7 +4009,7 @@ async function runNativeWorklogAction(args, isCurrent = captureAiOperationGuard(
             if (!ok || !targetUnchanged()) return { role: 'assistant', type: 'text', content: '已取消删除，或记录已发生变化，请重新确认。' };
             if (kind === 'leave') taskStore.deleteLeaveRecord(existing.id);
             else taskStore.deleteOvertimeRecord(existing.id);
-            return { role: 'assistant', type: 'text', content: `已删除${label}记录。` };
+            return { role: 'assistant', type: 'text', applied: true, content: `已删除${label}记录。` };
         }
         const updates = {};
         if (kind === 'leave') {
@@ -4094,7 +4040,7 @@ async function runNativeWorklogAction(args, isCurrent = captureAiOperationGuard(
         if (!ok || !targetUnchanged()) return { role: 'assistant', type: 'text', content: '已取消修改，或记录已发生变化，请重新确认。' };
         if (kind === 'leave') taskStore.updateLeaveRecord(existing.id, updates);
         else taskStore.updateOvertimeRecord(existing.id, updates);
-        return { role: 'assistant', type: 'text', content: `已修改记录 ${existing.id}。` };
+        return { role: 'assistant', type: 'text', applied: true, content: `已修改记录 ${existing.id}。` };
     }
 
     return { role: 'assistant', type: 'text', content: '无法识别工时操作。' };
@@ -4109,12 +4055,12 @@ async function runNativeNotesAction(args, isCurrent = captureAiOperationGuard())
     if (action === 'list') {
         const limit = Number(args.limit) || 20;
         const lines = visibleNotes.slice(0, limit).map(note => (
-            `- ${note.id}《${note.title}》分类=${note.category || ''}\n${String(note.content || '').slice(0, 1500)}`
+            `- ${note.id}《${String(note.title || '').slice(0, 300)}》分类=${String(note.category || '').slice(0, 100)}`
         ));
         return {
             role: 'assistant',
             type: 'text',
-            content: lines.length ? `共 ${visibleNotes.length} 篇可读笔记（锁定笔记已隐藏）：\n${lines.join('\n')}` : '没有可读的工作笔记。'
+            content: lines.length ? `共 ${visibleNotes.length} 篇可读笔记（仅标题，正文需按ID调用workplan_read_data）：\n${lines.join('\n')}` : '没有可读的工作笔记。'
         };
     }
 
@@ -4141,7 +4087,7 @@ async function runNativeNotesAction(args, isCurrent = captureAiOperationGuard())
         const ok = await confirmAiMutation('确认删除笔记', `确定删除《${note.title}》吗？此操作不可撤销。`);
         if (!ok || !targetUnchanged()) return { role: 'assistant', type: 'text', content: '已取消删除笔记，或笔记已发生变化，请重新确认。' };
         notesStore.deleteNote(note.id);
-        return { role: 'assistant', type: 'text', content: `已删除笔记《${note.title}》。` };
+        return { role: 'assistant', type: 'text', applied: true, content: `已删除笔记《${note.title}》。` };
     }
 
     if (action === 'update') {
@@ -4152,7 +4098,7 @@ async function runNativeNotesAction(args, isCurrent = captureAiOperationGuard())
         const ok = await confirmAiMutation('确认修改笔记', `将修改《${note.title}》。\n新标题：${updates.title || note.title}\n内容：${String(updates.content ?? note.content).slice(0, 200)}`);
         if (!ok || !targetUnchanged()) return { role: 'assistant', type: 'text', content: '已取消修改笔记，或笔记已发生变化，请重新确认。' };
         notesStore.updateNote(note.id, updates);
-        return { role: 'assistant', type: 'text', content: `已修改笔记《${updates.title || note.title}》。` };
+        return { role: 'assistant', type: 'text', applied: true, content: `已修改笔记《${updates.title || note.title}》。` };
     }
 
     return { role: 'assistant', type: 'text', content: '无法识别笔记操作。' };
@@ -4745,6 +4691,72 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     return normalizeAssistantResult(result, assistantContext);
 }
 
+async function requestOnDemandReply(text, config, context = {}, attachments = [], chatStyle = 'default') {
+    const api = await import('../utils/ai-providers.js');
+    const isCurrent = config.isCurrent || captureAiOperationGuard(config.signal, false);
+    const toolsEnabled = get(settingsStore).enableAiChatTools !== false;
+    const supportsNative = toolsEnabled && api.canProviderUseNativeTools(config.provider);
+    const bodyFormat = api.getProviderBodyFormat(config.provider);
+    const userContent = buildUserMessageContentForAI({ content: text, attachments }, bodyFormat);
+    const messages = [
+        { role: 'system', content: `你是 WorkPlan 助手。当前时间：${getFormattedDateTime()}。${AI_TRUST_RULES}
+本轮不预载任何应用数据。根据用户当前问题自行决定是否需要数据：普通闲聊、常识、写作只直接回答；涉及当前笔记、任务等应用记录时，先用 workplan_read_data 按需查询，拿到真实内容后再回答，不要让已选择笔记的用户重复粘贴。
+当前页面类型：${context.scope === 'notes' ? '笔记页面' : '通用聊天'}，${context.activeNoteId ? '有选中笔记，可查询current_note' : '未显式选择笔记'}。标题、正文和其他记录必须查询才能获得。
+${context.scope === 'notes' ? '工作文档模式：通过工具取得正文后保持原有Markdown结构，直接给出草稿，不声称已保存。' : ''}
+查询其他笔记先列出标题，再按真实ID读取单篇；分页与截断必须告知范围。锁定、删除或查询失败时准确说明，不编造数据。仅用户明确要求保存/修改/删除时可请求变更工具；返回确认卡片不等于执行成功。
+回复风格：${['default', 'fun', 'professional', 'concise', 'teacher'].includes(chatStyle) ? chatStyle : 'default'}。
+${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用数据；不要声称已读取。可正常回答通用问题，需要应用数据时提示选择支持原生工具的连接。'}` },
+        bodyFormat === 'google' && Array.isArray(userContent) ? { role: 'user', parts: userContent } : { role: 'user', content: userContent }
+    ];
+    if (!supportsNative) return { role: 'assistant', type: 'text', content: await api.callAIWithMessages(config, messages) };
+    const allowFiles = get(settingsStore).localFileConfig?.enabled === true;
+    const actionTools = buildNativeToolDefinitions(allowFiles, true);
+    const tools = [READ_APP_DATA_TOOL, ...actionTools];
+    let projectStore;
+    try {
+        return await runOnDemandAssistant({
+            messages, tools, isCurrent,
+            callModel: (transcript, definitions) => {
+                if (get(settingsStore).enableAiChatTools === false) throw new DOMException('工具已关闭', 'AbortError');
+                return api.callAIWithMessagesAndTools(config, transcript, definitions, { toolChoice: 'auto', signal: config.signal });
+            },
+            readData: async args => {
+                if (get(settingsStore).enableAiChatTools === false) throw new DOMException('工具已关闭', 'AbortError');
+                return queryApplicationData(args, {
+                    context, getNotes: () => get(notesStore),
+                    getProjects: async () => {
+                        projectStore ||= (await import('./tasks.js')).taskStore;
+                        return get(projectStore);
+                    },
+                    getProjectsSnapshot: () => projectStore ? get(projectStore) : null,
+                    overtimeEnabled: () => get(settingsStore).enableOvertime === true
+                });
+            },
+            executeAction: async call => {
+                if (!captureAiOperationGuard(config.signal)()) throw new DOMException('工具不可用或已取消', 'AbortError');
+                const current = { ...context };
+                // Resolve targets locally at execution time, never as a passive
+                // prompt snapshot. The model must obtain real IDs via queries.
+                const args = parseNativeToolArguments(call.arguments);
+                if (call.name === 'workplan_project_action') {
+                    projectStore ||= (await import('./tasks.js')).taskStore;
+                    if (!isCurrent()) throw new DOMException('操作已取消', 'AbortError');
+                    const state = get(projectStore);
+                    current.source = args.source;
+                    current.items = args.source === 'templates' ? state.templates : args.source === 'scheduled' ? state.scheduledTasks : state.tasks;
+                }
+                return executeNativeToolCall(call, text, config, current,
+                    get(settingsStore).localFileConfig?.requireConfirmation ?? true, () => {}, allowFiles);
+            }
+        });
+    } catch (error) {
+        if (isNativeToolUnsupportedError(error)) {
+            throw new Error('当前API或模型未支持原生工具调用，未读取应用数据。请在AI设置选择支持tool_calls的模型后重试。');
+        }
+        throw error;
+    }
+}
+
 export async function sendAiMessage(text, existingTasks = [], retryIndex = null) {
     if (!text.trim()) return;
     if (get(isAiLoading)) throw new Error('请等待当前 AI 请求完成或先停止请求。');
@@ -4781,25 +4793,7 @@ export async function sendAiMessage(text, existingTasks = [], retryIndex = null)
     lastFailedMessage.set({ text, index: retryIndex });
 
     try {
-        let result;
-        if (!requestsApplicationData(text)) {
-            const { callAIWithMessages } = await import('../utils/ai-providers.js');
-            const content = await callAIWithMessages(currentConfig, [
-                { role: 'system', content: `只根据用户当前消息回答，不读取或分析应用内数据。${AI_TRUST_RULES}` },
-                { role: 'user', content: text }
-            ]);
-            result = { role: 'assistant', type: 'text', content };
-        } else {
-            const supplied = normalizeAssistantPayload(existingTasks);
-            const relevantContext = supplied.scope === 'notes' && !/笔记|工作文档|\bnotes?\b/i.test(text)
-                ? await buildAiChatAssistantPayload(text) : supplied;
-            result = await resolveAssistantMessage(text, relevantContext, currentConfig, null, null, { allowLocalFiles: false });
-        }
-
-        // Right-side assistant doesn't support streaming — fallback to non-stream response
-        if (result?.__useStreamingChat) {
-            result = await buildContextualAssistantResponse(text, normalizeAssistantPayload(existingTasks), currentConfig);
-        }
+        const result = await requestOnDemandReply(text, currentConfig, normalizeAssistantPayload(existingTasks));
 
         if (controller.signal.aborted || !isCurrent() || get(aiPanelContext) !== context) return;
 
@@ -6192,67 +6186,6 @@ async function analyzeQueryIntent(userText, allTasks, relevantTasks, dateInfo, c
     }
 }
 
-async function buildContextMessages(history, chatStyle, bodyFormat = 'openai', useApplicationData = false) {
-    const nowStr = getFormattedDateTime();
-    const stylePrompts = {
-        default: `你是 WorkPlan 的智能助手。当前时间：${nowStr}。请用友好、专业的方式回答用户问题。`,
-        fun: `你是 WorkPlan 的智能助手。当前时间：${nowStr}。可以风趣幽默、适度自嘲，但不攻击用户；保持逻辑清晰、事实准确，不冒充其他模型或服务商。`,
-        professional: `你是一个专业严谨的助手。当前时间：${nowStr}。请用正式、专业的语气回答，注重逻辑和准确性。`,
-        concise: `你是一个简洁高效的助手。当前时间：${nowStr}。请用最简短的方式回答问题，直击要点。`,
-        teacher: `你是一个耐心的老师。当前时间：${nowStr}。请用循循善诱的方式解释问题，适当举例说明。`
-    };
-    const systemPrompt = stylePrompts[chatStyle] || stylePrompts.default;
-    const messages = [{ role: 'system', content: `${systemPrompt}\n${AI_TRUST_RULES}\n未明确授权时，只针对当前用户消息及主动上传的附件回答，不推测或读取应用内数据。` }];
-    if (useApplicationData) {
-        const lastUser = history.filter(message => message.role === 'user').at(-1);
-        const scoped = await buildAiChatAssistantPayload(lastUser?.content || '');
-        messages.push({ role: 'user', content: untrustedAiContext('REQUESTED_APP_DATA',
-            `${formatContextItemsForAI(scoped.items, scoped)}\n${formatNoteContextForAI(scoped)}`, 12000) });
-    }
-    const validHistory = history.filter(msg => {
-        if (!msg.content && !msg.summary && !msg.data && !msg.plan && !msg.attachments?.length) return false;
-        if (msg.role !== 'user' && msg.role !== 'assistant') return false;
-        // Skip transient types that don't carry meaningful content
-        if (msg.type === 'loading' || msg.type === 'streaming' || msg.type === 'tool_progress') return false;
-        return true;
-    });
-    const recentHistory = validHistory.filter(message => message.role === 'user').slice(-1);
-    for (const msg of recentHistory) {
-        if (msg.role === 'user') {
-            const content = buildUserMessageContentForAI(msg, bodyFormat);
-            if (bodyFormat === 'google' && Array.isArray(content)) {
-                messages.push({ role: 'user', parts: content });
-            } else {
-                messages.push({ role: 'user', content });
-            }
-        } else {
-            // Flatten non-text assistant message types into text for context
-            let content = msg.content || '';
-            if (msg.type === 'web_search_result') {
-                const entries = (msg.entries || []).map(e => `- [${e.title}](${e.url}): ${e.snippet || ''}`).join('\n');
-                content = (msg.summary || '') + (entries ? '\n' + entries : '');
-            } else if (msg.type === 'task_card' && msg.data) {
-                content = `[任务] ${msg.data.title || ''}${msg.data.date ? ' (' + msg.data.date + ')' : ''}${msg.data.note ? ' - ' + msg.data.note : ''}`;
-            } else if (msg.type === 'file_confirm' && msg.operation) {
-                content = `[文件操作待确认] ${msg.message || ''} - ${msg.operation.path || ''}`;
-            } else if (msg.type === 'generated_image') {
-                content = `[已生成图片] ${msg.content || msg.prompt || ''}`;
-            } else if (msg.type === 'generated_audio') {
-                content = `[已生成语音] ${msg.content || msg.text || ''}`;
-            } else if (msg.type === 'ai_execution_plan' && msg.plan) {
-                const stepsSummary = msg.plan.steps.map(s => `${s.status === 'done' ? '✅' : s.status === 'failed' ? '❌' : '⏳'} ${s.title}`).join('\n');
-                content = `[执行计划: ${msg.plan.title}]\n${stepsSummary}${msg.summary ? '\n\n' + msg.summary : ''}`;
-            } else if (msg.type === 'error') {
-                content = `[错误] ${msg.content || ''}`;
-            }
-            if (content) {
-                messages.push({ role: 'assistant', content });
-            }
-        }
-    }
-    return messages;
-}
-
 export async function sendChatMessage(text, chatStyle = 'default', retryIndex = null, options = {}) {
     if (get(isAiLoading)) throw new Error('请等待当前 AI 请求完成或先停止请求。');
     const requestedText = String(text || '').trim();
@@ -6264,11 +6197,8 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     if (!requestedText && selectedAttachments.length === 0) return;
 
     const effectiveText = requestedText || '请阅读并分析这些附件。';
-    const useApplicationData = selectedAttachments.length === 0 && requestsApplicationData(effectiveText);
-    const explicitExternalTool = selectedAttachments.length === 0 && (looksLikeFileIntent(effectiveText) || isExplicitWebSearchRequest(effectiveText));
 
     const currentConfig = getEffectiveConfig();
-    currentConfig.allowApplicationData = useApplicationData;
     assertChatAttachments(currentConfig, selectedAttachments);
     const needsApiKey = providerNeedsApiKey(currentConfig.provider);
 
@@ -6318,282 +6248,14 @@ export async function sendChatMessage(text, chatStyle = 'default', retryIndex = 
     currentConfig.isCurrent = isCurrent;
 
     try {
-        const aiChatToolsEnabled = (useApplicationData || explicitExternalTool) && (get(settingsStore).enableAiChatTools ?? true);
-
-        // Helper: update tool progress in chat history
-        function updateToolProgress(stepKey) {
-            if (!isCurrent()) return;
-            aiChatHistory.update(h => {
-                const nh = [...h];
-                const existing = nh[streamingIndex];
-                const prevSteps = existing?.steps || [];
-                if (existing?.currentStep) prevSteps.push(existing.currentStep);
-                nh[streamingIndex] = {
-                    role: 'assistant',
-                    type: 'tool_progress',
-                    steps: prevSteps,
-                    currentStep: stepKey
-                };
-                return nh;
-            });
-        }
-
-        let useToolRouter = false;
-        let intentHint = null;
-
-        if (aiChatToolsEnabled) {
-            if (explicitExternalTool) {
-                useToolRouter = true;
-            } else if (looksLikeGeneralChatIntent(effectiveText)) {
-                // Clear conversation: never ask a task classifier to reinterpret it.
-                useToolRouter = false;
-            } else if (shouldUseAssistantToolsInChat(effectiveText)) {
-                useToolRouter = true;
-                updateToolProgress('classifying');
-            } else {
-                updateToolProgress('ai_classifying');
-                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-                const aiIntent = await classifyUserIntent(effectiveText, currentConfig);
-                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-                if (aiIntent === null) {
-                    useToolRouter = false;
-                } else if (aiIntent !== 'chat') {
-                    useToolRouter = true;
-                    intentHint = aiIntent;
-                }
-            }
-        }
-
-        // Check if this is a complex multi-step request that should be decomposed.
-        // Task authoring is never decomposed: the plan router lists web_search as a
-        // step type and used to turn "帮我整理今天的任务" into a web lookup.
-        if (aiChatToolsEnabled && useApplicationData && !shouldSkipWebSearchForTaskText(effectiveText)) {
-            const { shouldDecompose, decomposeIntoSteps, executePlan, formatPlanSummary, cancelPlan, getTaskCreateResults } = await import('../utils/ai-execution-engine.js');
-            if (shouldDecompose(effectiveText)) {
-                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-                updateToolProgress('decomposing');
-                const plan = await decomposeIntoSteps(effectiveText, currentConfig, { signal: abortController.signal });
-                if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-                const planMessage = {
-                    role: 'assistant',
-                    type: 'ai_execution_plan',
-                    plan: { ...plan },
-                    isExecuting: true,
-                    summary: ''
-                };
-                aiChatHistory.update(h => {
-                    const nh = [...h];
-                    nh[streamingIndex] = planMessage;
-                    return nh;
-                });
-
-                const abortHandler = () => cancelPlan(plan.id);
-                abortController.signal.addEventListener('abort', abortHandler);
-
-                await executePlan(plan, {
-                    signal: abortController.signal,
-                    authorizeStep: async step => {
-                        if (!isCurrent() || get(settingsStore).enableAiChatTools === false) return false;
-                        if (step.type === 'file_read' && !get(settingsStore).localFileConfig?.enabled) return false;
-                        const detail = step.type === 'file_read'
-                            ? `将读取以下本地文件并发送给当前 AI 服务商：\n${(step.params.paths || []).join('\n')}`
-                            : `将向当前 AI 服务商请求生成图片，可能产生费用：\n${step.params.prompt || ''}`;
-                        return await confirmAiMutation('确认执行计划步骤', detail, () => isCurrent() && get(settingsStore).enableAiChatTools !== false);
-                    },
-                    getConfig: () => ({
-                        ...currentConfig,
-                        trustedDirectories: get(settingsStore).localFileConfig?.trustedDirectories || []
-                    }),
-                    userMessage: effectiveText,
-                    onStepStart: (step) => {
-                        if (!isCurrent()) return;
-                        aiChatHistory.update(h => {
-                            const nh = [...h];
-                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
-                                nh[streamingIndex] = { ...nh[streamingIndex], plan: { ...plan }, isExecuting: true };
-                            }
-                            return nh;
-                        });
-                    },
-                    onStepComplete: (step) => {
-                        if (!isCurrent()) return;
-                        aiChatHistory.update(h => {
-                            const nh = [...h];
-                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
-                                nh[streamingIndex] = { ...nh[streamingIndex], plan: { ...plan }, isExecuting: true };
-                            }
-                            return nh;
-                        });
-                    },
-                    onStepFail: (step) => {
-                        if (!isCurrent()) return;
-                        aiChatHistory.update(h => {
-                            const nh = [...h];
-                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
-                                nh[streamingIndex] = { ...nh[streamingIndex], plan: { ...plan }, isExecuting: true };
-                            }
-                            return nh;
-                        });
-                    },
-                    onPlanComplete: (completedPlan, results) => {
-                        if (!isCurrent()) return;
-                        const summary = formatPlanSummary(completedPlan, results);
-                        const taskResults = getTaskCreateResults(completedPlan);
-                        const failedSteps = completedPlan.steps.filter(s => s.status === 'failed');
-                        const success = completedPlan.status === 'done';
-
-                        try {
-                            settingsStore.notifyAiExecution?.({
-                                title: success ? `✅ ${completedPlan.title}` : `⚠️ ${completedPlan.title}`,
-                                body: success
-                                    ? `已完成 ${completedPlan.steps.length} 个步骤`
-                                    : `${failedSteps.length} 个步骤失败 / 共 ${completedPlan.steps.length}`,
-                                success
-                            });
-                        } catch (e) {
-                            console.warn('Notify failed:', e);
-                        }
-                        aiChatHistory.update(h => {
-                            const nh = [...h];
-                            if (nh[streamingIndex]?.type === 'ai_execution_plan') {
-                                nh[streamingIndex] = {
-                                    ...nh[streamingIndex],
-                                    plan: { ...completedPlan },
-                                    isExecuting: false,
-                                    summary
-                                };
-                            }
-                            if (taskResults.length > 0) {
-                                const dateInfo = getDateInfo();
-                                const fallbackDate = `${formatDateForAI(dateInfo.today)}T09:00`;
-                                const normalizedTasks = taskResults.map((t, i) => normalizeCreatedTask({
-                                    title: t.title,
-                                    priority: normalizePriority(t.priority),
-                                    note: t.note || '',
-                                    date: t.date || fallbackDate,
-                                    deadline: t.deadline || ''
-                                }, fallbackDate, i));
-                                if (normalizedTasks.length === 1) {
-                                    nh.push({
-                                        role: 'assistant',
-                                        type: 'task_card',
-                                        assistantSource: 'tasks',
-                                        assistantScope: 'dashboard',
-                                        entityLabel: '任务',
-                                        data: normalizedTasks[0],
-                                        confirmed: false
-                                    });
-                                } else {
-                                    nh.push({
-                                        role: 'assistant',
-                                        type: 'multi_task_card',
-                                        assistantSource: 'tasks',
-                                        assistantScope: 'dashboard',
-                                        entityLabel: '任务',
-                                        tasks: normalizedTasks,
-                                        confirmedIndexes: []
-                                    });
-                                }
-                            }
-                            return nh;
-                        });
-                    }
-                });
-
-                abortController.signal.removeEventListener('abort', abortHandler);
-                if (!isCurrent()) return;
-                saveAiChatHistory();
-                return;
-            }
-        }
-
-        if (useToolRouter) {
-            if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            const assistantPayload = await buildAiChatAssistantPayload(effectiveText);
-            if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            const assistantResult = await resolveAssistantMessage(effectiveText, assistantPayload, currentConfig, intentHint, updateToolProgress, { allowLocalFiles: looksLikeFileIntent(effectiveText) });
-            if (!isCurrent()) return;
-            // If resolveAssistantMessage signals no tool action matched, fall through to streaming chat
-            if (assistantResult?.__batchResults?.length) {
-                aiChatHistory.update(h => {
-                    const newHistory = [...h];
-                    if (newHistory[streamingIndex]) {
-                        newHistory.splice(streamingIndex, 1, ...assistantResult.__batchResults);
-                    }
-                    return newHistory;
-                });
-                saveAiChatHistory();
-                return;
-            }
-            if (!assistantResult?.__useStreamingChat) {
-                aiChatHistory.update(h => {
-                    const newHistory = [...h];
-                    if (newHistory[streamingIndex]) {
-                        newHistory[streamingIndex] = assistantResult;
-                    }
-                    return newHistory;
-                });
-                saveAiChatHistory();
-                return;
-            }
-        }
-
-        console.log('[Chat] Entering streaming path');
-        const { callAIWithMessagesStream, getProviderBodyFormat } = await import('../utils/ai-providers.js');
-        const bodyFormat = getProviderBodyFormat(currentConfig.provider);
-        const currentHistory = get(aiChatHistory);
-        const historyWithoutStreaming = currentHistory.filter(m => m.type !== 'streaming' && m.type !== 'loading' && m.type !== 'tool_progress');
-        const lastUser = historyWithoutStreaming.filter(message => message.role === 'user').at(-1);
-        assertChatAttachments(currentConfig, lastUser?.attachments || []);
-        const messages = await buildContextMessages(historyWithoutStreaming, chatStyle, bodyFormat, useApplicationData);
+        const result = await requestOnDemandReply(effectiveText, currentConfig, get(aiChatContext) || {}, selectedAttachments, chatStyle);
         if (!isCurrent()) return;
-
-        aiChatHistory.update(h => {
-            const newHistory = [...h];
-            const msgType = newHistory[streamingIndex]?.type;
-            if (msgType === 'loading' || msgType === 'tool_progress') {
-                newHistory[streamingIndex] = { role: 'assistant', type: 'streaming', content: '', isStreaming: true };
-            }
-            return newHistory;
+        aiChatHistory.update(history => {
+            const next = [...history];
+            if (result?.__batchResults?.length) next.splice(streamingIndex, 1, ...result.__batchResults);
+            else next[streamingIndex] = result;
+            return next;
         });
-
-        const onChunk = (delta, fullContent) => {
-            if (!isCurrent()) return;
-            streamingContent.set(fullContent);
-            aiChatHistory.update(h => {
-                const newHistory = [...h];
-                if (newHistory[streamingIndex]) {
-                    newHistory[streamingIndex] = {
-                        ...newHistory[streamingIndex],
-                        content: fullContent,
-                        isStreaming: true
-                    };
-                }
-                return newHistory;
-            });
-        };
-
-        const result = await callAIWithMessagesStream(currentConfig, messages, onChunk, { signal: abortController.signal });
-        if (!isCurrent()) return;
-
-        aiChatHistory.update(h => {
-            const newHistory = [...h];
-            if (newHistory[streamingIndex]) {
-                if (!result) {
-                    newHistory.splice(streamingIndex, 1);
-                } else {
-                    newHistory[streamingIndex] = {
-                        role: 'assistant',
-                        type: 'text',
-                        content: result,
-                        isStreaming: false
-                    };
-                }
-            }
-            return newHistory;
-        });
-
         streamingContent.set('');
         saveAiChatHistory();
     } catch (error) {

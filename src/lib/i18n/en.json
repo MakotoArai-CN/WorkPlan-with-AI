@@ -757,7 +757,7 @@
     "style_hint": "Style: {style} · Enter to send",
     "stop_generating": "Stop generating",
     "capability_title": "Capabilities",
-    "capability_mode_internal": "Internal tool router",
+    "capability_mode_internal": "Native tools · On-demand data",
     "capability_mode_chat_only": "Chat only",
     "capability_project_tools": "Project tools",
     "capability_native_tools": "Native tool calls",

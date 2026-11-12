@@ -35,20 +35,13 @@
         quickActions: []
     };
 
-    function getExistingItems() {
-        if ($aiPanelContext.source === 'templates') {
-            return $taskStore.templates || [];
-        }
-        if ($aiPanelContext.source === 'scheduled') {
-            return $taskStore.scheduledTasks || [];
-        }
-        return $taskStore.tasks || [];
-    }
-
     function getAssistantPayload() {
         return {
-            ...$aiPanelContext,
-            items: getExistingItems()
+            scope: $aiPanelContext.scope,
+            mode: $aiPanelContext.mode,
+            source: $aiPanelContext.source,
+            activeNoteId: $aiPanelContext.activeNoteId,
+            items: []
         };
     }
 
