@@ -35,6 +35,7 @@ test('retired profiles require explicit fresh setup without moving credentials t
         providerConfigs: { 'g4f-default': { apiKey: 'old-credential' }, custom: { apiKey: 'cached-other-credential', customEndpoint: 'https://other.invalid' } } };
     const migrated = migrateRemovedProvider(old);
     expect(migrated.id).toBe('kept-id');
+    expect(migrated.name).toBe('Connection');
     expect(migrated.provider).toBe('custom');
     expect(migrated.apiKey).toBe('');
     expect(migrated.customEndpoint).toBe('');
@@ -43,4 +44,14 @@ test('retired profiles require explicit fresh setup without moving credentials t
     expect(old.apiKey).toBe('old-credential');
     expect(migrateRemovedProvider(migrated)).toEqual(migrated);
     expect(migrateRemovedProvider({provider:'openai',apiKey:'keep'}).apiKey).toBe('keep');
+});
+
+test('profile status never becomes part of a connection name and only known default artifacts are repaired', () => {
+    for (const name of ['默认连接', '连接 2', '我的服务', 'Company（需重新配置）']) {
+        expect(migrateRemovedProvider({provider:'g4f-default',name}).name).toBe(name);
+    }
+    expect(migrateRemovedProvider({provider:'custom',name:'默认连接（需重新配置）',model:'auto'}).name).toBe('默认连接');
+    expect(migrateRemovedProvider({provider:'custom',name:'连接 2（需重新配置）（需重新配置）'}).name).toBe('连接 2');
+    expect(migrateRemovedProvider({provider:'custom',name:'我的服务（需重新配置）'}).name).toBe('我的服务（需重新配置）');
+    expect(migrateRemovedProvider({provider:'custom',name:'默认连接（需重新配置）',customEndpoint:'https://example.com'}).name).toBe('默认连接（需重新配置）');
 });

@@ -16,6 +16,7 @@
     import VaultwardenImport from "./VaultwardenImport.svelte";
     import DataRepairModal from "./DataRepairModal.svelte";
     import VaultProtectionSettings from './VaultProtectionSettings.svelte';
+    import { checkForUpdates, showCurrentReleaseNotes } from '../stores/updates.js';
     import { selectionIndicatorBounds } from '../utils/selection-indicator.js';
     import {
         DATABASE_PROVIDER_CATALOG,
@@ -27,21 +28,8 @@
     let isAndroid = false;
 
     let checkingUpdate = false;
-    let repairClicks = 0;
-    let repairClickTimer = null;
     let showDataRepair = false;
 
-    function handleVersionClick() {
-        if (isWebDemo) return;
-        repairClicks += 1;
-        if (repairClickTimer) clearTimeout(repairClickTimer);
-        repairClickTimer = setTimeout(() => { repairClicks = 0; }, 1800);
-        if (repairClicks >= 7) {
-            repairClicks = 0;
-            if (repairClickTimer) clearTimeout(repairClickTimer);
-            showDataRepair = true;
-        }
-    }
     $: databaseProviderOptions = DATABASE_PROVIDER_CATALOG.map(provider => ({ value: provider.id, label: provider.name }));
     let themeGridEl;
     let languageGridEl;
@@ -309,27 +297,10 @@
     }
 
     async function checkUpdate() {
-        const t = get(_);
+        if (checkingUpdate) return;
         checkingUpdate = true;
-        try {
-            const data = await invoke("check_update");
-            if (data.has_update) {
-                const confirmed = await showConfirm({
-                    title: t('settings.update_available'),
-                    message: t('settings.update_desc', { values: { version: data.latest_version } }),
-                    confirmText: t('settings.download'),
-                    cancelText: t('settings.later'),
-                    variant: "success",
-                });
-                if (confirmed) { await invoke("open_releases"); }
-            } else {
-                await showAlert({ title: t('settings.check_update'), message: t('settings.up_to_date'), variant: "success" });
-            }
-        } catch (error) {
-            await showAlert({ title: t('common.error'), message: String(error), variant: "danger" });
-        } finally {
-            checkingUpdate = false;
-        }
+        try { await checkForUpdates(); }
+        finally { checkingUpdate = false; }
     }
 
     async function openGithub() {
@@ -1346,14 +1317,7 @@
                     </div>
                     <div class="flex-1">
                         <h3 class="text-lg md:text-xl font-bold text-slate-800 dark:text-slate-100">WorkPlan with AI</h3>
-                        <button type="button" on:click={handleVersionClick}
-                            class="text-left text-xs md:text-sm text-slate-500 dark:text-slate-400 transition hover:text-slate-700 dark:hover:text-slate-200"
-                            title="连续点击 7 次打开数据修复工具">
-                            {$_('settings.version')} {$settingsStore.appVersion}
-                        </button>
-                        {#if !isWebDemo && repairClicks >= 3}
-                            <div class="mt-1 text-[9px] text-amber-600 dark:text-amber-400">再点击 {7 - repairClicks} 次打开数据修复工具</div>
-                        {/if}
+                        <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400">{$_('settings.version')} {$settingsStore.appVersion}</p>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2 md:gap-3">
@@ -1367,6 +1331,12 @@
                         <i class="ph text-lg" class:ph-spinner={checkingUpdate} class:animate-spin={checkingUpdate} class:ph-download-simple={!checkingUpdate}></i>
                         {checkingUpdate ? ($_('common.loading') || '...') : $_('settings.check_update')}
                     </button>
+                    {/if}
+                </div>
+                <div class="flex flex-wrap gap-4 text-xs font-bold">
+                    <button on:click={showCurrentReleaseNotes} class="text-blue-600 dark:text-blue-400 hover:underline">{$_('settings.release_notes')}</button>
+                    {#if !isWebDemo}
+                        <button on:click={() => showDataRepair = true} class="text-slate-500 dark:text-slate-400 hover:underline">{$_('settings.local_data_backups')}</button>
                     {/if}
                 </div>
                 <button on:click={showAgreement}

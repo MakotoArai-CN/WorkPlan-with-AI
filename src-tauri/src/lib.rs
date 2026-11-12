@@ -27,6 +27,7 @@ mod autostart;
 mod device;
 mod local_db;
 mod local_paths;
+mod updates;
 mod vault_guard;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
@@ -467,52 +468,6 @@ fn extract_duckduckgo_url(raw_url: &str) -> String {
     }
 
     String::new()
-}
-
-fn is_newer_version(current: &str, latest: &str) -> bool {
-    let parse_version = |v: &str| -> Vec<u32> {
-        v.trim_start_matches('v')
-            .split('.')
-            .filter_map(|s| s.parse::<u32>().ok())
-            .collect()
-    };
-    let current_parts = parse_version(current);
-    let latest_parts = parse_version(latest);
-    for i in 0..std::cmp::max(current_parts.len(), latest_parts.len()) {
-        let c = current_parts.get(i).unwrap_or(&0);
-        let l = latest_parts.get(i).unwrap_or(&0);
-        if l > c {
-            return true;
-        }
-        if l < c {
-            return false;
-        }
-    }
-    false
-}
-
-#[tauri::command]
-async fn check_update() -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get("https://api.github.com/repos/MakotoArai-CN/WorkPlan-with-AI/releases/latest")
-        .header("User-Agent", "WorkPlan")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if response.status().is_success() {
-        let data: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        let current_version = env!("CARGO_PKG_VERSION");
-        let latest_version = data["tag_name"].as_str().unwrap_or("");
-        let has_update = is_newer_version(current_version, latest_version);
-        Ok(serde_json::json!({
-            "has_update": has_update,
-            "current_version": current_version,
-            "latest_version": latest_version.trim_start_matches('v')
-        }))
-    } else {
-        Err(format!("HTTP Error: {}", response.status()))
-    }
 }
 
 #[tauri::command]
@@ -1496,7 +1451,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler({
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
-            check_update,
+            updates::check_update,
             set_autostart,
             get_autostart_status,
             get_app_version,

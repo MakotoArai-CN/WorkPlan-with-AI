@@ -381,6 +381,14 @@
     "vaultwarden_push_locked": "密码库未解锁，解锁后才能推送"
   },
   "settings": {
+    "release_notes": "更新日志",
+    "current_version": "当前版本",
+    "release_date": "发布日期",
+    "release_notes_empty": "此版本暂未提供更新日志，可前往正式发布页查看。",
+    "release_offline_hint": "未能获取在线版本信息，以下为当前版本内置的更新日志。",
+    "release_open_failed": "无法打开发布页，请检查浏览器或系统权限。",
+    "view_release": "查看发布页",
+    "local_data_backups": "本地数据与备份",
     "title": "系统设置",
     "subtitle": "应用配置与管理",
     "appearance": "外观设置",
@@ -816,6 +824,7 @@
     "drop_files_failed": "拖入文件失败"
   },
   "ai_settings_page": {
+    "connection_setup_hint": "请填写服务地址和模型，并按提供商要求设置 API Key。连接名称可以保留，不影响配置。",
     "title": "AI 配置",
     "tab_basic": "基础设置",
     "tab_advanced": "高级参数",

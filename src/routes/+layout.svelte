@@ -15,9 +15,12 @@
     import { initLocalDatabase, installLocalDatabaseMirror } from '$lib/utils/local-db.js';
     import { installGlassPointer } from '$lib/utils/glass-pointer.js';
     import { formatLocalDate } from '$lib/utils/datetime.js';
-    import { showConfirm, showAlert } from '$lib/stores/modal.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
+    import { updateDialog, checkForUpdates } from '$lib/stores/updates.js';
+    const loadUpdateDialog = () => import('$lib/components/UpdateDialog.svelte');
+    let updateModule;
+    $: if ($updateDialog.show && !updateModule) updateModule = loadUpdateDialog();
     import { migrateLegacyProtection } from '$lib/utils/vault-protection.js';
     const loadBackupModal = () => import('$lib/components/BackupModal.svelte');
     const loadDataRepairModal = () => import('$lib/components/DataRepairModal.svelte');
@@ -109,28 +112,7 @@
                         console.error(e);
                     }
                 });
-                unlistenUpdate = await listen('tray-check-update', async () => {
-                    const { invoke } = await import('@tauri-apps/api/core');
-                    try {
-                        const data = await invoke('check_update');
-                        if (data && data.has_update) {
-                            const confirmed = await showConfirm({
-                                title: get(_)('settings.update_available'),
-                                message: get(_)('settings.update_desc', { values: { version: data.latest_version } }),
-                                confirmText: get(_)('settings.download'),
-                                cancelText: get(_)('settings.later'),
-                                variant: 'success'
-                            });
-                            if (confirmed) {
-                                await invoke('open_releases');
-                            }
-                        } else {
-                            await showAlert({ title: get(_)('settings.check_update'), message: get(_)('settings.up_to_date'), variant: 'success' });
-                        }
-                    } catch (e) {
-                        console.error(e);
-                    }
-                });
+                unlistenUpdate = await listen('tray-check-update', () => { void checkForUpdates(); });
                 unlistenAbout = await listen('tray-open-about', () => {
                     settingsStore.showAgreementModal();
                 });
@@ -183,6 +165,11 @@
 </script>
 
 <GlobalModal />
+{#if i18nReady && updateModule}
+    {#await updateModule then module}
+        <svelte:component this={module.default} />
+    {/await}
+{/if}
 
 {#if startupError}
     <div class="min-h-dvh grid place-items-center p-6 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100">

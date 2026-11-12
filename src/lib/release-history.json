@@ -1,0 +1,50 @@
+[
+  {
+    "version": "0.5.17",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": [
+        "连接迁移保留原名称，修正旧版本为默认连接添加的状态后缀。",
+        "检查更新新增版本、发布日期和更新日志展示；设置与托盘共用同一更新窗口。",
+        "可在离线状态查看当前版本的更新记录，并打开对应版本的正式发布页。"
+      ],
+      "en": [
+        "Keep connection names unchanged during migration and repair the suffix previously added to default names.",
+        "Show the release version, date and changelog when checking for updates, using one dialog for Settings and the tray.",
+        "Read the current version's release notes offline and open the matching official release page."
+      ],
+      "ja": [
+        "接続の移行時に名前を保持し、旧版が既定名に追加した状態サフィックスを修正しました。",
+        "更新確認でバージョン・公開日・更新内容を表示し、設定とトレイの画面を統一しました。",
+        "現在の更新内容をオフラインでも表示し、対応する正式リリースページを開けます。"
+      ]
+    }
+  },
+  {
+    "version": "0.5.16",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": ["修复桌面和用户目录缩写的路径解析，支持系统桌面重定向。", "目录授权等待原生权限确认后再执行；不存在的目录提供明确提示。"],
+      "en": ["Resolve desktop and home aliases correctly, including redirected desktops.", "Wait for native directory authorization before access and report missing directories clearly."],
+      "ja": ["デスクトップとホームの省略パスを正しく解決し、転送されたフォルダーにも対応しました。", "ネイティブ権限の確定後にアクセスし、存在しないフォルダーを明確に通知します。"]
+    }
+  },
+  {
+    "version": "0.5.15",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": ["AI 通过原生工具按需查询应用数据，不在首轮预载记录。", "当前笔记查询遵守选择和锁定状态，切换笔记后不使用过期结果。"],
+      "en": ["Query application data on demand through native tools without preloading records.", "Respect the selected note and lock state, and discard stale results after selection changes."],
+      "ja": ["記録を事前送信せず、ネイティブツールで必要時にアプリデータを照会します。", "選択中のノートとロック状態を確認し、選択変更後の古い結果を破棄します。"]
+    }
+  },
+  {
+    "version": "0.5.14",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": ["移除 G4F 集成，旧连接不自动将凭据转发至其他服务。", "数据清除入口集中到设置；附件按模型和 API 能力校验。", "优化设置选中底色、自定义类型弹窗和主密码防护开关。"],
+      "en": ["Remove the G4F integration without forwarding old credentials to another service.", "Move data deletion to Settings and validate attachments against model and API support.", "Improve selection backgrounds, custom-category dialogs and the master-password protection switch."],
+      "ja": ["G4F 統合を削除し、旧認証情報を別サービスに転送しないようにしました。", "データ削除を設定へ移動し、モデルと API に応じて添付を検証します。", "選択背景、独自カテゴリ画面、マスターパスワード保護スイッチを改善しました。"]
+    }
+  }
+]
