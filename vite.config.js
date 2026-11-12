@@ -406,6 +406,74 @@ class WorkPlanAndroidBridge(private val activity: MainActivity) {
   }
 
   @JavascriptInterface
+  fun searchTreeReport(rootUri: String, relativeRoot: String, query: String, maxResults: Int, optionsJson: String): String {
+    return wrapJson {
+      requireUriPermission(Uri.parse(rootUri), write = false)
+      val root = if (relativeRoot.isBlank()) DocumentFile.fromTreeUri(activity, Uri.parse(rootUri)) else resolveDocument(rootUri, relativeRoot)
+      if (root == null || !root.isDirectory) error("Unable to open authorized directory")
+      val options = JSONObject(optionsJson)
+      val recursive = options.optBoolean("recursive", true)
+      val maxDepth = if (recursive) options.optInt("maxDepth", 64).coerceIn(1, 256) else 1
+      val offset = options.optInt("offset", 0).coerceIn(0, 1000000)
+      val limit = maxResults.coerceIn(1, 5000)
+      val summaryOnly = options.optBoolean("summaryOnly", false)
+      val sensitive = setOf(".workplan", ".ssh", ".gnupg", "appdata")
+      val generated = setOf("node_modules", ".git", ".venv", "venv", "target", ".playwright-cli", ".playwright-mcp", "playwright-report", "test-results", ".next", ".nuxt", ".svelte-kit", ".cache", "__pycache__")
+      val excluded = sensitive + if (options.optBoolean("includeGenerated", false)) emptySet() else generated
+      val extensions = options.optJSONArray("extensions")?.let { list -> (0 until list.length()).map { list.getString(it).trimStart('.').lowercase() }.toSet() } ?: emptySet()
+      val needle = query.trim().lowercase()
+      val kind = options.optString("kind", "")
+      val entries = JSONArray()
+      val byExtension = JSONObject()
+      var matched = 0
+      var files = 0
+      var directories = 0
+      var scanned = 0
+      var errors = 0
+      var depthLimited = false
+      var stopReason = "complete"
+      val started = System.nanoTime()
+      data class Pending(val file: DocumentFile, val prefix: String, val depth: Int)
+      val pending = java.util.ArrayDeque<Pending>()
+      pending.push(Pending(root, "", 0))
+      scan@ while (pending.isNotEmpty()) {
+        val current = pending.pop()
+        val children = try { current.file.listFiles().sortedBy { it.name } } catch (_: Exception) { errors++; continue }
+        for (child in children) {
+          if (scanned >= 1000000) { stopReason = "entry_limit"; break@scan }
+          if (System.nanoTime() - started >= 30000000000L) { stopReason = "time_limit"; break@scan }
+          val name = child.name ?: continue
+          val directory = child.isDirectory
+          if (directory && name.lowercase() in excluded) continue
+          scanned++
+          val displayPath = if (current.prefix.isBlank()) name else "\${current.prefix}/$name"
+          if (directory && recursive) {
+            if (current.depth + 1 < maxDepth) pending.push(Pending(child, displayPath, current.depth + 1)) else depthLimited = true
+          }
+          if (needle.isNotEmpty() && !displayPath.lowercase().contains(needle)) continue
+          if (kind == "file" && directory || kind == "directory" && !directory) continue
+          val extension = if (name.contains('.')) name.substringAfterLast('.').lowercase() else ""
+          if (extensions.isNotEmpty() && (directory || extension !in extensions)) continue
+          matched++
+          if (directory) directories++ else { files++; byExtension.put(extension, byExtension.optInt(extension) + 1) }
+          if (!summaryOnly && matched > offset && entries.length() < limit) entries.put(JSONObject()
+            .put("path", child.uri.toString()).put("name", name).put("displayPath", displayPath)
+            .put("kind", if (directory) "directory" else "file").put("size", child.length()))
+        }
+      }
+      val complete = stopReason == "complete" && errors == 0 && !depthLimited
+      val more = !summaryOnly && matched > offset + entries.length()
+      JSONObject().put("entries", entries).put("recursive", recursive).put("maxDepth", maxDepth)
+        .put("offset", offset).put("returned", entries.length()).put("totalMatched", matched)
+        .put("counts", JSONObject().put("files", files).put("directories", directories).put("byExtension", byExtension))
+        .put("countComplete", complete).put("hasMore", more).put("nextOffset", if (more) offset + entries.length() else JSONObject.NULL)
+        .put("scanned", scanned).put("skippedErrors", errors).put("truncated", !complete)
+        .put("stopReason", if (stopReason == "complete" && depthLimited) "depth_limit" else stopReason)
+        .put("excludedDirectories", JSONArray(excluded.toList())).put("filters", options)
+    }
+  }
+
+  @JavascriptInterface
   fun readTextFile(uri: String, maxBytes: Int): String {
     return wrapJson {
       val documentUri = Uri.parse(uri)

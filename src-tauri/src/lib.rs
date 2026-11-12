@@ -544,6 +544,7 @@ async fn search_local_files(
     max_results: Option<usize>,
     trusted_dirs: Option<Vec<String>>,
     include_report: Option<bool>,
+    search_options: Option<LocalFileSearchOptions>,
 ) -> Result<serde_json::Value, String> {
     let trusted_dirs = trusted_dirs.unwrap_or_default();
     let root_path = match root {
@@ -556,18 +557,45 @@ async fn search_local_files(
         return Err(format!("搜索根目录不存在：{}", root_path.to_string_lossy()));
     }
 
-    let limit = max_results.unwrap_or(40).clamp(1, 200);
+    let limit = max_results.unwrap_or(200).clamp(1, 5000);
     tauri::async_runtime::spawn_blocking(move || {
-        let report = search_file_report(&root_path, &query, limit)?;
+        let report = search_file_report_with_options(&root_path, &query, limit, &search_options.unwrap_or_default())?;
         if include_report.unwrap_or(false) { Ok(report) } else { Ok(report["entries"].clone()) }
     }).await.map_err(|e| e.to_string())?
 }
 
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalFileSearchOptions {
+    offset: Option<usize>,
+    kind: Option<String>,
+    extensions: Option<Vec<String>>,
+    recursive: Option<bool>,
+    max_depth: Option<usize>,
+    summary_only: Option<bool>,
+    include_generated: Option<bool>,
+}
+
+#[cfg(test)]
 fn search_file_report(root_path: &std::path::Path, query: &str, limit: usize) -> Result<serde_json::Value, String> {
+    search_file_report_with_options(root_path, query, limit, &LocalFileSearchOptions::default())
+}
+
+fn search_file_report_with_options(root_path: &std::path::Path, query: &str, limit: usize, options: &LocalFileSearchOptions) -> Result<serde_json::Value, String> {
     if !root_path.is_dir() { return Err("搜索目标不是有效目录".into()); }
     let needle = query.trim().to_lowercase();
     let mut entries = Vec::new();
-    let excluded = ["node_modules", ".git", ".venv", "venv", "target", ".workplan", ".ssh", ".gnupg", "appdata"];
+    let sensitive = [".workplan", ".ssh", ".gnupg", "appdata"];
+    let generated = ["node_modules", ".git", ".venv", "venv", "target", ".playwright-cli", ".playwright-mcp", "playwright-report", "test-results", ".next", ".nuxt", ".svelte-kit", ".cache", "__pycache__"];
+    let excluded: Vec<&str> = sensitive.into_iter().chain(generated.into_iter().filter(|_| !options.include_generated.unwrap_or(false))).collect();
+    let recursive = options.recursive.unwrap_or(true);
+    let max_depth = if recursive { options.max_depth.unwrap_or(64).clamp(1, 256) } else { 1 };
+    let offset = options.offset.unwrap_or(0).min(1_000_000);
+    let extensions: Vec<String> = options.extensions.as_deref().unwrap_or(&[]).iter().map(|value| value.trim_start_matches('.').to_lowercase()).collect();
+    let mut matched = 0usize;
+    let mut files = 0usize;
+    let mut directories = 0usize;
+    let mut by_extension = std::collections::BTreeMap::<String, usize>::new();
     let mut scanned = 0usize;
     let mut errors = 0usize;
     let mut depth_limited = false;
@@ -575,20 +603,17 @@ fn search_file_report(root_path: &std::path::Path, query: &str, limit: usize) ->
     let started = std::time::Instant::now();
     for entry in WalkDir::new(root_path)
         .follow_links(false)
-        .max_depth(12)
+        .max_depth(max_depth)
+        .sort_by_file_name()
         .into_iter()
         .filter_entry(|entry| entry.depth() == 0 || !entry.file_type().is_dir()
             || !excluded.contains(&entry.file_name().to_string_lossy().to_lowercase().as_str()))
     {
-        if scanned >= 20000 { stop_reason = "entry_limit"; break; }
-        if started.elapsed() >= std::time::Duration::from_secs(3) { stop_reason = "time_limit"; break; }
-        if entries.len() >= limit {
-            stop_reason = "result_limit";
-            break;
-        }
+        if scanned >= 1_000_000 { stop_reason = "entry_limit"; break; }
+        if started.elapsed() >= std::time::Duration::from_secs(30) { stop_reason = "time_limit"; break; }
         let entry = match entry { Ok(value) => value, Err(_) => { errors += 1; continue; } };
         scanned += 1;
-        if entry.depth() == 12 && entry.file_type().is_dir() { depth_limited = true; }
+        if recursive && entry.depth() == max_depth && entry.file_type().is_dir() { depth_limited = true; }
         let path = entry.path();
         if path == root_path {
             continue;
@@ -599,7 +624,15 @@ fn search_file_report(root_path: &std::path::Path, query: &str, limit: usize) ->
         if !needle.is_empty() && !path_text.contains(&needle) && !name_text.contains(&needle) {
             continue;
         }
-
+        let is_dir = entry.file_type().is_dir();
+        if !is_dir && !entry.file_type().is_file() { continue; }
+        if options.kind.as_deref() == Some("file") && is_dir || options.kind.as_deref() == Some("directory") && !is_dir { continue; }
+        let extension = path.extension().map(|value| value.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if !extensions.is_empty() && (is_dir || !extensions.contains(&extension)) { continue; }
+        matched += 1;
+        if is_dir { directories += 1; } else { files += 1; *by_extension.entry(extension).or_default() += 1; }
+        // Count the entire scope independently of the returned page size.
+        if options.summary_only.unwrap_or(false) || matched <= offset || entries.len() >= limit { continue; }
         let metadata = entry.metadata().ok();
         entries.push(LocalFileEntry {
             path: path.to_string_lossy().to_string(),
@@ -615,10 +648,15 @@ fn search_file_report(root_path: &std::path::Path, query: &str, limit: usize) ->
 
     Ok(serde_json::json!({
         "root": root_path.to_string_lossy(), "query": query, "entries": entries,
-        "recursive": true, "maxDepth": 12, "scanned": scanned, "skippedErrors": errors,
+        "recursive": recursive, "maxDepth": max_depth, "scanned": scanned, "skippedErrors": errors,
         "stopReason": if stop_reason == "complete" && depth_limited { "depth_limit" } else { stop_reason },
         "truncated": stop_reason != "complete" || errors > 0 || depth_limited,
-        "excludedDirectories": excluded
+        "excludedDirectories": excluded, "offset": offset, "returned": entries.len(),
+        "totalMatched": matched, "counts": { "files": files, "directories": directories, "byExtension": by_extension },
+        "countComplete": stop_reason == "complete" && errors == 0 && !depth_limited,
+        "hasMore": !options.summary_only.unwrap_or(false) && matched > offset.saturating_add(entries.len()),
+        "nextOffset": if !options.summary_only.unwrap_or(false) && matched > offset.saturating_add(entries.len()) { Some(offset + entries.len()) } else { None },
+        "filters": { "kind": options.kind, "extensions": extensions, "includeGenerated": options.include_generated.unwrap_or(false) }
     }))
 }
 
@@ -630,7 +668,7 @@ async fn read_local_file(
 ) -> Result<LocalFileReadResult, String> {
     let trusted_dirs = trusted_dirs.unwrap_or_default();
     let normalized = ensure_local_path_allowed(&path, &trusted_dirs)?;
-    let limit = max_bytes.unwrap_or(16_000).clamp(512, 256_000);
+    let limit = max_bytes.unwrap_or(120_000).clamp(512, 256_000);
     tauri::async_runtime::spawn_blocking(move || {
         let file = fs::File::open(&normalized).map_err(|e| format!("读取文件失败 {}: {}", normalized.to_string_lossy(), e))?;
         let size = file.metadata().map_err(|e| e.to_string())?.len();
@@ -1441,12 +1479,47 @@ mod tests {
         assert!(report["entries"].as_array().unwrap().iter().any(|entry|entry["name"]=="README.md"));
         assert!(!report["entries"].to_string().contains("hidden.js"));
         let capped=search_file_report(&root.join("Desktop"),"",1).unwrap();
-        assert_eq!(capped["stopReason"],"result_limit");assert_eq!(capped["truncated"],true);
+        assert_eq!(capped["stopReason"],"complete");assert_eq!(capped["truncated"],false);
+        assert_eq!(capped["countComplete"],true);assert_eq!(capped["totalMatched"],2);
+        assert_eq!(capped["hasMore"],true);assert_eq!(capped["nextOffset"],1);
         let empty=search_file_report(&root.join("Desktop"),"unmatched-unique-file",40).unwrap();
         assert_eq!(empty["entries"].as_array().unwrap().len(),0);assert_eq!(empty["query"],"unmatched-unique-file");
         fs::remove_file(dependencies.join("hidden.js")).unwrap();fs::remove_dir(dependencies).unwrap();
         fs::remove_file(project.join("README.md")).unwrap();fs::remove_dir(project).unwrap();
         fs::remove_dir(root.join("Desktop")).unwrap();fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn file_search_counts_all_matches_independently_of_pages_and_filters() {
+        let mut random = [0u8;16]; getrandom::fill(&mut random).unwrap();
+        let root = std::env::temp_dir().join(format!("workplan-count-{}", random.iter().map(|b|format!("{b:02x}")).collect::<String>()));
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::create_dir_all(root.join(".playwright-cli")).unwrap();
+        fs::create_dir_all(root.join(".ssh")).unwrap();
+        for index in 0..250 { fs::write(root.join(format!("doc-{index:03}.md")), "fixture").unwrap(); }
+        fs::write(root.join("nested").join("guide.PDF"), "fixture").unwrap();
+        fs::write(root.join(".playwright-cli").join("trace.yml"), "fixture").unwrap();
+        fs::write(root.join(".ssh").join("secret.md"), "fixture").unwrap();
+        let first = search_file_report_with_options(&root, "", 40, &LocalFileSearchOptions { kind: Some("file".into()), ..Default::default() }).unwrap();
+        assert_eq!(first["totalMatched"],251); assert_eq!(first["counts"]["files"],251);
+        assert_eq!(first["counts"]["byExtension"]["md"],250);
+        assert_eq!(first["countComplete"],true); assert_eq!(first["entries"].as_array().unwrap().len(),40);
+        let second = search_file_report_with_options(&root, "", 40, &LocalFileSearchOptions { kind: Some("file".into()), offset: Some(40), ..Default::default() }).unwrap();
+        assert_eq!(second["totalMatched"],251); assert_ne!(first["entries"][0]["path"],second["entries"][0]["path"]);
+        assert_eq!(second["nextOffset"],80);
+        let summary = search_file_report_with_options(&root, "", 1, &LocalFileSearchOptions { extensions: Some(vec![".MD".into()]), summary_only: Some(true), ..Default::default() }).unwrap();
+        assert_eq!(summary["totalMatched"],250); assert_eq!(summary["entries"].as_array().unwrap().len(),0);
+        assert_eq!(summary["countComplete"],true); assert_eq!(summary["hasMore"],false);
+        let top = search_file_report_with_options(&root, "", 1, &LocalFileSearchOptions { kind: Some("file".into()), recursive: Some(false), ..Default::default() }).unwrap();
+        assert_eq!(top["totalMatched"],250); assert_eq!(top["countComplete"],true);
+        let generated = search_file_report_with_options(&root, "", 1, &LocalFileSearchOptions { kind: Some("file".into()), include_generated: Some(true), ..Default::default() }).unwrap();
+        assert_eq!(generated["totalMatched"],252); assert_eq!(generated["countComplete"],true);
+        // All paths are explicit children of the isolated root created above.
+        for index in 0..250 { fs::remove_file(root.join(format!("doc-{index:03}.md"))).unwrap(); }
+        for (directory, file) in [("nested","guide.PDF"),(".playwright-cli","trace.yml"),(".ssh","secret.md")] {
+            fs::remove_file(root.join(directory).join(file)).unwrap(); fs::remove_dir(root.join(directory)).unwrap();
+        }
+        fs::remove_dir(root).unwrap();
     }
 
     #[test]

@@ -5,7 +5,7 @@ import { READ_APP_DATA_TOOL, queryApplicationData } from '../src/lib/utils/ai-ap
 
 // Existing application-tool fixtures are adapters over the generic executor.
 function runOnDemandAssistant({ readData, executeAction, ...options }) {
-    return runToolLoop({ ...options, describeOperation, executeTool: async (call, args) => {
+    return runToolLoop({ limits: { maxCalls: 8, maxRounds: 5, contextCharacters: 47000, observationCharacters: 19000 }, ...options, describeOperation, executeTool: async (call, args) => {
         if (call.name === 'workplan_read_data') {
             const query = await readData(args);
             return { ...query, lease: { source: args.source, id: query.data?.note?.id || args.id } };
@@ -319,7 +319,7 @@ test('arbitrary tool adapters share deduplication, lease invalidation and read-a
 
 test('actual execution limits hold when a write invalidates a cached read in the same batch', async () => {
     let round = 0, executions = 0;
-    const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
+    const result = await runToolLoop({ limits: { maxCalls: 8 }, messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
         executeTool: async call => { executions++; return { data: { executed: executions }, applied: call.name === 'change_record' }; },
         callModel: async () => {
             if (!round++) return { toolCalls: [0, 1, 2, 3].map(key => recordCall('lookup_record', String(key), 'r' + key)) };
@@ -364,4 +364,20 @@ test('malformed final responses cannot discard observations from arbitrary tools
         expect(result.content).toContain('REAL_OBSERVATION');
         expect(result.toolLimited).toBe(true);
     }
+});
+
+test('default execution capacity retains a 30k-token-sized observation and continues beyond eight calls', async () => {
+    let executed = 0, rounds = 0;
+    const content = '真实内容'.repeat(7500);
+    const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
+        executeTool: async () => ({ data: { sequence: ++executed, content } }),
+        callModel: async messages => {
+            if (rounds++ < 4) return { toolCalls: Array.from({ length: 3 }, (_, index) => recordCall('lookup_record', String(executed + index), 'q-' + (executed + index))) };
+            const results = messages.filter(message => message.role === 'tool').map(message => JSON.parse(message.content).untrusted_data);
+            expect(results).toHaveLength(12);
+            for (const observation of results) expect(observation.content).toBe(content);
+            return { content: 'All twelve observations retained.' };
+        }
+    });
+    expect(executed).toBe(12); expect(result.toolLimited).not.toBe(true);
 });

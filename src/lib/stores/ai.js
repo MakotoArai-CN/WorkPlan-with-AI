@@ -15,6 +15,7 @@ import { assertChatAttachments } from '../utils/ai-attachment-policy.js';
 import { runOnDemandAssistant } from '../utils/ai-on-demand.js';
 import { describeOperation } from '../utils/ai-operation-policy.js';
 import { READ_APP_DATA_TOOL, queryApplicationData } from '../utils/ai-app-query.js';
+import { fitFileSearchReport } from '../utils/file-search-report.js';
 
 const STORAGE_KEY = 'workplan_ai_config';
 const AI_CHAT_HISTORY_KEY = 'workplan_ai_chat_history';
@@ -1757,6 +1758,7 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
     if (operation === 'read') {
         const result = await readLocalFile({
             path: plan.path,
+            maxBytes: plan.maxBytes ?? 120000,
             trustedDirectories
         });
         if (config.rawToolResults) return { role: 'assistant', type: 'text', content: `已读取文件：${result.path || plan.path}`, toolData: {
@@ -1783,16 +1785,19 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
         };
     }
 
-    const report = await searchLocalFilesDetailed({
+    const report = fitFileSearchReport(await searchLocalFilesDetailed({
         root: plan.root || '',
         query: plan.query || plan.path || '',
-        maxResults: 40,
+        maxResults: plan.maxResults ?? 200,
+        offset: plan.offset ?? 0, kind: plan.kind, extensions: plan.extensions,
+        recursive: plan.recursive ?? true, maxDepth: plan.maxDepth,
+        summaryOnly: plan.summaryOnly ?? false, includeGenerated: plan.includeGenerated ?? false,
         trustedDirectories
-    });
+    }));
     const results = report.entries.filter(entry => !isSensitiveAiPath(entry.path));
     if (config.rawToolResults) return { role: 'assistant', type: 'text', content: `检索完成：${report.root || plan.root}，返回${results.length}项。`, toolData: {
         operation: 'search', ...report, entries: results,
-        note: '仅在上述实际root下递归按名称或路径关键词匹配；未运行项目。空结果不证明整个电脑不存在项目。'
+        note: '统计与清单分页相互独立：countComplete为true时totalMatched及counts覆盖本次筛选范围，hasMore仅表示清单还有下一页，可用nextOffset继续。countComplete为false时数字只是已扫描部分的下限。以filters、recursive、excludedDirectories为准；统计不等于读取或验证文件内容。'
     } };
     const fallback = formatLocalFileSearchResult(results.filter(entry => !isSensitiveAiPath(entry.path)));
     const summarized = await finalizeToolAnswer(
@@ -2110,6 +2115,15 @@ function buildNativeToolDefinitions(allowLocalFiles = true, allowApplicationData
                         path: { type: 'string', description: '目标文件路径。read/write/delete 使用。' },
                         root: { type: 'string', description: '搜索根目录。桌面可用 Desktop 或 ~/Desktop，由原生端解析真实系统桌面（含OneDrive重定向）。不要猜测用户目录，不要拼接工作目录与~。读取仅在用户授权后执行。' },
                         query: { type: 'string', description: '搜索关键词。' },
+                        maxResults: { type: 'integer', minimum: 1, maximum: 5000, description: '清单每页条数，不影响完整范围的统计。默认200。' },
+                        maxBytes: { type: 'integer', minimum: 512, maximum: 256000, description: '读取文本的字节容量，默认120000。仅read使用。' },
+                        offset: { type: 'integer', minimum: 0, maximum: 1000000, description: '清单分页起点，使用上次nextOffset。' },
+                        kind: { type: 'string', enum: ['file', 'directory'], description: '仅文件或仅目录；不填查询两者。' },
+                        extensions: { type: 'array', items: { type: 'string' }, description: '可选扩展名筛选，如md、pdf、docx；不填包含所有文件类型。' },
+                        recursive: { type: 'boolean', description: '默认递归；false仅查询根目录的直接子项。' },
+                        maxDepth: { type: 'integer', minimum: 1, maximum: 256 },
+                        summaryOnly: { type: 'boolean', description: '统计数量时设为true：扫描完整筛选范围，仅返回总数、文件/目录数及扩展名分布，不返回文件清单。不要根据清单页长度估算总数。' },
+                        includeGenerated: { type: 'boolean', description: '默认跳过依赖、缓存和测试产物目录；需要包含这些目录的统计时设为true，敏感目录始终排除。' },
                         content: { type: 'string', description: 'write 时写入的完整内容。' },
                         response_goal: { type: 'string' },
                         message: { type: 'string' }
@@ -2708,6 +2722,8 @@ async function executeNativeToolCall(toolCall, userText, config, assistantContex
             path: args.path || '',
             root: args.root || '',
             query: args.query || '',
+            ...Object.fromEntries(['maxResults', 'maxBytes', 'offset', 'kind', 'extensions', 'recursive', 'maxDepth', 'summaryOnly', 'includeGenerated']
+                .filter(key => args[key] !== undefined).map(key => [key, args[key]])),
             content: args.content || '',
             response_goal: args.response_goal || '',
             message: args.message || '已通过原生工具调用解析为本地文件操作。'
@@ -2985,7 +3001,7 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
         if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件操作结果属于已关闭的对话。' };
         let reply = result;
         if (['search', 'read'].includes(operation.operation) && result.type === 'text') {
-            const args = Object.fromEntries(['operation', 'path', 'root', 'query', 'response_goal', 'message']
+            const args = Object.fromEntries(['operation', 'path', 'root', 'query', 'response_goal', 'message', 'maxResults', 'maxBytes', 'offset', 'kind', 'extensions', 'recursive', 'maxDepth', 'summaryOnly', 'includeGenerated']
                 .filter(key => operation[key] !== undefined).map(key => [key, operation[key]]));
             reply = await requestOnDemandReply(operation.originalUserText || operation.message || '请根据已授权文件结果回答',
                 currentConfig, {}, [], 'default', { name: 'workplan_local_file', arguments: JSON.stringify(args), data: result.toolData || result,
