@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.5.21",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": [
+        "最左侧主导航、AI 聊天会话列表、笔记列表和密码分类栏统一支持拖拽调整宽度，并分别记忆。",
+        "统一方向键微调、双击还原及拖拽结束清理，保留主导航折叠和移动端抽屉行为。"
+      ],
+      "en": [
+        "Resize the main navigation, AI chat history, notes list and vault categories using one shared controller, with independent saved widths.",
+        "Unify keyboard resizing, double-click reset and drag cleanup while preserving navigation collapse and mobile drawers."
+      ],
+      "ja": [
+        "メインナビゲーション、AI 会話一覧、ノート一覧、パスワード分類を共通の処理で幅調整し、それぞれの幅を記憶します。",
+        "方向キー調整、ダブルクリック初期化、ドラッグ終了処理を共通化し、ナビゲーションの折り畳みとモバイルのドロワー動作を維持します。"
+      ]
+    }
+  },
+  {
     "version": "0.5.20",
     "date": "2026-11-12",
     "changes": {
