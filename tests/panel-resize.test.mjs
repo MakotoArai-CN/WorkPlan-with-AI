@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { DEFAULT_DETAIL_WIDTH, detailPanelLayout, detailWidthFromKey } from '../src/lib/utils/panel-resize.js';
+import { DEFAULT_DETAIL_WIDTH, DEFAULT_NOTES_WIDTH, notesPanelLayout, detailPanelLayout, detailWidthFromKey } from '../src/lib/utils/panel-resize.js';
 
 describe('resizable workspace detail panel', () => {
     test('keeps a usable workspace and clamps a persisted width', () => {
@@ -41,5 +41,27 @@ describe('resizable workspace detail panel', () => {
         expect(main.decorations).toBe(true);
         expect(main.minWidth).toBe(480);
         expect(main.minHeight).toBe(480);
+    });
+});
+
+describe('resizable notes list', () => {
+    test('preserves editor room and clamps restored widths without changing the preference', () => {
+        expect(notesPanelLayout(1000).width).toBe(DEFAULT_NOTES_WIDTH);
+        expect(notesPanelLayout(1000, 9999).width).toBe(480);
+        expect(notesPanelLayout(650, 480)).toEqual({ min: 200, max: 290, width: 290 });
+        expect(notesPanelLayout(1000, 480).width).toBe(480);
+        expect(notesPanelLayout(1000, -1).width).toBe(200);
+        expect(notesPanelLayout(1000, 'invalid').width).toBe(DEFAULT_NOTES_WIDTH);
+        expect(notesPanelLayout(300, 480).width).toBe(150);
+        expect(notesPanelLayout(0).width).toBe(0);
+    });
+
+    test('right-edge keys follow the physical drag direction and support bounds', () => {
+        expect(detailWidthFromKey('ArrowRight', 288, 200, 480, 'right')).toBe(304);
+        expect(detailWidthFromKey('ArrowLeft', 288, 200, 480, 'right')).toBe(272);
+        expect(detailWidthFromKey('ArrowLeft', 200, 200, 480, 'right')).toBe(200);
+        expect(detailWidthFromKey('End', 288, 200, 480, 'right')).toBe(480);
+        expect(detailWidthFromKey('Home', 288, 200, 480, 'right')).toBe(200);
+        expect(detailWidthFromKey('Escape', 288, 200, 480, 'right')).toBeNull();
     });
 });
