@@ -19,6 +19,7 @@
     import {
         getEffectiveConfig,
         configureAiPanel,
+        aiPanelContext,
         showAiPanel,
         providerRequiresApiKey,
     } from "../stores/ai.js";
@@ -793,6 +794,25 @@
             return;
         }
         showAiPanel.set(true);
+    }
+
+    function syncSelectedNoteAssistant(note, context) {
+        if (context.activeNoteId === (note?.id || null) && context.noteLocked === !!note?.aiLocked) return;
+        const next = {
+            activeNoteId: note?.id || null,
+            noteTitle: note?.title || '',
+            noteCategory: note?.category || '',
+            noteContent: note?.aiLocked ? '' : note?.content || '',
+            noteLocked: !!note?.aiLocked,
+            title: note ? `${note.title || t('notes.new_note_title')} · AI` : t('notes.ai_assistant')
+        };
+        if (Object.entries(next).every(([key, value]) => context[key] === value)) return;
+        const changedNote = context.activeNoteId !== next.activeNoteId;
+        configureAiPanel({ ...context, ...next, draft: changedNote ? '' : context.draft }, changedNote);
+    }
+
+    $: if ($aiPanelContext.scope === 'notes' && $aiPanelContext.mode === 'note') {
+        syncSelectedNoteAssistant($activeNote, $aiPanelContext);
     }
 
     async function handleExport(type) {

@@ -18,4 +18,20 @@ describe('notes AI system prompt', () => {
         expect(source).toContain('不要声称已经保存或修改了笔记');
         expect(source).toContain('引用块');
     });
+
+    test('live chat entry points use native on-demand queries instead of keyword or intent-classifier routing', () => {
+        const side = source.slice(source.indexOf('export async function sendAiMessage('), source.indexOf('export async function retryLastMessage('));
+        const chat = source.slice(source.indexOf('export async function sendChatMessage('), source.indexOf('export async function retryChatMessage('));
+        for (const entry of [side, chat]) {
+            expect(entry).toContain('requestOnDemandReply(');
+            expect(entry).not.toContain('classifyUserIntent(');
+            expect(entry).not.toContain('resolveAssistantMessage(');
+        }
+        expect(source).not.toContain('requestsApplicationData');
+        const panel = readFileSync(join(import.meta.dir, '..', 'src/lib/components/AiPanel.svelte'), 'utf8');
+        const payload = panel.slice(panel.indexOf('function getAssistantPayload()'), panel.indexOf('function addScopedItem('));
+        expect(payload).not.toContain('getExistingItems');
+        expect(payload).not.toContain('noteContent');
+        expect(payload).toContain('items: []');
+    });
 });
