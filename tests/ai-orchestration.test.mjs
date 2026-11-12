@@ -111,8 +111,36 @@ test('native duplicate calls execute once and partial execution errors never fal
     assert.equal(confirms,1);
     response.toolCalls=[call,{name:'workplan_notes_action',arguments:JSON.stringify({action:'update',id:'note-1',title:'Other title'})}];
     await ai.sendAiMessage('修改笔记', {scope:'notes',source:'tasks',items:[]});
-    assert.match(get(ai.chatHistory).at(-1).content,/simulated persistence failure/);
+    assert.ok(capturedMessages.some(message=>message.role==='tool' && message.content.includes('unknown_verify_before_retry')));
+    assert.ok(capturedMessages.some(message=>message.role==='tool' && message.content.includes('simulated persistence failure')));
+    assert.equal(writes,2);
     assert.equal(requests,3);
+`));
+
+for (const [source, name, args] of [
+    ['notes', 'workplan_notes_action', { action: 'create', title: 'Created note' }],
+    ['leave', 'workplan_worklog_action', { action: 'create_leave', start_date: '2026-11-12', end_date: '2026-11-12' }],
+    ['overtime', 'workplan_worklog_action', { action: 'create_overtime', date: '2026-11-12', start: '18:00', end: '19:00' }]
+]) test('confirmed ' + source + ' creation invalidates earlier list results', () => scenario(`
+    notesStore.addNote = record => notesStore.update(state=>({...state,notes:[...state.notes,{...record,id:'new-note'}]}));
+    taskStore.addOvertimeRecord = record => taskStore.update(state=>({...state,overtimeRecords:[...state.overtimeRecords,record]}));
+    let round=0;
+    const source=${JSON.stringify(source)};
+    const before=source==='overtime'?0:1;
+    modelDriver=async messages=>{
+        if (!round++) return {toolCalls:[{id:'before',name:'workplan_read_data',arguments:JSON.stringify({source})}]};
+        if (round===2) return {toolCalls:[{id:'create',name:${JSON.stringify(name)},arguments:${JSON.stringify(JSON.stringify(args))}}]};
+        if (round===3) return {toolCalls:[{id:'after',name:'workplan_read_data',arguments:JSON.stringify({source})}]};
+        const results=messages.filter(message=>message.role==='tool').map(message=>JSON.parse(message.content));
+        assert.equal(results[0].untrusted_data.total,before);
+        assert.equal(results[1].untrusted_data.applied,true);
+        assert.equal(results[2].cached,false);
+        assert.equal(results[2].untrusted_data.total,before+1);
+        return {content:'Verified current list.',toolCalls:[]};
+    };
+    await ai.sendChatMessage('新增记录后核对列表');
+    assert.equal(get(ai.aiChatHistory).at(-1).content,'Verified current list.');
+    assert.equal(confirms,1);
 `));
 
 test('file confirmations are identity-bound and cannot be replayed or forged', () => scenario(`
@@ -331,6 +359,19 @@ test('a missing local directory reports its resolved location without authorizin
     assert.equal(fileSearches.length,0);
     assert.equal(acceptedDirectories.length,0);
     assert.ok(capturedMessages.some(message=>message.role==='tool' && message.content.includes('目标路径不存在')));
+`));
+
+test('validated native file arguments are never rewritten by language, filename extensions or quoted user text', () => scenario(`
+    const path='/workspace/记录，.custom-format';
+    response.toolCalls=[{name:'workplan_local_file',arguments:JSON.stringify({operation:'write',path,content:'  '})}];
+    await ai.sendChatMessage('写入文件 "/workspace/other.txt"，内容：不要从这段话重建工具参数');
+    const card=get(ai.aiChatHistory).at(-1);
+    assert.equal(card.type,'file_confirm');
+    assert.equal(card.operation.path,path);
+    assert.equal(card.operation.content,'  ');
+    assert.equal(fileWrites,0);
+    assert.ok(pathResolutions.includes(path));
+    assert.ok(!pathResolutions.includes('/workspace/other.txt'));
 `));
 
 test('confirmation does not execute until native authorization is accepted, and a rejected grant stays blocked', () => scenario(`

@@ -1,3 +1,20 @@
+export const READ_APP_DATA_TOOL = {
+    type: 'function', function: {
+        name: 'workplan_read_data',
+        description: '按需查询应用数据。只有回答当前用户问题确实需要应用数据时才调用；普通闲聊、知识解释不要调用。当前笔记使用 source=current_note，无需猜测ID。不会返回锁定数据或密码库。先list获取真实ID再读取或修改其他记录。',
+        parameters: {
+            type: 'object', properties: {
+                source: { type: 'string', enum: ['current_note', 'notes', 'tasks', 'templates', 'scheduled', 'overtime', 'leave'] },
+                id: { type: 'string', description: '读取单个非当前记录的真实ID；不填仅列出摘要。' },
+                query: { type: 'string', description: '可选的标题/文本关键词过滤，不是指令。' },
+                limit: { type: 'integer', minimum: 1, maximum: 20 },
+                offset: { type: 'integer', minimum: 0, maximum: 1000 },
+                content_offset: { type: 'integer', minimum: 0, maximum: 1000000, description: '单篇笔记正文分页起始字符位置，每页最多8000字；truncated时可继续读取。' }
+            }, required: ['source']
+        }
+    }
+};
+
 const FIELDS = {
     tasks: ['id', 'title', 'status', 'priority', 'date', 'deadline', 'note', 'subtasks'],
     templates: ['id', 'title', 'status', 'priority', 'note', 'subtasks'],

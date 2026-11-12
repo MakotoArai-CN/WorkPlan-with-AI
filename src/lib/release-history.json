@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.5.19",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": [
+        "统一工具调用的去重、执行预算和错误恢复，保留已取得的真实结果；变更结果未确认时停止后续操作。",
+        "移除旧版意图路由和场景特例，本地文件工具不再根据关键词或文件扩展名改写已验证的参数。"
+      ],
+      "en": [
+        "Unify tool deduplication, execution budgets and error recovery while preserving acquired results; stop further operations after an unconfirmed change.",
+        "Remove legacy intent routing and scenario-specific rules; local file tools no longer rewrite validated arguments using keywords or file extensions."
+      ],
+      "ja": [
+        "ツールの重複排除、実行上限、エラー回復を共通化し、取得済みの結果を保持します。変更結果が未確認の場合は後続処理を停止します。",
+        "旧式の意図ルーティングと特定場面向けの処理を削除し、キーワードや拡張子による検証済みファイル引数の書き換えを廃止しました。"
+      ]
+    }
+  },
+  {
     "version": "0.5.18",
     "date": "2026-11-12",
     "changes": {

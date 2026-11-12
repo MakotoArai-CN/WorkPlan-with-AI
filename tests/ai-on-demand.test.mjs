@@ -1,6 +1,20 @@
 import { expect, test } from 'bun:test';
-import { READ_APP_DATA_TOOL, runOnDemandAssistant } from '../src/lib/utils/ai-on-demand.js';
-import { queryApplicationData } from '../src/lib/utils/ai-app-query.js';
+import { runOnDemandAssistant as runToolLoop } from '../src/lib/utils/ai-on-demand.js';
+import { describeOperation } from '../src/lib/utils/ai-operation-policy.js';
+import { READ_APP_DATA_TOOL, queryApplicationData } from '../src/lib/utils/ai-app-query.js';
+
+// Existing application-tool fixtures are adapters over the generic executor.
+function runOnDemandAssistant({ readData, executeAction, ...options }) {
+    return runToolLoop({ ...options, describeOperation, executeTool: async (call, args) => {
+        if (call.name === 'workplan_read_data') {
+            const query = await readData(args);
+            return { ...query, lease: { source: args.source, id: query.data?.note?.id || args.id } };
+        }
+        const result = await executeAction({ ...call, arguments: JSON.stringify(args) });
+        return { data: result?.toolData || result, applied: result?.applied === true,
+            card: result?.type && result.type !== 'text' ? result : null };
+    } });
+}
 
 function stores() {
     let state = { activeNoteId: 'a', notes: [{ id: 'a', title: 'Selected', content: 'ONLY_SELECTED_BODY' },
@@ -178,7 +192,7 @@ test('an already authorized file result seeds the native continuation rather tha
     let scans=0,models=0;
     const result=await runOnDemandAssistant({messages:[{role:'user',content:'桌面的GPT项目还能用吗？'}],tools:[fileTool],isCurrent:()=>true,readData:async()=>{},
         initialResult:{name:'workplan_local_file',arguments:'{"operation":"search","root":"C:/Users/fixture/OneDrive/Desktop","query":"GPT"}',
-            aliases:[{operation:'search',root:'Desktop',query:'GPT'}],data:{root:'OneDrive/Desktop',entries:[{path:'OneDrive/Desktop/GPT/README.md'}]}},
+            aliases:[{operation:'search',root:'~/Desktop',query:'gpt'}],data:{root:'OneDrive/Desktop',entries:[{path:'OneDrive/Desktop/GPT/README.md'}]}},
         executeAction:async()=>{scans++;return{type:'text',content:'should not re-scan'};},
         callModel:async messages=>{
             models++;expect(JSON.stringify(messages)).toContain('OneDrive/Desktop/GPT/README.md');
@@ -202,4 +216,152 @@ test('oversized result context truncates observed data and stops additional work
         }
     });
     expect(reads).toBeLessThanOrEqual(4);expect(result.toolLimited).toBe(true);expect(result.content).toContain('截断结果');
+});
+
+test('budget recovery is identical across notes, tasks, schedules and worklog queries', async () => {
+    for (const source of ['current_note', 'notes', 'tasks', 'templates', 'scheduled', 'overtime', 'leave']) {
+        let queries=0, finalCalls=0;
+        const result=await runOnDemandAssistant({messages:[{role:'user',content:'请根据所需数据回答当前问题'}],tools:[READ_APP_DATA_TOOL],isCurrent:()=>true,
+            executeAction:async()=>{throw Error('unexpected action');},
+            readData:async args=>{queries++;return{data:{source:args.source,id:args.id,value:'ACTUAL_'+source}};},
+            callModel:async()=>({toolCalls:Array.from({length:4},(_,index)=>({id:'q-'+(queries+index),name:'workplan_read_data',arguments:JSON.stringify({source,id:String(queries+index)})}))}),
+            finalizeModel:async messages=>{
+                finalCalls++;
+                expect(JSON.stringify(messages)).toContain('ACTUAL_'+source);
+                expect(messages.at(-1).content).not.toContain('目录');
+                expect(messages.at(-1).content).not.toContain('项目');
+                return '依据已返回的数据完成回答，未验证事项已注明。';
+            }
+        });
+        expect(queries).toBe(8);expect(finalCalls).toBe(1);expect(result.toolLimited).toBe(true);
+    }
+});
+
+test('a failed read becomes a structured observation and cannot discard a preceding success', async () => {
+    let round=0;
+    const result=await runOnDemandAssistant({messages:[],tools:[READ_APP_DATA_TOOL],isCurrent:()=>true,executeAction:async()=>{},
+        readData:async args=>{if(args.id==='bad')throw Error('synthetic read failure');return{data:{id:args.id,value:'SAVED_SUCCESS'}};},
+        callModel:async messages=>{
+            if(!round++)return{toolCalls:['ok','bad'].map((id,index)=>({id:'q'+index,name:'workplan_read_data',arguments:JSON.stringify({source:'tasks',id})}))};
+            const evidence=messages.filter(message=>message.role==='tool').map(message=>JSON.parse(message.content).untrusted_data);
+            expect(evidence[0].value).toBe('SAVED_SUCCESS');expect(evidence[1].status).toBe('failed');expect(evidence[1].error).toContain('read failure');
+            return{toolCalls:[],content:'一项查询成功，另一项失败；未丢弃已知信息。'};
+        }
+    });
+    expect(result.content).toContain('一项查询成功');
+});
+
+test('invalid or blank follow-up model responses retain prior data instead of asking the user to start over', async () => {
+    for(const followUp of [{toolCalls:[{name:'workplan_read_data',arguments:'{"source":"vault"}'}]}, {content:'',toolCalls:[]}, null, {toolCalls:{}}, {content:{}}]){
+        let round=0;
+        const result=await runOnDemandAssistant({messages:[],tools:[READ_APP_DATA_TOOL],isCurrent:()=>true,executeAction:async()=>{},
+            readData:async()=>({data:{value:'KNOWN_RESULT'}}),
+            callModel:async()=>!round++?{toolCalls:[{id:'valid',name:'workplan_read_data',arguments:'{"source":"tasks"}'}]}:followUp,
+            finalizeModel:async messages=>{expect(JSON.stringify(messages)).toContain('KNOWN_RESULT');return '基于已取得数据回答。';}
+        });
+        expect(result.toolLimited).toBe(true);expect(result.content).toBe('基于已取得数据回答。');
+    }
+});
+
+test('a mutation failure stops later mutations and preserves confirmed outcomes without replay', async () => {
+    const definition={type:'function',function:{name:'workplan_notes_action',parameters:{type:'object',properties:{action:{type:'string'},id:{type:'string'},message:{type:'string'}},required:['action','id']}}};
+    let writes=0;
+    const result=await runOnDemandAssistant({messages:[],tools:[definition],isCurrent:()=>true,readData:async()=>{},
+        callModel:async()=>({toolCalls:['first','failed','later'].map((id,index)=>({id:'action-'+index,name:'workplan_notes_action',arguments:JSON.stringify({action:'update',id})}))}),
+        executeAction:async call=>{writes++;if(JSON.parse(call.arguments).id==='failed')throw Error('write result uncertain');return{type:'text',applied:true,content:'CONFIRMED_FIRST_CHANGE'};},
+        finalizeModel:async messages=>{
+            expect(JSON.stringify(messages)).toContain('CONFIRMED_FIRST_CHANGE');
+            expect(JSON.stringify(messages)).toContain('unknown_verify_before_retry');
+            return '首项已完成，次项结果未确认，后续未执行。';
+        }
+    });
+    expect(writes).toBe(2);expect(result.content).toContain('后续未执行');
+    expect(result.content).not.toContain('操作状态：');
+});
+
+test('shared tool-loop policies never hardcode a particular question, directory or business conclusion', () => {
+    const source = require('node:fs').readFileSync(new URL('../src/lib/utils/ai-on-demand.js', import.meta.url), 'utf8');
+    const finish = source.slice(source.indexOf('const finish ='), source.indexOf('if (initialResult)'));
+    for (const specific of ['GPT', '项目可以运行', '项目目录', 'README', 'package.json', '桌面']) {
+        expect(finish).not.toContain(specific);
+    }
+    expect(source).not.toContain('workplan_');
+});
+
+const recordTools = ['lookup_record', 'change_record'].map(name => ({ type: 'function', function: {
+    name, parameters: { type: 'object', properties: { key: { type: 'string' }, explanation: { type: 'string' } }, required: ['key'] }
+} }));
+const recordCall = (name, key, id, explanation = '') => ({ name, id, arguments: JSON.stringify({ key, explanation }) });
+const recordPolicy = (call, args) => ({ identity: { key: args.key }, readOnly: call.name === 'lookup_record',
+    invalidates: [{ source: 'records', id: args.key }] });
+
+test('arbitrary tool adapters share deduplication, lease invalidation and read-after-write freshness', async () => {
+    let round = 0, reads = 0, writes = 0, revision = 0;
+    const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
+        executeTool: async (call, args) => {
+            if (call.name === 'change_record') { writes++; revision++; return { applied: true, data: { revision } }; }
+            reads++;
+            const observed = revision;
+            return { data: { revision }, lease: { source: 'records', id: args.key }, isCurrent: () => revision === observed };
+        },
+        callModel: async messages => {
+            if (!round++) return { toolCalls: [recordCall('lookup_record', 'a', 'read-first')] };
+            if (round === 2) return { toolCalls: [recordCall('change_record', 'a', 'write-first'),
+                recordCall('change_record', 'a', 'write-again', 'different wording'), recordCall('lookup_record', 'a', 'read-latest')] };
+            const results = messages.filter(message => message.role === 'tool');
+            expect(JSON.parse(results.at(-1).content).untrusted_data.revision).toBe(1);
+            expect(JSON.parse(results.at(-2).content).cached).toBe(true);
+            return { content: 'Current record confirmed.' };
+        }
+    });
+    expect(reads).toBe(2); expect(writes).toBe(1); expect(result.content).toBe('Current record confirmed.');
+});
+
+test('actual execution limits hold when a write invalidates a cached read in the same batch', async () => {
+    let round = 0, executions = 0;
+    const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
+        executeTool: async call => { executions++; return { data: { executed: executions }, applied: call.name === 'change_record' }; },
+        callModel: async () => {
+            if (!round++) return { toolCalls: [0, 1, 2, 3].map(key => recordCall('lookup_record', String(key), 'r' + key)) };
+            if (round === 2) return { toolCalls: [4, 5, 6].map(key => recordCall('lookup_record', String(key), 'r' + key)) };
+            return { toolCalls: [recordCall('change_record', '0', 'write'), recordCall('lookup_record', '0', 'invalidated-read')] };
+        },
+        finalizeModel: async messages => {
+            const replies = messages.filter(message => message.role === 'tool');
+            expect(replies).toHaveLength(9);
+            expect(JSON.parse(replies.at(-1).content).untrusted_data.status).toBe('not_executed');
+            return 'Completed within the execution limit.';
+        }
+    });
+    expect(executions).toBe(8); expect(result.toolLimited).toBe(true);
+});
+
+test('arbitrary mutation failures close every tool-call ID without replaying or inventing UI status text', async () => {
+    let executions = 0;
+    const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
+        callModel: async () => ({ toolCalls: ['first', 'second', 'third'].map(key => recordCall('change_record', key, key)) }),
+        executeTool: async () => { if (++executions === 2) throw Error('unconfirmed change'); return { data: { receipt: 'CONFIRMED_RECEIPT' }, applied: true }; },
+        finalizeModel: async messages => {
+            const replies = messages.filter(message => message.role === 'tool');
+            expect(replies.map(message => message.tool_call_id)).toEqual(['first', 'second', 'third']);
+            expect(JSON.parse(replies[0].content).untrusted_data.receipt).toBe('CONFIRMED_RECEIPT');
+            expect(JSON.parse(replies[1].content).untrusted_data.effect).toBe('unknown_verify_before_retry');
+            expect(JSON.parse(replies[2].content).untrusted_data.status).toBe('not_executed');
+            return 'First confirmed; second uncertain; third not executed.';
+        }
+    });
+    expect(executions).toBe(2); expect(result.content).toBe('First confirmed; second uncertain; third not executed.');
+});
+
+test('malformed final responses cannot discard observations from arbitrary tools', async () => {
+    for (const finalResponse of [null, { content: {} }, { content: 42 }, { toolCalls: [] }]) {
+        let round = 0;
+        const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
+            executeTool: async () => ({ data: { receipt: 'REAL_OBSERVATION' } }),
+            callModel: async () => ({ toolCalls: [recordCall('lookup_record', 'a', 'read-' + round++)] }),
+            finalizeModel: async () => finalResponse
+        });
+        expect(result.content).toContain('REAL_OBSERVATION');
+        expect(result.toolLimited).toBe(true);
+    }
 });
