@@ -51,6 +51,7 @@
         normalizePriority,
     } from "../utils/task-vocabulary.js";
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
+    import SidebarResizeHandle from './SidebarResizeHandle.svelte';
     import { _ } from "svelte-i18n";
     import { get } from "svelte/store";
 
@@ -1042,7 +1043,8 @@
     {/if}
 
     <aside
-        class="w-[280px] bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shrink-0 h-full z-50 transition-transform duration-200 md:flex md:static md:translate-x-0"
+        id="chat-session-sidebar"
+        class="w-[280px] bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shrink-0 h-full z-50 transition-transform duration-200 md:flex md:relative md:translate-x-0"
         class:fixed={showSessionDrawer}
         class:inset-y-0={showSessionDrawer}
         class:left-0={showSessionDrawer}
@@ -1115,6 +1117,7 @@
                 </div>
             {/each}
         </div>
+        <SidebarResizeHandle controls="chat-session-sidebar" storageKey="workplan_chat_sessions_panel_width" defaultWidth={280} />
     </aside>
 
     <div class="flex-1 min-w-0 flex flex-col bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-850 overflow-hidden">

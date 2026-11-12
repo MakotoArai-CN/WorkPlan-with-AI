@@ -17,10 +17,14 @@ export function detailPanelLayout(availableWidth, preferredWidth = DEFAULT_DETAI
 }
 
 export function notesPanelLayout(availableWidth, preferredWidth = DEFAULT_NOTES_WIDTH) {
+    return sidebarPanelLayout(availableWidth, preferredWidth, { defaultWidth: DEFAULT_NOTES_WIDTH });
+}
+
+export function sidebarPanelLayout(availableWidth, preferredWidth, { defaultWidth = 288, minWidth = 200, maxWidth = 480, reserveWidth = 360 } = {}) {
     const available = Math.max(0, Math.floor(Number(availableWidth) || 0));
-    const min = Math.min(200, Math.floor(available / 2));
-    const max = Math.max(min, Math.min(480, available - 360));
-    const preferred = Number.isFinite(Number(preferredWidth)) ? Number(preferredWidth) : DEFAULT_NOTES_WIDTH;
+    const min = Math.min(minWidth, Math.floor(available / 2));
+    const max = Math.max(min, Math.min(maxWidth, available - reserveWidth));
+    const preferred = Number.isFinite(Number(preferredWidth)) ? Number(preferredWidth) : defaultWidth;
     return { min, max, width: Math.round(Math.max(min, Math.min(max, preferred))) };
 }
 

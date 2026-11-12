@@ -9,6 +9,7 @@
     import { flushLocalDatabase } from '../utils/local-db.js';
     import { openBackupModal } from '../stores/backup-modal.js';
     import { isWebDemo } from '../utils/runtime.js';
+    import SidebarResizeHandle from './SidebarResizeHandle.svelte';
 
     const AUTO_COLLAPSE_VIEWS = new Set(['notes', 'aichat']);
 
@@ -181,8 +182,9 @@
 <svelte:window on:resize={handleNavResize} />
 
 <aside
+    id="navigation-sidebar"
     data-glass-role="sidebar"
-    class="hidden md:flex bg-white border-r border-slate-200 flex-col z-20 shadow-lg shrink-0 transition-[width,padding] duration-300 ease-out"
+    class="relative hidden md:flex bg-white border-r border-slate-200 flex-col z-20 shadow-lg shrink-0 transition-[width,padding] duration-300 ease-out"
     class:w-72={!collapsed}
     class:w-24={collapsed}
 >
@@ -318,5 +320,7 @@
         </div>
     </div>
 
-
+    <SidebarResizeHandle controls="navigation-sidebar" storageKey="workplan_navigation_panel_width"
+        defaultWidth={288} minWidth={200} maxWidth={400} reserveWidth={560}
+        bind:collapsed collapsedWidth={96} on:resize={handleNavResize} />
 </aside>

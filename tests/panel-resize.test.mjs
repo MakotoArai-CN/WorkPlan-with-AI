@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { DEFAULT_DETAIL_WIDTH, DEFAULT_NOTES_WIDTH, notesPanelLayout, detailPanelLayout, detailWidthFromKey } from '../src/lib/utils/panel-resize.js';
+import { DEFAULT_DETAIL_WIDTH, DEFAULT_NOTES_WIDTH, notesPanelLayout, sidebarPanelLayout, detailPanelLayout, detailWidthFromKey } from '../src/lib/utils/panel-resize.js';
 
 describe('resizable workspace detail panel', () => {
     test('keeps a usable workspace and clamps a persisted width', () => {
@@ -41,6 +41,45 @@ describe('resizable workspace detail panel', () => {
         expect(main.decorations).toBe(true);
         expect(main.minWidth).toBe(480);
         expect(main.minHeight).toBe(480);
+    });
+});
+
+describe('shared sidebar sizing', () => {
+    test('uses each sidebar bounds without overwriting temporary viewport clamps', () => {
+        for (const options of [
+            { defaultWidth: 288, minWidth: 200, maxWidth: 400, reserveWidth: 560 },
+            { defaultWidth: 280, minWidth: 200, maxWidth: 480, reserveWidth: 360 },
+            { defaultWidth: 224, minWidth: 180, maxWidth: 400, reserveWidth: 360 }
+        ]) {
+            expect(sidebarPanelLayout(1400, 'invalid', options).width).toBe(options.defaultWidth);
+            expect(sidebarPanelLayout(1400, 9999, options).width).toBe(options.maxWidth);
+            expect(sidebarPanelLayout(1400, -50, options).width).toBe(options.minWidth);
+            expect(sidebarPanelLayout(1400, 350, options).width).toBe(350);
+            expect(sidebarPanelLayout(500, 350, options).width).toBeLessThanOrEqual(250);
+            expect(sidebarPanelLayout(0, 350, options).width).toBe(0);
+        }
+    });
+
+    test('every actual left sidebar uses the shared resize controller and its own saved width', () => {
+        const sources = [
+            ['Sidebar.svelte', 'navigation-sidebar', 'workplan_navigation_panel_width'],
+            ['AiChat.svelte', 'chat-session-sidebar', 'workplan_chat_sessions_panel_width'],
+            ['Notes.svelte', 'notes-sidebar', 'NOTES_WIDTH_KEY'],
+            ['Passwords.svelte', 'vault-category-sidebar', 'workplan_vault_categories_panel_width']
+        ];
+        for (const [file, id, key] of sources) {
+            const source = readFileSync(new URL(`../src/lib/components/${file}`, import.meta.url), 'utf8');
+            expect(source).toContain("import SidebarResizeHandle from './SidebarResizeHandle.svelte'");
+            expect(source).toContain(`<SidebarResizeHandle controls="${id}"`);
+            expect(source).toContain(key);
+        }
+        const notes = readFileSync(new URL('../src/lib/components/Notes.svelte', import.meta.url), 'utf8');
+        expect(notes).not.toContain('startNotesResize');
+        const shared = readFileSync(new URL('../src/lib/components/SidebarResizeHandle.svelte', import.meta.url), 'utf8');
+        expect(shared).toContain('on:pointercancel={finish}');
+        expect(shared).toContain('on:lostpointercapture={finish}');
+        expect(shared).toContain('observer.disconnect()');
+        expect(shared).toContain('panel.style.width = originalWidth');
     });
 });
 

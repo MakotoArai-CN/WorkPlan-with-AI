@@ -1,6 +1,7 @@
 <script>
     import AnimatedModal from './AnimatedModal.svelte';
     import SelectMenu from './SelectMenu.svelte';
+    import SidebarResizeHandle from './SidebarResizeHandle.svelte';
     import {
         passwordsStore,
         isPasswordsUnlocked,
@@ -1520,6 +1521,7 @@ async function handleChangeMasterPassword() {
             {/if}
 
             <div
+                id="vault-category-sidebar"
                 class="w-48 md:w-56 bg-white border-r border-slate-200 flex flex-col shrink-0 absolute md:relative z-30 h-full transition-transform duration-200"
                 class:translate-x-0={!isMobile || showSidebar}
                 class:-translate-x-full={isMobile && !showSidebar}
@@ -1569,10 +1571,11 @@ async function handleChangeMasterPassword() {
                         <i class="ph ph-folder-plus"></i> {$_('passwords.custom_category')}
                     </button>
                 </div>
+                <SidebarResizeHandle controls="vault-category-sidebar" storageKey="workplan_vault_categories_panel_width" defaultWidth={224} minWidth={180} maxWidth={400} />
             </div>
 
             <div
-                class="flex-1 overflow-y-auto p-4 overscroll-contain"
+                class="flex-1 min-w-0 overflow-y-auto p-4 overscroll-contain"
                 style="-webkit-overflow-scrolling: touch;"
             >
                 {#if filteredPasswords.length === 0}

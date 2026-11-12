@@ -12,7 +12,7 @@ describe('AI chat session drawer', () => {
     test('never stays fixed at desktop breakpoints', () => {
         const source = read('src/lib/components/AiChat.svelte');
         const aside = source.slice(source.indexOf('<aside'), source.indexOf('</aside>'));
-        expect(aside).toContain('md:static');
+        expect(aside).toContain('md:relative');
         expect(aside).toContain('md:translate-x-0');
     });
 
