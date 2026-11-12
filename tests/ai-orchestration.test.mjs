@@ -361,6 +361,19 @@ test('a missing local directory reports its resolved location without authorizin
     assert.ok(capturedMessages.some(message=>message.role==='tool' && message.content.includes('目标路径不存在')));
 `));
 
+test('native search options preserve complete aggregate counts independently of the returned list page', () => scenario(`
+    response.toolCalls=[{name:'workplan_local_file',arguments:JSON.stringify({operation:'search',root:'/workspace',query:'',summaryOnly:true,kind:'file',extensions:['md','pdf'],maxResults:500,offset:40,includeGenerated:true,recursive:false})}];
+    await ai.sendChatMessage('统计指定范围的文件');
+    assert.equal(fileSearches.length,1);
+    assert.equal(fileSearches[0].summaryOnly,true);
+    assert.equal(fileSearches[0].maxResults,500);
+    assert.equal(fileSearches[0].offset,40);
+    assert.equal(fileSearches[0].kind,'file');
+    assert.deepEqual(fileSearches[0].extensions,['md','pdf']);
+    assert.equal(fileSearches[0].includeGenerated,true);
+    assert.equal(fileSearches[0].recursive,false);
+`));
+
 test('validated native file arguments are never rewritten by language, filename extensions or quoted user text', () => scenario(`
     const path='/workspace/记录，.custom-format';
     response.toolCalls=[{name:'workplan_local_file',arguments:JSON.stringify({operation:'write',path,content:'  '})}];

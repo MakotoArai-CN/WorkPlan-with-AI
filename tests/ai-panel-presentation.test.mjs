@@ -11,6 +11,15 @@ test('side assistant renders replies using the same safe Markdown component as f
     expect(panel).not.toContain('{@html');
 });
 
+test('long note descriptions and message content cannot set the side panel minimum width', () => {
+    const intro = panel.slice(panel.indexOf('bind:this={chatContainer}'), panel.indexOf('{#each $chatHistory'));
+    expect(intro).toContain('overflow-x-hidden');
+    expect(intro).toContain('min-w-0');
+    expect(intro).toContain('[overflow-wrap:anywhere]');
+    const detail = readFileSync(new URL('../src/lib/components/TaskDetail.svelte', import.meta.url), 'utf8');
+    expect(detail).toContain('w-full min-w-0 min-h-0 overflow-hidden');
+});
+
 test('note shortcuts have compact translated labels while preserving the original submitted requests', () => {
     expect(panel).toContain('$: panelMeta = getPanelMeta($aiPanelContext, $_);');
     for (const language of ['zh', 'en', 'ja']) {

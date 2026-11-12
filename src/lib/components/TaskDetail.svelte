@@ -54,7 +54,7 @@
     }
 </script>
 
-<aside class="hidden md:flex w-full bg-white border-l border-slate-200 flex-col z-10 shrink-0 h-full shadow-[-4px_0_15px_rgba(0,0,0,0.02)]">
+<aside class="hidden md:flex w-full min-w-0 min-h-0 overflow-hidden bg-white border-l border-slate-200 flex-col z-10 shrink-0 h-full shadow-[-4px_0_15px_rgba(0,0,0,0.02)]">
     {#if $showAiPanel}
         <slot name="ai-panel"></slot>
     {:else if $activeTask}

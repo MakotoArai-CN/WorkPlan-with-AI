@@ -250,16 +250,26 @@ export async function searchLocalFiles(options = {}) {
 export async function searchLocalFilesDetailed({
     root = '',
     query = '',
-    maxResults = 40,
+    maxResults = 200,
+    offset = 0,
+    kind = undefined,
+    extensions = undefined,
+    recursive = true,
+    maxDepth = undefined,
+    summaryOnly = false,
+    includeGenerated = false,
     trustedDirectories = []
 } = {}) {
     const bridge = getAndroidBridge();
+    const searchOptions = { offset, kind, extensions, recursive, maxDepth, summaryOnly, includeGenerated };
     const contentRoots = root
         ? (isContentUri(root) ? [root] : [])
         : contentTrustedDirectories(trustedDirectories);
 
     if (bridge?.searchTree && contentRoots.length > 0) {
         const entries = [];
+        const reports = [];
+        let matched = 0;
         for (const contentRoot of contentRoots) {
             const relativeRoots = root && !isContentUri(root)
                 ? androidTreeRelativePathCandidates(root, contentRoot, { includeEmpty: true })
@@ -268,18 +278,33 @@ export async function searchLocalFilesDetailed({
             for (const relativeRoot of relativeRoots) {
                 try {
                     const result = parseAndroidBridgeResult(
-                        relativeRoot && bridge.searchTreeInTree
+                        bridge.searchTreeReport ? bridge.searchTreeReport(contentRoot, relativeRoot, query || '', Math.max(1, maxResults - entries.length),
+                            JSON.stringify({ ...searchOptions, offset: Math.max(0, offset - matched), summaryOnly: summaryOnly || entries.length >= maxResults }))
+                        : relativeRoot && bridge.searchTreeInTree
                             ? bridge.searchTreeInTree(contentRoot, relativeRoot, query || '', maxResults)
                             : bridge.searchTree(contentRoot, query || '', maxResults)
                     );
+                    if (contentRoots.length === 1 && bridge.searchTreeReport) return { ...result, root: contentRoot, query, source: 'android_tree' };
+                    if (bridge.searchTreeReport) { reports.push(result); matched += result.totalMatched; }
                     entries.push(...(result.entries || []));
                     break;
-                } catch {
+                } catch (error) {
+                    if (bridge.searchTreeReport) throw error;
                     // Try the next relative root form for this authorized tree.
                 }
             }
 
-            if (entries.length >= maxResults) break;
+            if (!bridge.searchTreeReport && entries.length >= maxResults) break;
+        }
+        if (bridge.searchTreeReport) {
+            const byExtension = {};
+            for (const report of reports) for (const [extension, count] of Object.entries(report.counts?.byExtension || {})) byExtension[extension] = (byExtension[extension] || 0) + count;
+            const complete = reports.every(report => report.countComplete);
+            const more = !summaryOnly && matched > offset + entries.length;
+            return { root, roots: contentRoots, query, entries, offset, returned: entries.length, totalMatched: matched,
+                countComplete: complete, truncated: !complete, hasMore: more, nextOffset: more ? offset + entries.length : null,
+                counts: { files: reports.reduce((sum, report) => sum + report.counts.files, 0), directories: reports.reduce((sum, report) => sum + report.counts.directories, 0), byExtension },
+                recursive, filters: searchOptions, reports: reports.map(({ entries: _entries, ...scope }) => scope), source: 'android_tree' };
         }
         return { entries: entries.slice(0, maxResults), root, query, recursive: true, truncated: entries.length >= maxResults, source: 'android_tree' };
     }
@@ -289,14 +314,15 @@ export async function searchLocalFilesDetailed({
         query,
         maxResults,
         trustedDirs: trustedDirectories,
-        includeReport: true
+        includeReport: true,
+        searchOptions
     });
     return Array.isArray(result) ? { entries: result, root, query, recursive: true, truncated: result.length >= maxResults } : result;
 }
 
 export async function readLocalFile({
     path,
-    maxBytes = 16000,
+    maxBytes = 120000,
     trustedDirectories = []
 } = {}) {
     const bridge = getAndroidBridge();

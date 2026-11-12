@@ -1,5 +1,7 @@
 import { MAX_NATIVE_TOOL_CALLS, validateNativeToolCall } from './ai-tool-policy.js';
 
+export const DEFAULT_TOOL_LIMITS = Object.freeze({ maxCalls: 32, maxRounds: 16, contextCharacters: 1500000, observationCharacters: 256000 });
+
 function stable(value) {
     if (Array.isArray(value)) return value.map(stable);
     if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])]));
@@ -21,7 +23,11 @@ function boundedObservation(value, budget) {
 
 // Keep the execution budget, but always close with already observed facts.
 // Repeated reads replay results instead of repeating filesystem/network work.
-export async function runOnDemandAssistant({ messages, tools, callModel, finalizeModel, executeTool, describeOperation = (_call, args) => ({ identity: args, readOnly: false }), isCurrent, initialResult = null }) {
+export async function runOnDemandAssistant({ messages, tools, callModel, finalizeModel, executeTool, describeOperation = (_call, args) => ({ identity: args, readOnly: false }), isCurrent, initialResult = null, limits = {} }) {
+    const budget = { ...DEFAULT_TOOL_LIMITS, ...limits };
+    for (const key of Object.keys(DEFAULT_TOOL_LIMITS)) {
+        if (!Number.isSafeInteger(budget[key]) || budget[key] < 1) throw new Error('Invalid tool execution budget');
+    }
     const transcript = [...messages];
     const leases = [];
     const completed = new Map();
@@ -29,7 +35,8 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
     const observations = [];
     const fingerprint = (call, args) => call.name + ':' + JSON.stringify(stable(describeOperation(call, args).identity ?? args));
     let calls = 0;
-    let usedCharacters = 0;
+    let usedCharacters = JSON.stringify(messages).length + JSON.stringify(tools).length;
+    const contextCeiling = Math.max(0, budget.contextCharacters - 2000);
     const assertCurrent = () => {
         if (!isCurrent() || leases.some(lease => !lease.check())) throw new DOMException('操作已取消或数据已改变，请重新提问', 'AbortError');
     };
@@ -78,7 +85,7 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
         const checked = validateNativeToolCall(initialResult, tools);
         if (!checked.valid || !describeOperation(initialResult, checked.args).readOnly) throw new Error('授权后的原始工具参数不可用，未继续查询。');
         const args = checked.args;
-        const data = boundedObservation(initialResult.data, 19000);
+        const data = boundedObservation(initialResult.data, Math.min(budget.observationCharacters, Math.max(512, contextCeiling - usedCharacters)));
         calls = 1;
         completed.set(fingerprint(initialResult, args), { data, read: true, id: 'authorized_result' });
         for (const alias of initialResult.aliases || []) {
@@ -90,13 +97,13 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
         transcript.push({ role: 'assistant', content: null, tool_calls: [{ id: 'authorized_result', type: 'function', function: { name: initialResult.name, arguments: JSON.stringify(args) } }] });
         pushResult('authorized_result', data);
     }
-    for (let round = 0; round < 5; round++) {
+    for (let round = 0; round < budget.maxRounds; round++) {
         assertCurrent();
-        if (calls >= MAX_NATIVE_TOOL_CALLS) return finish('已完成本轮允许的查询');
+        if (calls >= budget.maxCalls) return finish('已完成本轮允许的查询');
         let response;
         try {
             response = await callModel([...transcript, { role: 'system', content:
-                '本轮剩余最多' + (MAX_NATIVE_TOOL_CALLS - calls) + '个新工具执行，剩余' + (5 - round) + '轮。相同操作将复用原结果，不会再次执行。只获取完成当前请求所需的最小数据；失败后不要盲目重复或扩大范围。信息足够时直接回答，注明范围、截断和未验证事项。' }], tools);
+                '本轮剩余最多' + (budget.maxCalls - calls) + '个新工具执行，剩余' + (budget.maxRounds - round) + '轮。相同操作将复用原结果，不会再次执行。只获取完成当前请求所需的最小数据；失败后不要盲目重复或扩大范围。信息足够时直接回答，注明范围、截断和未验证事项。' }], tools);
         } catch (error) {
             if (error?.name === 'AbortError' || !observations.length) throw error;
             return finish('后续模型请求失败，保留已获取的结果', !(Number(error?.status) >= 400 && Number(error?.status) < 500));
@@ -119,7 +126,7 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
             throw new Error('模型返回无效或不可用的工具参数，未执行操作。');
         }
         const newCount = new Set(batch.map((call, index) => fingerprint(call, checked[index].args)).filter(key => !completed.has(key))).size;
-        if (calls + newCount > MAX_NATIVE_TOOL_CALLS) return finish('继续查询将超过预算，保留已有信息');
+        if (calls + newCount > budget.maxCalls) return finish('继续查询将超过预算，保留已有信息');
         const ids = batch.map((call, index) => String(call.id || `request_${round}_${index}`));
         if (new Set(ids).size !== ids.length || ids.some(id => seenIds.has(id) || id.length > 128)) return finish('模型返回重复或无效的工具调用ID');
         ids.forEach(id => seenIds.add(id));
@@ -140,8 +147,8 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
             }
             // Earlier writes can invalidate cached reads within this batch.
             // Bound actual executions as well as the initial batch estimate.
-            if (calls >= MAX_NATIVE_TOOL_CALLS) return finish('已完成本轮允许的工具执行');
-            if (usedCharacters >= 44000) {
+            if (calls >= budget.maxCalls) return finish('已完成本轮允许的工具执行');
+            if (usedCharacters >= contextCeiling) {
                 pushResult(ids[index], { skipped: true, message: '上下文预算已用完，未执行本次额外查询；将基于已获取结果回答。' });
                 continue;
             }
@@ -174,14 +181,14 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
             if (result?.isCurrent) leases.push({ check: result.isCurrent, ...result.lease });
             if (result?.card) cards.push(result.card);
             let data = result?.data ?? { error: 'No result' };
-            data = boundedObservation(data, Math.max(512, Math.min(19000, 45000 - usedCharacters)));
+            data = boundedObservation(data, Math.max(512, Math.min(budget.observationCharacters, contextCeiling - usedCharacters)));
             completed.set(signature, { data, read: !!policy.readOnly, id: ids[index] });
             observations.push(data);
             pushResult(ids[index], data);
         }
         if (cards.length) return cards.length === 1 ? cards[0] : { __batchResults: cards };
         if (!newExecutions) return finish('没有新的查询结果，停止重复调用');
-        if (usedCharacters >= 44000) return finish('已取得本轮可容纳的信息');
+        if (usedCharacters >= contextCeiling) return finish('已取得本轮可容纳的信息');
     }
     return finish('已完成本轮查询，基于现有结果回答');
 }

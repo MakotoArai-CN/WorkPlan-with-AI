@@ -632,12 +632,12 @@
     }
 </script>
 
-<div class="flex flex-col h-full bg-rose-50/30" data-ai-shell>
-    <div class="h-16 border-b border-rose-100 hidden md:flex items-center justify-between px-6 bg-white shrink-0">
-        <h3 class="font-bold text-rose-600 flex items-center gap-2">
+<div class="flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-rose-50/30" data-ai-shell>
+    <div class="h-16 border-b border-rose-100 hidden md:flex items-center justify-between gap-2 px-4 bg-white shrink-0 min-w-0">
+        <h3 class="font-bold text-rose-600 flex items-center gap-2 min-w-0">
             <i class="ph-fill ph-chat-teardrop-dots"></i> {panelMeta.title}
         </h3>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 shrink-0">
             <button on:click={() => showAiSettings.set(true)}
                 class="text-xs font-bold text-rose-500 hover:text-rose-700 px-2 py-1 rounded hover:bg-rose-100 flex items-center gap-1">
                 <i class="ph ph-gear"></i> {$_('ai_panel.settings')}
@@ -651,21 +651,21 @@
 
     <div
         bind:this={chatContainer}
-        class="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 md:space-y-4 scroll-smooth overscroll-contain"
+        class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-3 md:p-4 space-y-3 md:space-y-4 scroll-smooth overscroll-contain"
     >
-        <div class="flex gap-2 md:gap-3">
+        <div class="flex gap-2 md:gap-3 min-w-0">
             <div
                 class="w-7 h-7 md:w-8 md:h-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 shrink-0"
             >
                 <i class="ph-fill ph-chat-teardrop-dots text-sm md:text-base"></i>
             </div>
             <div
-                class="bg-white border border-rose-100 p-2.5 md:p-3 rounded-2xl rounded-tl-none text-xs md:text-sm text-slate-700 shadow-sm max-w-[85%]"
+                class="bg-white border border-rose-100 p-2.5 md:p-3 rounded-2xl rounded-tl-none text-xs md:text-sm text-slate-700 shadow-sm max-w-[85%] min-w-0 break-words [overflow-wrap:anywhere]"
             >
                 <div class="font-bold text-rose-600 mb-1">{panelMeta.introTitle}</div>
                 <div class="text-slate-600 space-y-1">
                     {#if $aiPanelContext.description}
-                        <div class="text-slate-500 leading-6">{$aiPanelContext.description}</div>
+                        <div class="text-slate-500 leading-6 [overflow-wrap:anywhere]">{$aiPanelContext.description}</div>
                     {/if}
                     {#each panelMeta.introLines as line}
                         <div>{line}</div>
@@ -676,7 +676,7 @@
 
         {#each $chatHistory as msg, index}
             <div
-                class="flex gap-2 md:gap-3"
+                class="flex gap-2 md:gap-3 min-w-0"
                 class:flex-row-reverse={msg.role === "user"}
             >
                 <div

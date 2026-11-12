@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.5.22",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": [
+        "修复侧边 AI 面板被长链接、笔记摘要或消息内容撑宽的问题，保持输入框和消息在面板内。",
+        "本地搜索不再因返回清单达到页大小而停止统计；独立返回完整性标记、总数、扩展名分布和分页位置，支持按类型及扩展名筛选。",
+        "提高工具结果及文本读取容量，允许更长的多步查询；默认跳过依赖、缓存和测试产物，必要时可由工具显式包含。"
+      ],
+      "en": [
+        "Keep long links, note descriptions and replies within the side assistant panel without pushing the composer out of bounds.",
+        "Count the search scope independently of list pagination, returning completeness, totals, extension counts and page offsets with file-type filters.",
+        "Increase tool-result and text-read capacity and allow longer multi-step queries; skip generated artifacts by default with an explicit tool option to include them."
+      ],
+      "ja": [
+        "長いリンクやノート概要、返信がサイド AI パネルを押し広げる問題を修正しました。",
+        "一覧ページの件数に左右されず検索範囲を集計し、完全性、総数、拡張子別件数、ページ位置を返します。種類や拡張子による絞り込みも可能です。",
+        "ツール結果とテキスト読取容量を拡大し、複数段階の検索を改善しました。生成物は既定で除外し、ツールで明示的に含められます。"
+      ]
+    }
+  },
+  {
     "version": "0.5.21",
     "date": "2026-11-12",
     "changes": {
