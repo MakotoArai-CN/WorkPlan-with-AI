@@ -187,14 +187,11 @@
     class="relative hidden md:flex bg-white border-r border-slate-200 flex-col z-20 shadow-lg shrink-0 transition-[width,padding] duration-300 ease-out"
     class:w-72={!collapsed}
     class:w-24={collapsed}
+    class:nav-collapsed={collapsed}
 >
-    <div class="py-3 flex items-center border-b border-slate-100 h-16 transition-all duration-300"
-         class:px-4={!collapsed}
-         class:px-2={collapsed}
-         class:gap-3={!collapsed}
-         class:justify-center={collapsed}
-    >
-        {#if !collapsed}
+    <div class="nav-header py-3 flex items-center border-b border-slate-100 h-16 px-4 gap-3">
+        <div class="nav-brand" aria-hidden={collapsed}>
+            <div class="nav-brand-inner">
             <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md shrink-0">
                 <i class="ph ph-check-square-offset text-xl"></i>
             </div>
@@ -205,7 +202,8 @@
                     {$taskStore.accessKey}
                 </div>
             </div>
-        {/if}
+            </div>
+        </div>
 
         <button
             on:click={toggleCollapse}
@@ -218,7 +216,7 @@
 
     <div class="px-4 py-3">
         <div
-            class={`relative flex items-center rounded-2xl border text-xs font-bold transition-all duration-300 ${getSyncStatusClasses($taskStore.syncStatus)} ${collapsed ? 'justify-center px-2 py-2.5' : 'gap-2 px-3 py-2.5'}`}
+            class={`nav-sync relative flex items-center rounded-2xl border text-xs font-bold transition-all duration-300 gap-2 px-3 py-2.5 ${getSyncStatusClasses($taskStore.syncStatus)}`}
             title={$taskStore.syncStatus === 'syncing'
                 ? $_('sync.syncing')
                 : $taskStore.syncStatus === 'done'
@@ -237,14 +235,12 @@
                 <i class="ph ph-cloud shrink-0"></i>
             {/if}
 
-            {#if !collapsed}
-                <span class="truncate">
+                <span class="nav-label truncate" aria-hidden={collapsed}>
                     {#if $taskStore.syncStatus === 'syncing'}{$_('sync.syncing')}
                     {:else if $taskStore.syncStatus === 'done'}{$_('sync.synced')}
                     {:else if $taskStore.syncStatus === 'error'}{$_('sync.sync_failed')}
                     {:else}{$_('sync.ready')}{/if}
                 </span>
-            {/if}
         </div>
     </div>
 
@@ -257,27 +253,20 @@
             <button
                 on:click={() => switchView(item.id)}
                 data-nav-id={item.id}
-                class={`relative z-10 w-full flex items-center rounded-2xl py-3 transition-colors duration-300 text-sm font-bold ${collapsed ? 'justify-center px-2' : 'justify-start gap-3 px-3 text-left'} ${$currentView === item.id ? item.activeText : `text-slate-600 ${item.hoverBg}`}`}
+                class={`nav-item relative z-10 w-full items-center rounded-2xl py-3 text-sm font-bold text-left ${$currentView === item.id ? item.activeText : `text-slate-600 ${item.hoverBg}`}`}
                 title={item.label}
+                aria-label={item.label}
             >
                 <span class="w-5 flex items-center justify-center shrink-0">
                     <i class={`ph ${item.icon} text-lg shrink-0`}></i>
                 </span>
 
-                {#if !collapsed}
-                    <span class="truncate">{item.label}</span>
-                {/if}
+                    <span class="nav-label truncate" aria-hidden={collapsed}>{item.label}</span>
 
                 {#if item.badge}
-                    {#if collapsed}
-                        <span class={`absolute top-2 right-2 min-w-4 h-4 px-1 rounded-full text-[10px] leading-4 font-bold ${item.badgeClass}`}>
+                        <span class={`nav-badge min-w-5 h-5 px-1.5 rounded-full text-[10px] leading-5 font-bold ${item.badgeClass}`}>
                             {item.badge}
                         </span>
-                    {:else}
-                        <span class={`ml-auto min-w-5 h-5 px-1.5 rounded-full text-[10px] leading-5 font-bold ${item.badgeClass}`}>
-                            {item.badge}
-                        </span>
-                    {/if}
                 {/if}
             </button>
         {/each}
@@ -285,9 +274,7 @@
 
 
     <div class="p-3 border-t border-slate-100 bg-slate-50">
-        {#if !collapsed}
-            <div class="text-[10px] font-bold text-slate-400 uppercase mb-2">{$_('settings.management')}</div>
-        {/if}
+            <div class="nav-management text-[10px] font-bold text-slate-400 uppercase mb-2" aria-hidden={collapsed}>{$_('settings.management')}</div>
 
         <div class={`grid gap-2 ${collapsed ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <button
@@ -296,7 +283,7 @@
                 title={$_('settings.backup')}
             >
                 <i class="ph ph-download-simple"></i>
-                {#if !collapsed}<span>{$_('settings.backup')}</span>{/if}
+                <span class="nav-footer-label" aria-hidden={collapsed}>{$_('settings.backup')}</span>
             </button>
 
             <button
@@ -305,7 +292,7 @@
                 title={$_('settings.restore')}
             >
                 <i class="ph ph-upload-simple"></i>
-                {#if !collapsed}<span>{$_('settings.restore')}</span>{/if}
+                <span class="nav-footer-label" aria-hidden={collapsed}>{$_('settings.restore')}</span>
             </button>
 
             <button
@@ -314,7 +301,7 @@
                 title={$_('settings.switch_account')}
             >
                 <i class="ph-bold ph-sign-out"></i>
-                {#if !collapsed}<span>{$_('settings.switch_account')}</span>{/if}
+                <span class="nav-footer-label" aria-hidden={collapsed}>{$_('settings.switch_account')}</span>
             </button>
 
         </div>
@@ -324,3 +311,34 @@
         defaultWidth={288} minWidth={200} maxWidth={400} reserveWidth={560}
         bind:collapsed collapsedWidth={96} on:resize={handleNavResize} />
 </aside>
+
+<style>
+    .nav-header { transition: gap 300ms ease-out, padding 300ms ease-out; }
+    .nav-brand { flex: 1; min-width: 0; overflow: hidden; opacity: 1; transition: flex 300ms ease-out, opacity 180ms ease-out; }
+    .nav-brand-inner { display: flex; gap: 12px; align-items: center; min-width: 180px; }
+    .nav-item {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr) auto;
+        gap: 12px;
+        padding-left: 12px;
+        padding-right: 12px;
+        transition: grid-template-columns 300ms ease-out, gap 300ms ease-out, padding 300ms ease-out, color 180ms ease-out;
+    }
+    .nav-label { min-width: 0; opacity: 1; transition: opacity 180ms ease-out; }
+    .nav-sync .nav-label { flex: 1; }
+    .nav-sync { padding-left: 12px; transition: padding 300ms ease-out, gap 300ms ease-out; }
+    .nav-badge { transition: transform 300ms ease-out; }
+    .nav-footer-label { max-width: 160px; white-space: nowrap; overflow: hidden; opacity: 1; transition: max-width 300ms ease-out, opacity 180ms ease-out; }
+    .nav-management { max-height: 20px; opacity: 1; overflow: hidden; transition: max-height 300ms ease-out, margin 300ms ease-out, opacity 180ms ease-out; }
+    .nav-collapsed .nav-header { gap: 0; padding-left: calc((100% - 36px) / 2); padding-right: calc((100% - 36px) / 2); }
+    .nav-collapsed .nav-brand { flex: 0; opacity: 0; }
+    .nav-collapsed .nav-item { grid-template-columns: 20px minmax(0, 1fr) 0px; gap: 0; padding-left: calc((100% - 20px) / 2); padding-right: 0; }
+    .nav-collapsed .nav-label { opacity: 0; pointer-events: none; }
+    .nav-collapsed .nav-badge { transform: translate(-20px, -10px) scale(0.8); }
+    .nav-collapsed .nav-sync { gap: 0; padding-left: calc((100% - 12px) / 2); padding-right: 0; }
+    .nav-collapsed .nav-footer-label { max-width: 0; opacity: 0; }
+    .nav-collapsed .nav-management { max-height: 0; margin-bottom: 0; opacity: 0; }
+    @media (prefers-reduced-motion: reduce) {
+        aside, .nav-header, .nav-brand, .nav-item, .nav-label, .nav-sync, .nav-badge, .nav-footer-label, .nav-management { transition: none; }
+    }
+</style>

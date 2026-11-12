@@ -109,18 +109,10 @@
 
     $: capabilityBadges = [
         {
-            id: "project",
-            label: $_("ai_chat.capability_project_tools"),
-            active: $aiChatCapabilities.projectToolsAvailable,
-            icon: $aiChatCapabilities.projectToolsAvailable ? "ph-check-circle" : "ph-chat-circle",
-            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.toolCallRuntimeAvailable : null,
-            detail: $aiChatRuntimeCapabilities.details?.toolCall?.message || '',
-        },
-        {
-            id: "native-tools",
-            label: $_("ai_chat.capability_native_tools"),
-            active: $aiChatCapabilities.nativeToolCallAvailable,
-            icon: $aiChatCapabilities.nativeToolCallAvailable ? "ph-function" : "ph-code",
+            id: "application",
+            label: $_("ai_chat.capability_application"),
+            active: $aiChatCapabilities.applicationToolsAvailable,
+            icon: "ph-squares-four",
             runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.nativeToolCallRuntimeAvailable : null,
             detail: $aiChatRuntimeCapabilities.details?.nativeToolCall?.message || '',
         },
@@ -1221,18 +1213,6 @@
             <div class="flex flex-wrap items-center gap-2">
                 <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                     {$_("ai_chat.capability_title")}
-                </div>
-                <div
-                    class={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border ${
-                        $aiChatCapabilities.toolRouterEnabled
-                            ? "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800"
-                            : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
-                    }`}
-                >
-                    <i class={`ph ${$aiChatCapabilities.toolRouterEnabled ? "ph-plugs-connected" : "ph-chat-circle-dots"}`}></i>
-                    {$aiChatCapabilities.toolRouterEnabled
-                        ? $_("ai_chat.capability_mode_internal")
-                        : $_("ai_chat.capability_mode_chat_only")}
                 </div>
                 {#each capabilityBadges as badge}
                     <div

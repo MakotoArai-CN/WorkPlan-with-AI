@@ -295,6 +295,17 @@ const recordCall = (name, key, id, explanation = '') => ({ name, id, arguments: 
 const recordPolicy = (call, args) => ({ identity: { key: args.key }, readOnly: call.name === 'lookup_record',
     invalidates: [{ source: 'records', id: args.key }] });
 
+test('a confirmed mutation receipt is summarized with tools disabled and never re-executes the operation', async () => {
+    let finalizations = 0;
+    const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,
+        initialResult: { name: 'change_record', arguments: '{"key":"a"}', applied: true, data: { status: 'completed', receipt: 'REAL_RECEIPT' } },
+        executeTool: async () => { throw Error('Mutation must not be executed again'); },
+        callModel: async () => { throw Error('Tools must not be requested after confirmation'); },
+        finalizeModel: async messages => { finalizations++; expect(JSON.stringify(messages)).toContain('REAL_RECEIPT'); return 'Confirmed completed change.'; }
+    });
+    expect(finalizations).toBe(1); expect(result.applied).toBe(true); expect(result.toolLimited).toBe(false);
+});
+
 test('arbitrary tool adapters share deduplication, lease invalidation and read-after-write freshness', async () => {
     let round = 0, reads = 0, writes = 0, revision = 0;
     const result = await runToolLoop({ messages: [], tools: recordTools, isCurrent: () => true, describeOperation: recordPolicy,

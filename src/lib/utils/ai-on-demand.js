@@ -83,11 +83,12 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
     };
     if (initialResult) {
         const checked = validateNativeToolCall(initialResult, tools);
-        if (!checked.valid || !describeOperation(initialResult, checked.args).readOnly) throw new Error('授权后的原始工具参数不可用，未继续查询。');
+        const readOnly = checked.valid && describeOperation(initialResult, checked.args).readOnly;
+        if (!checked.valid || !readOnly && initialResult.applied !== true) throw new Error('授权后的原始工具参数不可用，未继续查询。');
         const args = checked.args;
         const data = boundedObservation(initialResult.data, Math.min(budget.observationCharacters, Math.max(512, contextCeiling - usedCharacters)));
         calls = 1;
-        completed.set(fingerprint(initialResult, args), { data, read: true, id: 'authorized_result' });
+        completed.set(fingerprint(initialResult, args), { data, read: !!readOnly, id: 'authorized_result' });
         for (const alias of initialResult.aliases || []) {
             const verified = validateNativeToolCall({ name: initialResult.name, arguments: JSON.stringify(alias) }, tools);
             if (verified.valid && describeOperation(initialResult, verified.args).readOnly) completed.set(fingerprint(initialResult, verified.args), { data, read: true, id: 'authorized_result' });
@@ -96,6 +97,7 @@ export async function runOnDemandAssistant({ messages, tools, callModel, finaliz
         seenIds.add('authorized_result');
         transcript.push({ role: 'assistant', content: null, tool_calls: [{ id: 'authorized_result', type: 'function', function: { name: initialResult.name, arguments: JSON.stringify(args) } }] });
         pushResult('authorized_result', data);
+        if (!readOnly) return { ...await finish('已确认的变更已执行，只根据回执回复，不再调用工具'), applied: true, toolLimited: false };
     }
     for (let round = 0; round < budget.maxRounds; round++) {
         assertCurrent();

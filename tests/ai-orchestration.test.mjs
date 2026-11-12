@@ -262,6 +262,82 @@ test('the side assistant also excludes supplied application context for an ordin
     assert.ok(!JSON.stringify(capturedMessages).includes('Original content'));
 `));
 
+test('follow-up requests carry actual prior turns and observed scope without a keyword router', () => scenario(`
+    globalThis.window={};
+    let turn=0;
+    modelDriver=async messages=>{
+        const current=messages.filter(message=>message.role==='user').at(-1).content;
+        const observations=messages.filter(message=>message.role==='tool');
+        if(current==='First scope request'){
+            if(!observations.length)return {toolCalls:[{id:'scope',name:'workplan_local_file',arguments:'{"operation":"search","root":"/workspace","recursive":false,"extensions":["pdf"]}'}]};
+            return {content:'Two files at the top level.',toolCalls:[]};
+        }
+        const payload=JSON.stringify(messages);
+        assert.ok(payload.includes('First scope request'));
+        assert.ok(payload.includes('Two files at the top level.'));
+        assert.ok(payload.includes('historical_tool_observations'));
+        assert.ok(payload.includes('/workspace'));
+        assert.equal(messages.filter(message=>message.role==='user'&&message.content==='Another extension?').length,1);
+        if(!observations.length)return {toolCalls:[{id:'followup',name:'workplan_local_file',arguments:'{"operation":"search","root":"/workspace","recursive":false,"extensions":["sh"]}'}]};
+        return {content:'Follow-up in the same scope.',toolCalls:[]};
+    };
+    await ai.sendChatMessage('First scope request');
+    await ai.sendChatMessage('Another extension?');
+    assert.equal(fileSearches.length,2);assert.equal(fileSearches[1].root,'/workspace');
+    assert.equal(fileSearches[1].recursive,false);assert.deepEqual(fileSearches[1].extensions,['sh']);
+    const saved=storage.get('workplan_ai_chat_history');
+    assert.ok(saved.includes('conversationContext'));assert.ok(saved.includes('historical_tool_observations')===false);
+`));
+
+test('application result bodies stay gated on later turns while user conversation survives', () => scenario(`
+    response.toolCalls=[{name:'workplan_read_data',arguments:'{"source":"current_note"}'}];
+    await ai.sendAiMessage('Read this note',{scope:'notes',activeNoteId:'note-1'});
+    assert.ok(get(ai.chatHistory).at(-1).conversationContext.applicationData);
+    notesStore.update(s=>({...s,notes:s.notes.map(note=>({...note,aiLocked:true}))}));
+    response={content:'Normal conversation',toolCalls:[]};
+    await ai.sendAiMessage('Follow-up',{scope:'notes',activeNoteId:'note-1'});
+    assert.ok(!JSON.stringify(initialMessages).includes('Original content'));
+    assert.ok(JSON.stringify(initialMessages).includes('Read this note'));
+`));
+
+test('file confirmation finalizes with the original turn history and a receipt without executing the write twice', () => scenario(`
+    response={content:'Previous contextual answer',toolCalls:[]};
+    await ai.sendChatMessage('Original design request');
+    response={toolCalls:[{id:'write-proposal',name:'workplan_local_file',arguments:JSON.stringify({operation:'write',path:'/workspace/fixture.sh',content:'SAVED_FILE_CONTENT',message:'Confirm file'})}]};
+    await ai.sendChatMessage('Save that as a file');
+    const index=get(ai.aiChatHistory).length-1,card=get(ai.aiChatHistory)[index];
+    assert.equal(card.type,'file_confirm');assert.equal(fileWrites,0);
+    const confirmed=await ai.confirmAiChatLocalFileOperation(index,card.operation);
+    assert.equal(confirmed.success,true);assert.equal(fileWrites,1);
+    const payload=JSON.stringify(capturedMessages);
+    assert.ok(payload.includes('Original design request'));assert.ok(payload.includes('Previous contextual answer'));
+    assert.ok(payload.includes('SAVED_FILE_CONTENT'));assert.ok(payload.includes('completed'));
+    assert.ok(capturedMessages.at(-1).content.includes('禁止继续调用'));
+    assert.ok(!JSON.stringify(get(ai.aiChatHistory).at(-1).conversationContext).includes('SAVED_FILE_CONTENT'));
+`));
+
+test('switching or clearing a session does not replay previous session history', () => scenario(`
+    response={content:'Session A answer',toolCalls:[]};
+    await ai.sendChatMessage('SESSION_A_REQUEST');
+    ai.createAiChatSession('Session B');
+    await ai.sendChatMessage('SESSION_B_REQUEST');
+    assert.ok(!JSON.stringify(capturedMessages).includes('SESSION_A_REQUEST'));
+    ai.clearAiChatHistory();
+    await ai.sendChatMessage('New request');
+    assert.ok(!JSON.stringify(capturedMessages).includes('SESSION_B_REQUEST'));
+`));
+
+test('application capabilities require actual function-call support rather than a successful text probe', () => scenario(`
+    ai.aiChatRuntimeCapabilities.set({probed:true,toolCallRuntimeAvailable:true,nativeToolCallRuntimeAvailable:false,localFilesRuntimeAvailable:true,webSearchRuntimeAvailable:true});
+    let capabilities=get(ai.aiChatCapabilities);
+    assert.equal(capabilities.applicationToolsAvailable,false);
+    assert.equal(capabilities.localFilesAvailable,false);assert.equal(capabilities.webSearchAvailable,false);
+    ai.aiChatRuntimeCapabilities.update(s=>({...s,nativeToolCallRuntimeAvailable:true}));
+    assert.equal(get(ai.aiChatCapabilities).applicationToolsAvailable,true);
+    settingsStore.update(s=>({...s,enableAiChatTools:false}));
+    assert.equal(get(ai.aiChatCapabilities).applicationToolsAvailable,false);
+`));
+
 test('unsupported attachments fail before history, model calls or composer clearing', () => scenario(`
     const file={name:'recording.wav',mediaType:'audio',mimeType:'audio/wav',base64Data:'YWJjZA==',size:4};
     ai.aiChatComposerAttachments.set([file]);
