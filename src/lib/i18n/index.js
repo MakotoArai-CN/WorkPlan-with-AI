@@ -1,4 +1,5 @@
-import { register, init, getLocaleFromNavigator, locale } from 'svelte-i18n';
+import { register, init, locale, waitLocale } from 'svelte-i18n';
+import '../../../static/locale-init.js';
 
 const SUPPORTED = ['zh', 'zh-Hant', 'en', 'ja', 'ko', 'ru'];
 const STORAGE_KEY = 'workplan_locale';
@@ -84,22 +85,11 @@ register('ru', async () => deepMerge(await loadEn(), {
 }));
 
 function normalizeLocale(input = '') {
-    const raw = String(input || '').trim();
-    if (!raw) return 'en';
-    if (SUPPORTED.includes(raw)) return raw;
-    const lower = raw.toLowerCase();
-    if (lower.startsWith('zh-tw') || lower.startsWith('zh-hk') || lower.startsWith('zh-mo') || lower === 'zh-hant') {
-        return 'zh-Hant';
-    }
-    const short = lower.split('-')[0];
-    if (SUPPORTED.includes(short)) return short;
-    return 'en';
+    return (typeof window === 'undefined' ? globalThis : window).WorkPlanLocale.normalize(input) || 'en';
 }
 
 function resolveLocale() {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (saved) return normalizeLocale(saved);
-    return normalizeLocale(getLocaleFromNavigator() || '');
+    return (typeof window === 'undefined' ? globalThis : window).WorkPlanLocale.current();
 }
 
 export function setupI18n() {
@@ -109,13 +99,25 @@ export function setupI18n() {
     });
 }
 
+export function refreshSystemLocale() {
+    locale.set(resolveLocale());
+    return waitLocale();
+}
+
+locale.subscribe(language => {
+    if (typeof document !== 'undefined' && language) document.documentElement.lang = language;
+    if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__ && language) {
+        import('@tauri-apps/api/core').then(({ invoke }) => invoke('set_app_language', { language })).catch(() => {});
+    }
+});
+
 export function setLocale(lang) {
     const normalized = normalizeLocale(lang);
     if (!SUPPORTED.includes(normalized)) return;
     locale.set(normalized);
-    if (typeof localStorage !== 'undefined') {
+    try {
         localStorage.setItem(STORAGE_KEY, normalized);
-    }
+    } catch {}
 }
 
 export function toIntlLocale(lang) {
