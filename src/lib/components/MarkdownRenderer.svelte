@@ -171,6 +171,12 @@
         margin: 0.8em 0;
         padding-left: 2em;
     }
+    :global(.markdown-content ul) {
+        list-style-type: disc;
+    }
+    :global(.markdown-content ol) {
+        list-style-type: decimal;
+    }
     :global(.markdown-content li) {
         margin: 0.4em 0;
     }

@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.5.20",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": [
+        "侧边 AI 助手回复使用统一的 Markdown 渲染，修复列表标记显示；精简笔记助手的预设按钮和输入提示，保留原有操作。",
+        "笔记列表支持拖拽调整宽度、方向键微调、双击还原和宽度记忆，移动端保留抽屉布局。",
+        "修复侧边 AI 助手切换页面或语言后提示与预设按钮未同步更新的问题。"
+      ],
+      "en": [
+        "Use shared Markdown rendering for side-assistant replies and restore list markers; shorten note shortcuts and the input placeholder without changing their actions.",
+        "Resize the notes list by dragging or keyboard, double-click to reset, and remember its width while keeping the mobile drawer unchanged.",
+        "Refresh side-assistant prompts and shortcuts when the page context or language changes."
+      ],
+      "ja": [
+        "サイド AI の返信に共通の Markdown 表示を適用し、リスト記号を修正しました。操作は変えず、ノート用ボタンと入力ヒントを短くしました。",
+        "ノート一覧の幅をドラッグ・方向キーで調整し、ダブルクリックで初期化できます。幅を記憶し、モバイルのドロワーは維持します。",
+        "ページや言語を切り替えた際に、サイド AI のヒントとボタンが更新されない問題を修正しました。"
+      ]
+    }
+  },
+  {
     "version": "0.5.19",
     "date": "2026-11-12",
     "changes": {

@@ -31,6 +31,7 @@
     function t(key, opts) { return get(_)(key, opts); }
 
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
+    import { DEFAULT_NOTES_WIDTH, NOTES_WIDTH_KEY, notesPanelLayout, detailWidthFromKey } from '../utils/panel-resize.js';
     import { onMount, onDestroy, tick } from "svelte";
     import "vditor/dist/index.css";
 
@@ -41,6 +42,12 @@
     let previewElement;
     let showSidebar = false;
     let noteListEl;
+    let notesWidth = DEFAULT_NOTES_WIDTH;
+    let notesWorkspaceWidth = 1024;
+    let resizePointerId = null;
+    let resizeOriginX = 0;
+    let resizeOriginWidth = DEFAULT_NOTES_WIDTH;
+    $: notesLayout = notesPanelLayout(notesWorkspaceWidth, notesWidth);
     let notePill = { top: 0, height: 0, ready: false };
     let showExportMenu = false;
     let editingTitle = false;
@@ -112,6 +119,10 @@
             autoSaveEnabled = saved === "true";
         }
         aiAutocompleteEnabled = localStorage.getItem('workplan_notes_ai_autocomplete') === 'true';
+        try {
+            const savedWidth = Number(localStorage.getItem(NOTES_WIDTH_KEY));
+            if (savedWidth > 0 && Number.isFinite(savedWidth)) notesWidth = savedWidth;
+        } catch {}
     });
 
     onDestroy(() => {
@@ -133,7 +144,53 @@
 
     function handleResize() {
         isMobile = window.innerWidth < 768;
+        resizePointerId = null;
         tick().then(measureNotePill);
+    }
+
+    function observeNotesWorkspace(node) {
+        const measure = () => { notesWorkspaceWidth = node.getBoundingClientRect().width; };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(node);
+        return { destroy() { observer.disconnect(); } };
+    }
+
+    function saveNotesWidth() {
+        try { localStorage.setItem(NOTES_WIDTH_KEY, String(Math.round(notesWidth))); } catch {}
+    }
+
+    function startNotesResize(event) {
+        if (event.button !== 0 || isMobile) return;
+        event.preventDefault();
+        resizePointerId = event.pointerId;
+        resizeOriginX = event.clientX;
+        resizeOriginWidth = notesLayout.width;
+        event.currentTarget.setPointerCapture(event.pointerId);
+    }
+
+    function moveNotesResize(event) {
+        if (event.pointerId !== resizePointerId) return;
+        notesWidth = notesPanelLayout(notesWorkspaceWidth, resizeOriginWidth + event.clientX - resizeOriginX).width;
+    }
+
+    function finishNotesResize(event) {
+        if (event.pointerId !== resizePointerId) return;
+        resizePointerId = null;
+        saveNotesWidth();
+    }
+
+    function handleNotesResizeKey(event) {
+        const next = detailWidthFromKey(event.key, notesLayout.width, notesLayout.min, notesLayout.max, 'right');
+        if (next === null) return;
+        event.preventDefault();
+        notesWidth = next;
+        saveNotesWidth();
+    }
+
+    function resetNotesWidth() {
+        notesWidth = DEFAULT_NOTES_WIDTH;
+        saveNotesWidth();
     }
 
     function handleKeydown(e) {
@@ -1039,7 +1096,7 @@
             </button>
         </div>
     </header>
-    <div class="flex flex-1 overflow-hidden relative">
+    <div class="flex flex-1 overflow-hidden relative" use:observeNotesWorkspace class:resizing-notes={resizePointerId !== null}>
         {#if isMobile && showSidebar}
             <div
                 class="absolute inset-0 bg-black/30 z-20"
@@ -1050,7 +1107,9 @@
             ></div>
         {/if}
         <div
-            class="w-64 md:w-72 bg-white border-r border-slate-200 flex flex-col shrink-0 absolute md:relative z-30 h-full transition-transform duration-200"
+            id="notes-sidebar"
+            class="bg-white border-r border-slate-200 flex flex-col shrink-0 absolute md:relative z-30 h-full transition-transform duration-200"
+            style:width={isMobile ? '256px' : `${notesLayout.width}px`}
             class:translate-x-0={!isMobile || showSidebar}
             class:-translate-x-full={isMobile && !showSidebar}
         >
@@ -1146,6 +1205,17 @@
                     {/each}
                 {/if}
             </div>
+            {#if !isMobile}
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+                <div class="notes-resize-handle" role="separator" tabindex="0"
+                    aria-label={$_('common.resize_panel')} title={$_('common.resize_panel')}
+                    aria-orientation="vertical" aria-controls="notes-sidebar"
+                    aria-valuenow={notesLayout.width} aria-valuemin={notesLayout.min} aria-valuemax={notesLayout.max}
+                    on:pointerdown={startNotesResize} on:pointermove={moveNotesResize}
+                    on:pointerup={finishNotesResize} on:pointercancel={finishNotesResize}
+                    on:lostpointercapture={finishNotesResize} on:keydown={handleNotesResizeKey}
+                    on:dblclick={resetNotesWidth}><span></span></div>
+            {/if}
         </div>
         <div class="flex-1 flex flex-col overflow-hidden min-w-0">
             {#if $activeNote}
@@ -1394,6 +1464,38 @@
 {/if}
 
 <style>
+    .notes-resize-handle {
+        position: absolute;
+        inset: 0 0 0 auto;
+        width: 9px;
+        z-index: 20;
+        cursor: col-resize;
+        touch-action: none;
+        outline: none;
+    }
+    .notes-resize-handle span {
+        position: absolute;
+        right: 1px;
+        top: 50%;
+        height: 36px;
+        width: 3px;
+        border-radius: 3px;
+        transform: translateY(-50%);
+        background: var(--app-border-strong, #cbd5e1);
+        transition: background 120ms ease;
+    }
+    .notes-resize-handle:hover span,
+    .notes-resize-handle:focus-visible span,
+    .resizing-notes .notes-resize-handle span {
+        background: #60a5fa;
+    }
+    .resizing-notes {
+        cursor: col-resize;
+        user-select: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .notes-resize-handle span { transition: none; }
+    }
     .vditor-editor-shell {
         height: 100%;
         min-height: 0;

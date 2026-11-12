@@ -19,6 +19,7 @@
     import { openExternalUrl } from "../utils/open-external.js";
     import { resizeTextarea, observeTextareaResize } from "../utils/textarea-autosize.js";
     import { captureMessageApproval } from "../utils/ai-message-approval.js";
+    import MarkdownRenderer from "./MarkdownRenderer.svelte";
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
@@ -99,29 +100,29 @@
         taskStore.deleteTask(id);
     }
 
-    function getPanelMeta() {
-        if ($aiPanelContext.scope === 'notes') {
+    function getPanelMeta(context, translate) {
+        if (context.scope === 'notes') {
             return {
-                title: $_('notes.ai_assistant'),
-                introTitle: $_('notes.title'),
+                title: translate('notes.ai_assistant'),
+                introTitle: translate('notes.title'),
                 introLines: [
-                    $_('notes.ai_panel_summary_hint'),
-                    $_('notes.ai_panel_polish_hint'),
-                    $_('notes.ai_panel_followup_hint')
+                    translate('notes.ai_panel_summary_hint'),
+                    translate('notes.ai_panel_polish_hint'),
+                    translate('notes.ai_panel_followup_hint')
                 ],
-                placeholder: $_('notes.ai_panel_placeholder'),
+                placeholder: translate('notes.ai_panel_placeholder'),
                 quickActions: [
-                    { label: $_('notes.ai_panel_quick_summary'), value: $_('notes.ai_panel_quick_summary') },
-                    { label: $_('notes.ai_panel_quick_polish'), value: $_('notes.ai_panel_quick_polish') },
-                    { label: $_('notes.ai_panel_quick_actions'), value: $_('notes.ai_panel_quick_actions') }
+                    { label: translate('notes.ai_panel_summary_label'), value: translate('notes.ai_panel_quick_summary') },
+                    { label: translate('notes.ai_panel_polish_label'), value: translate('notes.ai_panel_quick_polish') },
+                    { label: translate('notes.ai_panel_actions_label'), value: translate('notes.ai_panel_quick_actions') }
                 ]
             };
         }
 
-        if ($aiPanelContext.scope === 'templates') {
+        if (context.scope === 'templates') {
             return {
                 title: '模板 AI 助手',
-                introTitle: $aiPanelContext.title || '任务模板助手',
+                introTitle: context.title || '任务模板助手',
                 introLines: [
                     '你可以让我创建、整理或优化任务模板结构。',
                     '我可以补全模板步骤、适用场景、优先级和备注建议。',
@@ -136,10 +137,10 @@
             };
         }
 
-        if ($aiPanelContext.scope === 'scheduled') {
+        if (context.scope === 'scheduled') {
             return {
                 title: '定时任务 AI 助手',
-                introTitle: $aiPanelContext.title || '定时任务助手',
+                introTitle: context.title || '定时任务助手',
                 introLines: [
                     '你可以让我创建周期提醒、整理执行频率或排查冲突。',
                     '我可以补全重复规则、截止时间、启用状态和备注说明。',
@@ -154,10 +155,10 @@
             };
         }
 
-        if ($aiPanelContext.scope === 'statistics') {
+        if (context.scope === 'statistics') {
             return {
                 title: '统计 AI 助手',
-                introTitle: $aiPanelContext.title || '数据统计助手',
+                introTitle: context.title || '数据统计助手',
                 introLines: [
                     '你可以让我总结统计区间、分析延期风险，或提出改进建议。',
                     '我可以基于当前筛选范围输出复盘、瓶颈和执行建议。',
@@ -173,19 +174,19 @@
         }
 
         return {
-            title: $_('ai_panel.title'),
-            introTitle: $aiPanelContext.title || $_('ai_panel.task_assistant'),
+            title: translate('ai_panel.title'),
+            introTitle: context.title || translate('ai_panel.task_assistant'),
             introLines: [
-                $_('ai_panel.add_hint') + $_('ai_panel.add_example'),
-                $_('ai_panel.delete_hint') + $_('ai_panel.delete_example'),
-                $_('ai_panel.modify_hint') + $_('ai_panel.modify_example'),
-                $_('ai_panel.query_hint') + $_('ai_panel.query_example')
+                translate('ai_panel.add_hint') + translate('ai_panel.add_example'),
+                translate('ai_panel.delete_hint') + translate('ai_panel.delete_example'),
+                translate('ai_panel.modify_hint') + translate('ai_panel.modify_example'),
+                translate('ai_panel.query_hint') + translate('ai_panel.query_example')
             ],
-            placeholder: $_('ai_panel.placeholder'),
+            placeholder: translate('ai_panel.placeholder'),
             quickActions: [
-                { label: $_('ai_panel.quick_today'), value: $_('ai_panel.query_today_cmd') },
-                { label: $_('ai_panel.quick_week'), value: $_('ai_panel.query_week_cmd') },
-                { label: $_('ai_panel.quick_tomorrow'), value: $_('ai_panel.query_tomorrow_cmd') }
+                { label: translate('ai_panel.quick_today'), value: translate('ai_panel.query_today_cmd') },
+                { label: translate('ai_panel.quick_week'), value: translate('ai_panel.query_week_cmd') },
+                { label: translate('ai_panel.quick_tomorrow'), value: translate('ai_panel.query_tomorrow_cmd') }
             ]
         };
     }
@@ -619,7 +620,7 @@
     }
 
     $: if ($chatHistory.length) scrollToBottom();
-    $: panelMeta = getPanelMeta();
+    $: panelMeta = getPanelMeta($aiPanelContext, $_);
     let appliedDraft = null;
     $: if ($aiPanelContext.draft && $aiPanelContext.draft !== appliedDraft && !$chatHistory.length) {
         inputText = $aiPanelContext.draft;
@@ -693,7 +694,7 @@
                 </div>
 
                 <div
-                    class="p-2.5 md:p-3 rounded-2xl text-xs md:text-sm shadow-sm max-w-[85%]"
+                    class="p-2.5 md:p-3 rounded-2xl text-xs md:text-sm shadow-sm max-w-[85%] min-w-0 break-words"
                     class:bg-blue-600={msg.role === "user"}
                     class:text-white={msg.role === "user"}
                     class:rounded-tr-none={msg.role === "user"}
@@ -712,7 +713,11 @@
                         <div class="mb-2 text-[10px] font-bold text-rose-600">{$_(msg.assistantSource === 'templates' ? 'nav.templates_full' : 'nav.scheduled')}</div>
                     {/if}
                     {#if msg.type === "text"}
-                        <div class="whitespace-pre-wrap">{msg.content}</div>
+                        {#if msg.role === "user"}
+                            <div class="whitespace-pre-wrap">{msg.content}</div>
+                        {:else}
+                            <MarkdownRenderer content={msg.content || ""} />
+                        {/if}
                     {:else if msg.type === "loading"}
                         <div class="flex items-center gap-2 py-1">
                             <div class="flex gap-1">
@@ -1416,8 +1421,8 @@
                                 </div>
                             {/if}
                             {#if msg.summary}
-                                <div class="bg-cyan-50 border border-cyan-200 rounded-lg p-2.5 text-[11px] text-slate-600 whitespace-pre-wrap leading-6 mb-3">
-                                    {msg.summary}
+                                <div class="bg-cyan-50 border border-cyan-200 rounded-lg p-2.5 text-[11px] text-slate-600 leading-6 mb-3 min-w-0">
+                                    <MarkdownRenderer content={msg.summary} />
                                 </div>
                             {/if}
                             <div class="space-y-2 max-h-72 overflow-y-auto">
@@ -1532,7 +1537,7 @@
                 rows="1"
                 placeholder={panelMeta.placeholder}
                 disabled={$isAiLoading}
-                class="flex-1 min-h-[44px] bg-transparent border-none focus:ring-0 text-xs md:text-sm resize-none py-2 text-slate-700 outline-none disabled:opacity-50"
+                class="flex-1 min-w-0 min-h-[44px] bg-transparent border-none focus:ring-0 text-xs md:text-sm resize-none py-2 text-slate-700 outline-none disabled:opacity-50"
             ></textarea>
             <button
                 on:click={handleSend}
