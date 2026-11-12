@@ -9,14 +9,14 @@ describe('notes AI system prompt', () => {
     // did not know whether to rewrite, summarise, or ask for the note body.
     test('adds a notes-specific behaviour block', () => {
         expect(source).toContain('工作文档模式');
-        expect(source).toContain("assistantContext.scope === 'notes'");
-        expect(source).toContain('${notesGuidance}');
+        expect(source).toContain("context.scope === 'notes'");
+        expect(source).toContain('通过工具取得正文后保持原有Markdown结构');
     });
 
     test('tells the model to keep Markdown structure and not claim saves', () => {
-        expect(source).toContain('保持原有结构');
-        expect(source).toContain('不要声称已经保存或修改了笔记');
-        expect(source).toContain('引用块');
+        expect(source).toContain('保持原有Markdown结构');
+        expect(source).toContain('直接给出草稿，不声称已保存');
+        expect(source).toContain('拿到真实内容后再回答');
     });
 
     test('live chat entry points use native on-demand queries instead of keyword or intent-classifier routing', () => {
