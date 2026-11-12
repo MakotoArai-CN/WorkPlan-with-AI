@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.5.18",
+    "date": "2026-11-12",
+    "changes": {
+      "zh": [
+        "修复工具达到查询限制时丢失已获取结果的问题，停止继续调用后基于真实结果完成回答。",
+        "重复读取和搜索复用已有结果，目录授权后继续处理原问题，不再从头扫描或额外生成中间总结。",
+        "本地搜索返回实际目录、递归范围和截断原因，并限制扫描开销、跳过依赖目录；读取文本不再整文件载入。"
+      ],
+      "en": [
+        "Keep acquired results when tool limits are reached and finish the answer without further tool calls.",
+        "Reuse repeated reads and searches, and continue the original request after directory authorization without restarting the scan.",
+        "Report the real search scope and truncation limits, bound scanning costs and skip dependency trees; text reads no longer load entire files."
+      ],
+      "ja": [
+        "ツール上限に達しても取得結果を保持し、追加呼び出しなしで回答を完了します。",
+        "重複する読み取り・検索の結果を再利用し、フォルダー許可後も再走査せず元の質問を継続します。",
+        "実際の検索範囲と打ち切り理由を返し、走査コストを制限して依存ディレクトリを除外します。テキストを全件読み込む処理も改善しました。"
+      ]
+    }
+  },
+  {
     "version": "0.5.17",
     "date": "2026-11-12",
     "changes": {

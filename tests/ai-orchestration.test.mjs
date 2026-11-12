@@ -26,6 +26,8 @@ function scenario(body) {
         let noteWrites = 0;
         let fileWrites = 0;
         let fileSearches = [];
+        let fileReads = [];
+        let modelDriver;
         let pathResolutions = [];
         let acceptedDirectories = [];
         let acceptDirectory = true;
@@ -47,7 +49,8 @@ function scenario(body) {
                 return {path,exists:!path.includes('missing'),isDirectory:!path.endsWith('.md'),authorized:path.startsWith('/workspace') || acceptedDirectories.includes(path)};
             },
             syncTrustedDirectories: async directories => {await beforeDirectorySync();acceptedDirectories=acceptDirectory?directories:[];return acceptedDirectories;},
-            searchLocalFiles: async args => {fileSearches.push(args);return [{path:args.root+'/GPT/README.md',type:'file'}];}, readLocalFile: async () => ({path:'/workspace/doc.md',content:'safe'}),
+            searchLocalFiles: async args => {fileSearches.push(args);return [{path:args.root+'/GPT/README.md',type:'file'}];}, readLocalFile: async args => {fileReads.push(args);return {path:args.path,content:args.path.endsWith('package.json')?'{"scripts":{"start":"node index.js"},"engines":{"node":">=20"}}':'Project fixture requires Node and npm install.',size:100,truncated:false};},
+            searchLocalFilesDetailed: async args => {fileSearches.push(args);return {root:args.root,query:args.query,entries:[{path:args.root+'/GPT/README.md',name:'README.md',kind:'file'}],recursive:true,truncated:false,stopReason:'complete'};},
             writeLocalFile: async args => {fileWrites++; return {path:args.path};}, deleteLocalFile: async () => ({path:'/workspace/doc.md'}),
             pickLocalTextFiles: async()=>[],readSelectedTextFiles:async()=>[],readPastedFilesAsAttachments:async()=>[],
             isContentUri: path => /^content:/.test(path || ''),pickMediaFiles:async()=>[],readSelectedMediaFiles:async()=>[],
@@ -58,7 +61,8 @@ function scenario(body) {
             callAIWithMessagesAndTools: async (_config, messages) => {
                 requests++; capturedMessages = JSON.parse(JSON.stringify(messages));
                 if (!messages.some(message=>message.role==='tool')) initialMessages = capturedMessages;
-                if (messages.at(-1)?.role === 'tool') return {content:'context answer',toolCalls:[]};
+                if (modelDriver) return await modelDriver(messages);
+                if (messages.some(message=>message.role === 'tool')) return {content:'context answer',toolCalls:[]};
                 return typeof response === 'function' ? await response() : response;
             },
             callAI: async (_config,text,prompt) => { if(lastPrompt === null) {lastPrompt={text,prompt};return 'report';} throw new Error('Unexpected fallback request'); },
@@ -169,7 +173,8 @@ test('malformed or oversized tool batches fail before confirmations without fall
     assert.equal(confirms,0);
     response.toolCalls=Array(9).fill({name:'workplan_notes_action',arguments:'{"action":"list"}'});
     await ai.sendAiMessage('查看笔记内容', {scope:'notes',source:'tasks',items:[]});
-    assert.match(get(ai.chatHistory).at(-1).content,/预算/);
+    assert.equal(get(ai.chatHistory).at(-1).type,'text');
+    assert.equal(get(ai.chatHistory).at(-1).toolLimited,true);
     assert.equal(confirms,0);
 `));
 
@@ -345,4 +350,28 @@ test('confirmation does not execute until native authorization is accepted, and 
     release();
     assert.equal((await pending).success,true);
     assert.equal(fileSearches.length,1);
+`));
+
+test('the desktop GPT project question continues after authorization with one scan and two key-file reads, not another search loop', () => scenario(`
+    modelDriver=async messages=>{
+        const results=messages.filter(message=>message.role==='tool').map(message=>JSON.parse(message.content).untrusted_data);
+        if(!results.length)return {toolCalls:[{id:'find-project',name:'workplan_local_file',arguments:'{"operation":"search","root":"Desktop","query":"GPT"}'}]};
+        const reads=results.filter(result=>result.operation==='read');
+        if(!reads.length){
+            assert.equal(results[0].root,'/isolated/OneDrive/Desktop');assert.equal(results[0].recursive,true);
+            return {toolCalls:['README.md','package.json'].map((name,index)=>({id:'key-file-'+index,name:'workplan_local_file',arguments:JSON.stringify({operation:'read',path:'/isolated/OneDrive/Desktop/GPT/'+name})}))};
+        }
+        assert.equal(reads.length,2);
+        assert.ok(reads.some(result=>result.content.includes('engines')));
+        return {content:'已检查 GPT 的 README 和 package.json，需要 Node>=20 和依赖；未实际运行，不能保证当前可用。',toolCalls:[]};
+    };
+    await ai.sendChatMessage('桌面的GPT项目还能用吗？');
+    const index=get(ai.aiChatHistory).length-1, card=get(ai.aiChatHistory)[index];
+    assert.equal(card.type,'file_confirm');assert.equal(fileSearches.length,0);
+    assert.equal((await ai.confirmAiChatLocalFileOperation(index,card.operation)).success,true);
+    assert.equal(fileSearches.length,1);assert.equal(fileReads.length,2);assert.equal(requests,3);
+    assert.equal(get(ai.aiChatHistory)[index].type,'text');
+    assert.ok(get(ai.aiChatHistory)[index].content.includes('README'));
+    assert.ok(!get(ai.aiChatHistory)[index].content.includes('预算'));
+    assert.equal(get(ai.isAiLoading),false);
 `));

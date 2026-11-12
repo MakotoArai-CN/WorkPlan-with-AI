@@ -243,7 +243,11 @@ export async function syncTrustedDirectories(directories = []) {
     }
 }
 
-export async function searchLocalFiles({
+export async function searchLocalFiles(options = {}) {
+    return (await searchLocalFilesDetailed(options)).entries;
+}
+
+export async function searchLocalFilesDetailed({
     root = '',
     query = '',
     maxResults = 40,
@@ -277,15 +281,17 @@ export async function searchLocalFiles({
 
             if (entries.length >= maxResults) break;
         }
-        return entries.slice(0, maxResults);
+        return { entries: entries.slice(0, maxResults), root, query, recursive: true, truncated: entries.length >= maxResults, source: 'android_tree' };
     }
 
-    return await invoke('search_local_files', {
+    const result = await invoke('search_local_files', {
         root: root || null,
         query,
         maxResults,
-        trustedDirs: trustedDirectories
+        trustedDirs: trustedDirectories,
+        includeReport: true
     });
+    return Array.isArray(result) ? { entries: result, root, query, recursive: true, truncated: result.length >= maxResults } : result;
 }
 
 export async function readLocalFile({

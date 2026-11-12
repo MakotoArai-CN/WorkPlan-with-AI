@@ -4,6 +4,7 @@ import { resolveRequestHeaders } from '../utils/ai-request-fingerprint.js';
 import {
     looksLikeFileIntent,
     searchLocalFiles,
+    searchLocalFilesDetailed,
     readLocalFile,
     writeLocalFile,
     deleteLocalFile,
@@ -3018,7 +3019,7 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
             return { role: 'assistant', type: 'text', content: `目标路径不存在：${resolved.path}。没有执行操作，请选择实际目录或检查项目名称。` };
         }
         if (operation === 'search' && !resolved.isDirectory) return { role: 'assistant', type: 'text', content: `搜索目标不是目录：${resolved.path}` };
-        plan = operation === 'search' ? { ...plan, root: resolved.path } : { ...plan, path: resolved.path };
+        plan = operation === 'search' ? { ...plan, root: resolved.path, requestedRoot: plan.requestedRoot || target } : { ...plan, path: resolved.path };
     }
     if ([plan.path, plan.root].some(isSensitiveAiPath)) return { role: 'assistant', type: 'text', content: '拒绝自动访问应用数据库、凭据或密钥文件。' };
     const authorizationDirectory = resolved?.authorized ? '' : resolveUnauthorizedDirectory(plan, settings);
@@ -3060,6 +3061,7 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
             return {
                 role: 'assistant',
                 type: 'text',
+                applied: true,
                 content: `已写入本地文件：${result.path}`
             };
         }
@@ -3071,6 +3073,7 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
         return {
             role: 'assistant',
             type: 'text',
+            applied: true,
             content: `已删除本地文件：${result.path}`
         };
     }
@@ -3080,6 +3083,10 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
             path: plan.path,
             trustedDirectories
         });
+        if (config.rawToolResults) return { role: 'assistant', type: 'text', content: `已读取文件：${result.path || plan.path}`, toolData: {
+            operation: 'read', path: result.path || plan.path, size: result.size,
+            truncated: !!result.truncated, content: redactAiSecrets(result.content || '')
+        } };
         const fallback = [
             `已读取文件：${result.path}`,
             '',
@@ -3100,12 +3107,17 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
         };
     }
 
-    const results = await searchLocalFiles({
+    const report = await searchLocalFilesDetailed({
         root: plan.root || '',
         query: plan.query || plan.path || '',
         maxResults: 40,
         trustedDirectories
     });
+    const results = report.entries.filter(entry => !isSensitiveAiPath(entry.path));
+    if (config.rawToolResults) return { role: 'assistant', type: 'text', content: `检索完成：${report.root || plan.root}，返回${results.length}项。`, toolData: {
+        operation: 'search', ...report, entries: results,
+        note: '仅在上述实际root下递归按名称或路径关键词匹配；未运行项目。空结果不证明整个电脑不存在项目。'
+    } };
     const fallback = formatLocalFileSearchResult(results.filter(entry => !isSensitiveAiPath(entry.path)));
     const summarized = await finalizeToolAnswer(
         userText,
@@ -4709,7 +4721,7 @@ async function resolveAssistantMessage(text, existingTasks = [], currentConfig =
     return normalizeAssistantResult(result, assistantContext);
 }
 
-async function requestOnDemandReply(text, config, context = {}, attachments = [], chatStyle = 'default') {
+async function requestOnDemandReply(text, config, context = {}, attachments = [], chatStyle = 'default', initialResult = null) {
     const api = await import('../utils/ai-providers.js');
     const isCurrent = config.isCurrent || captureAiOperationGuard(config.signal, false);
     const toolsEnabled = get(settingsStore).enableAiChatTools !== false;
@@ -4721,6 +4733,8 @@ async function requestOnDemandReply(text, config, context = {}, attachments = []
 本轮不预载任何应用数据。根据用户当前问题自行决定是否需要数据：普通闲聊、常识、写作只直接回答；涉及当前笔记、任务等应用记录时，先用 workplan_read_data 按需查询，拿到真实内容后再回答，不要让已选择笔记的用户重复粘贴。
 当前页面类型：${context.scope === 'notes' ? '笔记页面' : '通用聊天'}，${context.activeNoteId ? '有选中笔记，可查询current_note' : '未显式选择笔记'}。标题、正文和其他记录必须查询才能获得。
 本地路径由系统原生解析：桌面使用Desktop，用户目录使用~，不猜测C盘用户名或把~拼到工作目录。目录授权只是读取权限，不代表路径存在。路径/权限失败后解释实际错误并请用户选择目录，勿自动重复相同调用。只检查项目文件和配置，不执行项目代码或声称项目已运行。
+桌面项目检查先在Desktop按项目名搜索；找到候选目录后只读README、package.json、pyproject.toml等关键文件。多个同名候选先澄清，不扩散搜索整个用户目录；不要用“文档文件”这类自然语言充当文件名关键词。搜索会返回真实递归范围、排除目录和截断标记，空结果不得编造扩展名过滤或未递归等原因。
+项目检查：先在用户指定的位置按项目名搜索，找到候选目录后读取README和依赖清单等少量关键文件。禁止搜索整个用户目录来代替明确的桌面范围；不要用“文档文件”这种自然语言作为文件名关键词。搜索本身会递归并返回扫描限制，不要编造扩展名过滤或不递归的解释。已有结果足够就回答；多个候选先让用户选择，不要继续盲扫。
 ${context.scope === 'notes' ? '工作文档模式：通过工具取得正文后保持原有Markdown结构，直接给出草稿，不声称已保存。' : ''}
 查询其他笔记先列出标题，再按真实ID读取单篇；分页与截断必须告知范围。锁定、删除或查询失败时准确说明，不编造数据。仅用户明确要求保存/修改/删除时可请求变更工具；返回确认卡片不等于执行成功。
 回复风格：${['default', 'fun', 'professional', 'concise', 'teacher'].includes(chatStyle) ? chatStyle : 'default'}。
@@ -4734,7 +4748,8 @@ ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用�
     let projectStore;
     try {
         return await runOnDemandAssistant({
-            messages, tools, isCurrent,
+            messages, tools, isCurrent, initialResult,
+            finalizeModel: transcript => api.callAIWithMessages(config, transcript),
             callModel: (transcript, definitions) => {
                 if (get(settingsStore).enableAiChatTools === false) throw new DOMException('工具已关闭', 'AbortError');
                 return api.callAIWithMessagesAndTools(config, transcript, definitions, { toolChoice: 'auto', signal: config.signal });
@@ -4764,7 +4779,7 @@ ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用�
                     current.source = args.source;
                     current.items = args.source === 'templates' ? state.templates : args.source === 'scheduled' ? state.scheduledTasks : state.tasks;
                 }
-                return executeNativeToolCall(call, text, config, current,
+                return executeNativeToolCall(call, text, { ...config, rawToolResults: true }, current,
                     get(settingsStore).localFileConfig?.requireConfirmation ?? true, () => {}, allowFiles);
             }
         });
@@ -4864,6 +4879,7 @@ export async function retryLastMessage(index, existingTasks = []) {
 }
 
 export async function confirmAiChatLocalFileOperation(index, operation) {
+    if (get(isAiLoading)) return { success: false, error: '请等待当前请求结束后再确认。' };
     const staged = get(aiChatHistory)[index];
     if (!staged || staged.type !== 'file_confirm' || staged.operation !== operation) {
         return { success: false, error: '确认卡片已失效，请重新发起文件操作。' };
@@ -4872,7 +4888,9 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
     if (!guard() || !get(settingsStore).localFileConfig?.enabled) {
         return { success: false, error: '文件工具已关闭或操作已取消。' };
     }
-    const currentConfig = { ...getEffectiveConfig(), isCurrent: guard };
+    const controller = new AbortController();
+    const currentConfig = { ...getEffectiveConfig(), signal: controller.signal, rawToolResults: true,
+        isCurrent: () => guard() && !controller.signal.aborted && get(aiChatHistory)[index] === loading };
     operation = JSON.parse(JSON.stringify(operation));
     const loading = { role: 'assistant', type: 'loading' };
 
@@ -4884,6 +4902,8 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
         return nextHistory;
     });
     saveAiChatHistory();
+    isAiLoading.set(true);
+    _streamAbortController = controller;
 
     try {
         if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件确认已取消。' };
@@ -4901,13 +4921,22 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
         }
         const result = await runLocalFilePlan(operation, operation.originalUserText || operation.message || '', currentConfig, false);
         if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件操作结果属于已关闭的对话。' };
+        let reply = result;
+        if (['search', 'read'].includes(operation.operation) && result.type === 'text') {
+            const args = Object.fromEntries(['operation', 'path', 'root', 'query', 'response_goal', 'message']
+                .filter(key => operation[key] !== undefined).map(key => [key, operation[key]]));
+            reply = await requestOnDemandReply(operation.originalUserText || operation.message || '请根据已授权文件结果回答',
+                currentConfig, {}, [], 'default', { name: 'workplan_local_file', arguments: JSON.stringify(args), data: result.toolData || result,
+                    aliases: operation.operation === 'search' && operation.requestedRoot ? [{ ...args, root: operation.requestedRoot }] : [] });
+            if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件操作结果属于已关闭的对话。' };
+        }
         aiChatHistory.update(history => {
             const nextHistory = [...history];
-            nextHistory[index] = result;
+            nextHistory[index] = reply;
             return nextHistory;
         });
         saveAiChatHistory();
-        return { success: true, result };
+        return { success: true, result: reply };
     } catch (error) {
         if (!guard() || get(aiChatHistory)[index] !== loading) return { success: false, error: '文件操作已取消。' };
         aiChatHistory.update(history => {
@@ -4922,6 +4951,11 @@ export async function confirmAiChatLocalFileOperation(index, operation) {
         });
         saveAiChatHistory();
         return { success: false, error: error.message || String(error) };
+    } finally {
+        if (_streamAbortController === controller) {
+            _streamAbortController = null;
+            isAiLoading.set(false);
+        }
     }
 }
 
