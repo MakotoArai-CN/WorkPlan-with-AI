@@ -9,9 +9,21 @@
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-red?logo=tauri)
 ![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-orange?logo=svelte)
   
+A cross-platform task planner with AI assistance for Windows, macOS, Linux and Android.
+
 融合AI能力的跨平台任务规划与管理系统。
 
 </div>
+
+## English Overview
+
+WorkPlan with AI combines task planning, Markdown notes, overtime and leave tracking, an encrypted vault, and an AI assistant with optional local-file and web-search access. AI connections use providers you configure; local file access is permission-bound and changes can require confirmation.
+
+Download the AppImage or another platform package from [GitHub Releases](https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/latest). Linux packages include AppImage, Debian, RPM and Arch Linux formats. The project is licensed under AGPL-3.0.
+
+On first launch, Linux follows `LC_ALL`, then `LC_MESSAGES`, then `LANG`. Chinese locales use Chinese; other supported languages are selected when available, and unsupported locales (including `C`/`POSIX`) fall back to English. Browser and mobile builds follow the system/WebView language. A language explicitly selected in Settings takes priority and remains saved across restarts.
+
+This is an actively developed, pre-1.0 personal project. Back up important data before upgrading.
 
 ## 简介
 

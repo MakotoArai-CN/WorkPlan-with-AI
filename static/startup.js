@@ -9,10 +9,10 @@
         ko: ['\uc791\uc5c5 \uacf5\uac04 \uc900\ube44 \uc911', '\ud3c9\uc18c\ubcf4\ub2e4 \uc2dc\uac04\uc774 \ub354 \uac78\ub9ac\uace0 \uc788\uc2b5\ub2c8\ub2e4', '\uc0c8\ub85c\uace0\uce68', '\uc2dc\uc791\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ub2e4\uc2dc \uc2dc\ub3c4\ud574 \uc8fc\uc138\uc694.'],
         ru: ['\u041f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0430 \u0440\u0430\u0431\u043e\u0447\u0435\u0433\u043e \u043f\u0440\u043e\u0441\u0442\u0440\u0430\u043d\u0441\u0442\u0432\u0430', '\u042d\u0442\u043e \u0437\u0430\u043d\u0438\u043c\u0430\u0435\u0442 \u0431\u043e\u043b\u044c\u0448\u0435 \u0432\u0440\u0435\u043c\u0435\u043d\u0438, \u0447\u0435\u043c \u043e\u0431\u044b\u0447\u043d\u043e', '\u041f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c', '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c. \u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u043f\u043e\u043f\u044b\u0442\u043a\u0443.']
     };
-    var language = navigator.language || 'en';
+    var language = window.WorkPlanLocale ? window.WorkPlanLocale.current() : navigator.language || 'en';
     var reduce = false;
     try {
-        language = localStorage.getItem('workplan_locale') || language;
+        if (!window.WorkPlanLocale) language = localStorage.getItem('workplan_locale') || language;
         reduce = JSON.parse(localStorage.getItem('workplan_system_settings') || '{}').reduceAnimations === true;
     } catch (error) {}
     var labels = copy[language.toLowerCase().split('-')[0]] || copy.en;

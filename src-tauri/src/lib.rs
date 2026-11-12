@@ -29,6 +29,7 @@ mod local_db;
 mod local_paths;
 mod updates;
 mod vault_guard;
+mod locale;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
 
@@ -1561,6 +1562,8 @@ mod tests {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("workplan-locale")
+            .js_init_script(locale::initialization_script()).build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
@@ -1573,6 +1576,7 @@ pub fn run() {
             set_autostart,
             get_autostart_status,
             get_app_version,
+            locale::set_app_language,
             get_workspace_root,
             resolve_local_path,
             set_trusted_directories,
@@ -1624,14 +1628,16 @@ pub fn run() {
                     eprintln!("[workplan] workspace root unavailable: {error}");
                 }
             }
-            let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
-            let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let labels = locale::tray_labels(locale::system_locale().as_deref());
+            let quit = MenuItem::with_id(app, "quit", labels[0], true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", labels[1], true, None::<&str>)?;
             let notification =
-                MenuItem::with_id(app, "notification", "系统通知", true, None::<&str>)?;
+                MenuItem::with_id(app, "notification", labels[2], true, None::<&str>)?;
             let autostart_item =
-                MenuItem::with_id(app, "autostart", "开机自启", true, None::<&str>)?;
-            let about = MenuItem::with_id(app, "about", "关于程序", true, None::<&str>)?;
-            let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)?;
+                MenuItem::with_id(app, "autostart", labels[3], true, None::<&str>)?;
+            let about = MenuItem::with_id(app, "about", labels[4], true, None::<&str>)?;
+            let update = MenuItem::with_id(app, "update", labels[5], true, None::<&str>)?;
+            app.manage(locale::TrayMenuLabels([quit.clone(), show.clone(), notification.clone(), autostart_item.clone(), about.clone(), update.clone()]));
             let menu = Menu::with_items(
                 app,
                 &[

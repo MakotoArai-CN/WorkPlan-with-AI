@@ -29,7 +29,7 @@
     let showStartupRepair = false;
     import { backupModal, closeBackupModal } from '$lib/stores/backup-modal.js';
     import { get } from 'svelte/store';
-    import { setupI18n } from '$lib/i18n/index.js';
+    import { setupI18n, refreshSystemLocale } from '$lib/i18n/index.js';
     import { _, isLoading } from 'svelte-i18n';
 
     let i18nReady = false;
@@ -64,6 +64,8 @@
                 const localDb = await initLocalDatabase();
                 if (localDb.error) throw new Error(localDb.error);
                 await installLocalDatabaseMirror();
+                await refreshSystemLocale();
+                await tick();
                 migrateLegacyProtection();
             } catch (error) {
                 console.warn('Local database init failed:', error);
