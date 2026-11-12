@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -37,7 +37,7 @@ export async function writeReleaseChecksums(assets, destination) {
     await writeFile(destination, `${lines.join('\n')}\n`);
 }
 
-export function renderReleaseNotes({ version, repository, assets, commits = [] }) {
+export function renderReleaseNotes({ version, repository, assets, commits = [], changes = [] }) {
     if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid release version');
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(repository)) throw new Error('Invalid repository');
     const base = `https://github.com/${repository}/releases/download/v${version}`;
@@ -52,11 +52,12 @@ export function renderReleaseNotes({ version, repository, assets, commits = [] }
     const source = assets.filter(asset => asset.name.endsWith('.src.tar.gz'));
     const archPackage = assets.find(asset => asset.name.endsWith('-x86_64.pkg.tar.zst'));
     const portable = assets.find(asset => asset.name.endsWith('_linux-x86_64.tar.gz'));
-    const changes = commits.length ? commits.map(commit => `- ${escapeMarkdown(commit)}`).join('\n') : '- 本次发布同步了应用与安装包版本。';
+    const changelog = changes.length ? changes.map(change => `- ${escapeMarkdown(change)}`).join('\n')
+        : commits.length ? commits.map(commit => `- ${escapeMarkdown(commit)}`).join('\n') : '- 本次发布同步了应用与安装包版本。';
     const sections = [
         `<div align="center">\n\n# WorkPlan ${version}\n\n任务 · 笔记 · 密码本 · AI 助手\n\n![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white) ![macOS](https://img.shields.io/badge/macOS-222222?style=flat-square&logo=apple&logoColor=white) ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black) ![Arch Linux](https://img.shields.io/badge/Arch_Linux-1793D1?style=flat-square&logo=archlinux&logoColor=white) ![Android](https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=black)\n\n</div>`,
         `> **升级前请备份重要数据。** 安装包请按系统和 CPU 架构选择。主密码尝试防护默认关闭，不会自动删除密码或云端数据库；云端部署者请先完成 [RLS 安全加固](https://github.com/${repository}/blob/main/docs/SUPABASE_SECURITY.md)。`,
-        `## 本次更新\n\n${changes}`,
+        `## 本次更新\n\n${changelog}`,
         `## 快速选择\n\n| 你的设备 | 推荐安装包 |\n| :--- | :--- |\n| Windows 常规电脑 | \`x64-setup.exe\`；32 位系统选 \`x86\`，ARM 设备选 \`arm64\` |\n| macOS | Apple 芯片选 \`aarch64.dmg\`，Intel 芯片选 \`x64.dmg\` |\n| Debian / Ubuntu | \`.deb\` |\n| Fedora / RHEL / openSUSE | \`.rpm\` |\n| Arch / EndeavourOS / Manjaro | 优先 \`.pkg.tar.zst\`，不要使用内置 Ubuntu 运行库的 AppImage |\n| Android | 通常选 \`arm64.apk\`；不确定时选 \`universal.apk\` |`,
     ];
     for (const [title, list, note] of [
@@ -80,11 +81,11 @@ async function main() {
     const repository = process.env.GITHUB_REPOSITORY;
     const assets = await collectReleaseAssets(directory);
     if (!assets.length) throw new Error('No release assets were downloaded');
-    const tags = execFileSync('git', ['tag', '--merged', 'HEAD', '--sort=-version:refname'], { encoding: 'utf8' }).trim().split(/\r?\n/);
-    const previous = tags.find(tag => /^v\d+\.\d+\.\d+$/.test(tag) && tag !== `v${version}`);
-    const commits = execFileSync('git', ['log', ...(previous ? [`${previous}..HEAD`] : ['-30']), '--no-merges', '--pretty=format:%s (%h)'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
+    const history = JSON.parse(await readFile(new URL('../src/lib/release-history.json', import.meta.url), 'utf8'));
+    const changes = history.find(item => item.version === version)?.changes?.zh;
+    if (!Array.isArray(changes) || !changes.length) throw new Error(`Missing public release notes for ${version}`);
     await writeReleaseChecksums(assets, join(directory, 'SHA256SUMS'));
-    await writeFile('RELEASE_NOTES.md', renderReleaseNotes({ version, repository, assets, commits }));
+    await writeFile('RELEASE_NOTES.md', renderReleaseNotes({ version, repository, assets, changes }));
     console.log(`Prepared ${assets.length} verified release assets for v${version}`);
 }
 

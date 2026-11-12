@@ -91,7 +91,7 @@
     <div class="p-6">
         <div class="flex items-start justify-between gap-3">
             <div>
-                <h3 class="text-lg font-black text-slate-800 dark:text-slate-100">数据修复工具</h3>
+                <h3 class="text-lg font-black text-slate-800 dark:text-slate-100">本地数据与备份</h3>
                 <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                     本地加密数据库位于用户目录的隐藏文件夹 <code class="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-700">.workplan</code>，
                     使用 sled + zstd 压缩 + AES-GCM 加密，每次保存前自动保留备份。

@@ -381,6 +381,14 @@
     "vaultwarden_push_locked": "Unlock the password vault before pushing"
   },
   "settings": {
+    "release_notes": "Release Notes",
+    "current_version": "Current Version",
+    "release_date": "Published",
+    "release_notes_empty": "No release notes are available for this version. See the official release page.",
+    "release_offline_hint": "Online version information is unavailable. Showing the bundled notes for the current version.",
+    "release_open_failed": "Could not open the release page. Check browser or system permissions.",
+    "view_release": "View Release",
+    "local_data_backups": "Local Data and Backups",
     "title": "Settings",
     "subtitle": "App configuration",
     "appearance": "Appearance",
@@ -816,6 +824,7 @@
     "drop_files_failed": "Failed to add dropped files"
   },
   "ai_settings_page": {
+    "connection_setup_hint": "Enter the service address and model, then supply an API key if required. The connection name can stay unchanged.",
     "title": "AI Settings",
     "tab_basic": "Basic",
     "tab_advanced": "Advanced",

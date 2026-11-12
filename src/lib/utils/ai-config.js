@@ -18,10 +18,16 @@ export function pruneProviderConfigs(providerConfigs, profiles) {
 export function migrateRemovedProvider(profile = {}) {
     const providerConfigs = Object.fromEntries(Object.entries(profile.providerConfigs || {})
         .filter(([provider]) => !provider.startsWith('g4f-')));
-    if (!String(profile.provider || '').startsWith('g4f-')) return { ...profile, providerConfigs };
+    if (!String(profile.provider || '').startsWith('g4f-')) {
+        // Repair only the exact default-name artifact produced by older builds.
+        // A user-defined connection name must never be rewritten by migration.
+        const generatedName = /^(默认连接|连接 \d+)(?:（需重新配置）)+$/.exec(profile.name || '');
+        const emptyMigratedProfile = profile.provider === 'custom' && !profile.apiKey && !profile.secretKey
+            && !profile.customEndpoint && !profile.customModel && (!profile.model || profile.model === 'auto');
+        return { ...profile, ...(generatedName && emptyMigratedProfile ? { name: generatedName[1] } : {}), providerConfigs };
+    }
     return {
         ...profile, provider: 'custom', apiKey: '', secretKey: '', model: '',
-        customModel: '', customEndpoint: '', accountId: '', providerConfigs: { ...providerConfigs, custom: {} },
-        name: `${profile.name || '连接'}（需重新配置）`
+        customModel: '', customEndpoint: '', accountId: '', providerConfigs: { ...providerConfigs, custom: {} }
     };
 }

@@ -381,6 +381,14 @@
     "vaultwarden_push_locked": "プッシュする前にパスワード庫を解除してください"
   },
   "settings": {
+    "release_notes": "更新内容",
+    "current_version": "現在のバージョン",
+    "release_date": "公開日",
+    "release_notes_empty": "このバージョンの更新内容は未掲載です。正式リリースページをご確認ください。",
+    "release_offline_hint": "オンライン情報を取得できません。現在のバージョンに同梱された更新内容を表示します。",
+    "release_open_failed": "リリースページを開けませんでした。ブラウザーまたはシステム権限をご確認ください。",
+    "view_release": "リリースを表示",
+    "local_data_backups": "ローカルデータとバックアップ",
     "title": "設定",
     "subtitle": "アプリ設定",
     "appearance": "外観",
@@ -816,6 +824,7 @@
     "drop_files_failed": "ドロップしたファイルを追加できませんでした"
   },
   "ai_settings_page": {
+    "connection_setup_hint": "サービスのURLとモデルを設定し、必要に応じてAPIキーを入力してください。接続名は変更不要です。",
     "title": "AI設定",
     "tab_basic": "基本設定",
     "tab_advanced": "詳細パラメータ",

@@ -580,6 +580,9 @@
                                 placeholder="https://api.example.com/v1"
                                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-400 font-mono"
                             />
+                            {#if !$aiConfig.customEndpoint?.trim()}
+                                <p class="text-xs text-amber-700 dark:text-amber-400 mt-2" role="status">{$_('ai_settings_page.connection_setup_hint')}</p>
+                            {/if}
                             <div class="text-[10px] text-slate-400 mt-1">
                                 {$_('ai_settings_page.custom_endpoint_hint')}
                             </div>
