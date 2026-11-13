@@ -49,10 +49,18 @@ describe('frosted glass theme', () => {
         expect(read('src/app.css')).toContain('.frosted-wallpaper');
     });
 
-    test('keeps the animated backdrop respectful of reduced motion', () => {
+    test('uses a static backdrop and limits live blur to outer panels', () => {
         const css = read('src/app.css');
-        expect(css).toContain('@keyframes frosted-drift');
+        expect(css).not.toContain('@keyframes frosted-drift');
+        expect(css).not.toContain('animation: frosted-drift');
+        expect(css).not.toContain('blur(34px)');
+        expect(css).toContain('backdrop-filter: none !important');
+        expect(css).toContain('[data-glass-role="workspace"], #detail-panel');
+        expect(css).toContain('--glass-blur: blur(16px) saturate(1.35)');
+        expect(css).toContain('(pointer: coarse)');
+        expect(css).toContain('--glass-blur: none');
         expect(css).toContain('prefers-reduced-motion: reduce');
+        expect(read('src/routes/+layout.svelte')).not.toContain('installGlassPointer');
     });
 
     test('is labelled as frosted glass, not liquid glass', () => {

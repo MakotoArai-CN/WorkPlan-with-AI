@@ -64,16 +64,8 @@
     --app-shadow: 0 16px 36px rgba(249, 115, 22, 0.16);
 }
 
-/*
- * Frosted glass theme.
- *
- * This is composited glass, not ray-marched liquid glass: frosted translucent
- * panels over a soft wallpaper, with a fresnel rim, a two-tone chromatic edge
- * and a pointer-following specular. The real WebGL refraction library
- * (@ybouane/liquidglass) was evaluated and rejected for the app shell — two
- * panels measured 1-3 fps because it re-rasterises the panel DOM every frame,
- * so it is only a fit for static showcase surfaces.
- */
+/* Frosted surfaces share a static wallpaper. Only shell panels sample it;
+   scrolling cards and controls must never allocate their own blur surfaces. */
 :root[data-theme="frosted"] {
     --app-bg: #eaf1ff;
     --app-surface: rgba(255, 255, 255, 0.56);
@@ -86,8 +78,7 @@
     --app-text-muted: #5a7391;
     --app-text-faint: #8aa0bb;
     --app-shadow:
-        0 24px 60px rgba(64, 102, 168, 0.18),
-        0 2px 8px rgba(64, 102, 168, 0.1),
+        0 4px 12px rgba(64, 102, 168, 0.1),
         inset 0 1px 0 rgba(255, 255, 255, 0.95),
         inset 0 -1px 0 rgba(150, 190, 255, 0.35);
     --glass-sheen: linear-gradient(
@@ -97,69 +88,37 @@
         rgba(255, 255, 255, 0.05) 54%,
         rgba(180, 220, 255, 0.28) 100%
     );
-    --glass-blur: blur(34px) saturate(2.3) brightness(1.08);
-    --frosted-pointer-x: 30%;
-    --frosted-pointer-y: 10%;
+    --glass-blur: blur(16px) saturate(1.35);
 }
 
-/* Vivid wallpaper. Bright enough that the frosted panels actually refract it. */
 :root[data-theme="frosted"] body {
-    background-color: #eef4ff !important;
-    background-image:
-        radial-gradient(46vw 40vw at 10% 6%, rgba(96, 165, 250, 0.85), transparent 62%),
-        radial-gradient(42vw 38vw at 92% 2%, rgba(196, 181, 253, 0.9), transparent 64%),
-        radial-gradient(46vw 40vw at 78% 92%, rgba(125, 211, 252, 0.8), transparent 66%),
-        radial-gradient(40vw 36vw at 12% 96%, rgba(251, 207, 232, 0.85), transparent 68%),
-        radial-gradient(36vw 32vw at 50% 46%, rgba(187, 247, 208, 0.6), transparent 70%),
-        linear-gradient(180deg, #f4f8ff 0%, #e8f0ff 52%, #eef4ff 100%);
-    background-attachment: fixed;
-    background-repeat: no-repeat;
-    background-size: 120% 120%, 120% 120%, 130% 130%, 130% 130%, 120% 120%, 100% 100%;
-    animation: frosted-drift 44s ease-in-out infinite alternate;
+    background: #eef4ff !important;
     color: var(--app-text);
 }
 
-@keyframes frosted-drift {
-    from {
-        background-position: 0% 0%, 100% 0%, 70% 100%, 10% 90%, 50% 50%, 0 0;
-    }
-    to {
-        background-position: 16% 12%, 82% 8%, 52% 78%, 0% 70%, 42% 46%, 0 0;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    :root[data-theme="frosted"] body {
-        animation: none;
-    }
-}
-
-/* Frosted glass on every surface that used to be a solid card. Attribute
-   selectors are needed because Tailwind emits `dark:`/`hover:` variants whose
-   specificity beats a plain class rule. */
+/* Nested surfaces use paint-only translucency, not recursive backdrop filters. */
 :root[data-theme="frosted"] [class*="bg-white"],
 :root[data-theme="frosted"] [class*="bg-slate-50"],
 :root[data-theme="frosted"] [class*="bg-slate-100"],
 :root[data-theme="frosted"] [class*="bg-slate-200"] {
-    background-color: rgba(255, 255, 255, 0.2) !important;
-    background-image:
-        radial-gradient(
-            460px circle at var(--frosted-pointer-x) var(--frosted-pointer-y),
-            rgba(255, 255, 255, 0.6),
-            transparent 62%
-        ),
-        var(--glass-sheen) !important;
-    -webkit-backdrop-filter: var(--glass-blur);
-    backdrop-filter: var(--glass-blur);
+    background-color: rgba(255, 255, 255, 0.46) !important;
+    background-image: var(--glass-sheen) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
     border-color: rgba(255, 255, 255, 0.85) !important;
-    box-shadow:
-        inset 0 0 30px rgba(255, 255, 255, 0.45),
-        0 22px 50px rgba(64, 102, 168, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.98),
-        inset 0 -1px 0 rgba(150, 190, 255, 0.4),
-        inset 1px 0 0 rgba(170, 220, 255, 0.5),
-        inset -1px 0 0 rgba(255, 190, 235, 0.4);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
+
+:root[data-theme="frosted"] :is([data-glass-role="sidebar"], [data-glass-role="workspace"], #detail-panel) {
+    -webkit-backdrop-filter: var(--glass-blur) !important;
+    backdrop-filter: var(--glass-blur) !important;
+}
+
+/* Mobile WebViews avoid full-screen sampling, especially while typing/scrolling. */
+@media (max-width: 767px), (pointer: coarse), (prefers-reduced-motion: reduce) {
+    :root[data-theme="frosted"] { --glass-blur: none; }
+}
+:root[data-theme="frosted"].reduce-animations { --glass-blur: none; }
 
 /* The app shell must stay transparent, otherwise the wallpaper disappears. */
 :root[data-theme="frosted"] body > div [class*="bg-slate-50"].h-screen,
@@ -183,7 +142,7 @@
 :root[data-theme="frosted"] .shadow-lg,
 :root[data-theme="frosted"] .shadow-xl {
     box-shadow:
-        0 20px 46px rgba(64, 102, 168, 0.16),
+        0 3px 10px rgba(64, 102, 168, 0.1),
         inset 0 1px 0 rgba(255, 255, 255, 0.95),
         inset 0 -1px 0 rgba(150, 190, 255, 0.35) !important;
 }
@@ -192,8 +151,8 @@
 :root[data-theme="frosted"] textarea,
 :root[data-theme="frosted"] select {
     background-color: rgba(255, 255, 255, 0.66) !important;
-    -webkit-backdrop-filter: blur(16px) saturate(1.6);
-    backdrop-filter: blur(16px) saturate(1.6);
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
     border-color: rgba(255, 255, 255, 0.85) !important;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
     color: var(--app-text) !important;
@@ -255,7 +214,7 @@
     margin-bottom: 0.2em;
 }
 
-/* Liquid glass wallpaper layer */
+/* Static wallpaper is decoded once instead of repainted below every card. */
 .frosted-wallpaper {
     position: absolute;
     inset: 0;
