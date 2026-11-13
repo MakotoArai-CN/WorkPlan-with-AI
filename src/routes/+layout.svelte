@@ -13,7 +13,6 @@
     import { initSecureSync } from '$lib/utils/secure-sync.js';
     import { isWebDemo } from '$lib/utils/runtime.js';
     import { initLocalDatabase, installLocalDatabaseMirror } from '$lib/utils/local-db.js';
-    import { installGlassPointer } from '$lib/utils/glass-pointer.js';
     import { formatLocalDate } from '$lib/utils/datetime.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
@@ -41,7 +40,6 @@
         let unlistenUpdate = () => {};
         let unlistenAbout = () => {};
         let notificationTimer = null;
-        let uninstallGlassPointer = () => {};
         let interval = null;
         let heartbeatInterval = null;
 
@@ -75,8 +73,6 @@
                 return;
             }
 
-            // Specular highlight for the liquid glass theme (no-op elsewhere).
-            uninstallGlassPointer = installGlassPointer();
             taskStore.loadFromLocal();
             reloadConnectorConfig();
             // Hydrate preferences synchronously, but do not keep the startup
@@ -158,7 +154,6 @@
             unlistenAutostart();
             unlistenUpdate();
             unlistenAbout();
-            uninstallGlassPointer();
             if (notificationTimer) clearTimeout(notificationTimer);
             if (interval) clearInterval(interval);
             if (heartbeatInterval) clearInterval(heartbeatInterval);

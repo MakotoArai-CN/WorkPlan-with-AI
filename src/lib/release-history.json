@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.5.25",
+    "date": "2026-11-13",
+    "changes": {
+      "zh": [
+        "磨砂玻璃主题仅在外层面板使用背景模糊，移除嵌套控件重复模糊和持续背景动画，保留半透明配色与静态壁纸。",
+        "移动端、触摸设备和减少动态效果模式不再启用外层实时模糊，降低滚动与输入时的渲染开销。",
+        "用户协议与隐私政策更新至 1.2，补充 AI 会话与工具数据、文件授权、第三方网络请求、快捷解锁及删除边界；更新后需重新确认。"
+      ],
+      "en": [
+        "Limit frosted-theme backdrop blur to shell panels, remove recursive control blurs and continuous background animation, and preserve translucent colors and the static wallpaper.",
+        "Avoid live shell blur on mobile, coarse-pointer devices and reduced-motion settings to reduce rendering costs during scrolling and typing.",
+        "Update the agreement and privacy policy to 1.2 with AI history/tools, file permissions, third-party requests, quick unlock and deletion boundaries; renewed acceptance is required."
+      ],
+      "ja": [
+        "磨りガラステーマの背景ぼかしを外側パネルに限定し、入れ子の部品と常時背景アニメーションの負荷を削減しました。半透明の配色と静止壁紙は維持します。",
+        "モバイル・タッチ端末と視差効果を減らす設定では外側のリアルタイムぼかしを使わず、スクロールや入力時の描画負荷を抑えます。",
+        "規約とプライバシーポリシーを 1.2 に更新し、AI 履歴・ツール、ファイル権限、第三者通信、簡易解除、削除範囲を明記しました。再同意が必要です。"
+      ]
+    }
+  },
+  {
     "version": "0.5.24",
     "date": "2026-11-13",
     "changes": {
