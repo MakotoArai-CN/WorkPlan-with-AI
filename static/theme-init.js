@@ -16,7 +16,8 @@
             }
         } catch (e) {}
 
-        var saved = localStorage.getItem('workplan_system_settings');
+        var saved = null;
+        try { saved = localStorage.getItem('workplan_system_settings'); } catch (e) {}
         var mode = 'auto';
         if (saved) {
             try {
@@ -32,8 +33,7 @@
         if (isDark) {
             document.documentElement.classList.add('dark');
             document.documentElement.style.colorScheme = 'dark';
-            var themeColor = document.querySelector('meta[name="theme-color"]');
-            if (themeColor) themeColor.setAttribute('content', mode === 'frosted' ? '#eef4ff' : '#0f172a');
         }
+        if (window.WorkPlanTheme) window.WorkPlanTheme.applySystemBars(resolved);
     } catch (e) {}
 })();

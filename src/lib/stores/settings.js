@@ -10,6 +10,7 @@ import {
 import { isWebDemo } from '../utils/runtime.js';
 import { DEFAULT_OVERTIME_CONFIG, normalizeOvertimeConfig } from '../utils/overtime.js';
 import { AGREEMENT_VERSION } from '../utils/agreement-version.js';
+import '../../../static/theme-surface.js';
 
 const DARK_THEMES = new Set(['dark']);
 const NOTIFICATION_CHANNEL_ID = 'workplan-important';
@@ -203,19 +204,7 @@ function createSettingsStore() {
             document.documentElement.dataset.theme = resolvedTheme;
             document.body.dataset.theme = resolvedTheme;
             document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-            const metaTheme = document.querySelector('meta[name="theme-color"]');
-            if (metaTheme) {
-                const themeColorMap = {
-                    light: '#ffffff',
-                    dark: '#0f172a',
-                    ocean: '#e0f2fe',
-                    forest: '#ecfdf5',
-                    sunset: '#fff7ed',
-                    rose: '#fff1f2',
-                    frosted: '#eef4ff'
-                };
-                metaTheme.setAttribute('content', themeColorMap[resolvedTheme] || (isDark ? '#0f172a' : '#ffffff'));
-            }
+            window.WorkPlanTheme.applySystemBars(resolvedTheme);
         };
 
         apply();
