@@ -7,7 +7,7 @@ test('update checks deduplicate, settle errors, preserve closed state and fence 
         import {mock} from 'bun:test';
         import {get} from 'svelte/store';
         let calls=0, release;
-        mock.module('@tauri-apps/api/core',()=>({invoke:async command=>{
+        mock.module('@tauri-apps/api/core',()=>({Channel:class {},invoke:async command=>{
             assert.equal(command,'check_update');calls++;return new Promise(resolve=>{release=resolve;});
         }}));
         const {checkForUpdates,updateDialog,closeUpdateDialog,showCurrentReleaseNotes}=await import('./src/lib/stores/updates.js');
@@ -22,7 +22,7 @@ test('update checks deduplicate, settle errors, preserve closed state and fence 
         assert.equal(get(updateDialog).data,null);assert.equal(get(updateDialog).loading,true);
         newRelease({latest_version:'0.5.18'});await newer;
         assert.equal(get(updateDialog).data.latest_version,'0.5.18');assert.equal(get(updateDialog).loading,false);
-        mock.module('@tauri-apps/api/core',()=>({invoke:async()=>{throw new Error('synthetic network outage');}}));
+        mock.module('@tauri-apps/api/core',()=>({Channel:class {},invoke:async()=>{throw new Error('synthetic network outage');}}));
         await checkForUpdates();assert.ok(get(updateDialog).error.includes('synthetic network outage'));assert.equal(get(updateDialog).loading,false);
     `;
     const result = Bun.spawnSync([process.execPath, '--eval', script], { cwd: fileURLToPath(new URL('..', import.meta.url)) });

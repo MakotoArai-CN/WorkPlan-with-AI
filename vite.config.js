@@ -17,7 +17,8 @@ const ANDROID_PERMISSIONS = [
     '<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />',
     '<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />',
     '<uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />',
-    '<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />'
+    '<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />',
+    '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
 ];
 
 function isAscii(value) {
@@ -149,6 +150,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -157,6 +159,9 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
+
+class WorkPlanUpdateProvider : FileProvider()
 
 class MainActivity : TauriActivity() {
   private var webView: WebView? = null
@@ -207,6 +212,32 @@ class MainActivity : TauriActivity() {
   fun setSystemBars(theme: String) {
     if (theme !in setOf("light", "dark", "ocean", "forest", "sunset", "rose", "frosted")) return
     runOnUiThread { systemBarTheme = theme; applySystemBars() }
+  }
+
+  fun installUpdate(path: String): JSONObject {
+    val file = File(path).canonicalFile
+    val root = File(cacheDir, "updates").canonicalFile
+    if (file.parentFile != root || !file.isFile || file.extension != "apk") error("Invalid update package path")
+    val archive = packageManager.getPackageArchiveInfo(file.path, 0) ?: error("Invalid APK")
+    if (archive.packageName != packageName) error("APK belongs to another application")
+    val action = java.util.concurrent.FutureTask<JSONObject> {
+      if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+        startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+        JSONObject().put("opened", true).put("permission_required", true)
+      } else {
+        launchUpdateInstaller(file)
+        JSONObject().put("opened", true)
+      }
+    }
+    runOnUiThread(action)
+    return action.get(10, java.util.concurrent.TimeUnit.SECONDS)
+  }
+
+  private fun launchUpdateInstaller(file: File) {
+    val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+    val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+      .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    startActivity(intent)
   }
 
   @Suppress("DEPRECATION")
@@ -429,6 +460,9 @@ class MainActivity : TauriActivity() {
 }
 
 class WorkPlanAndroidBridge(private val activity: MainActivity) {
+  @JavascriptInterface
+  fun installUpdate(path: String): String = wrapJson { activity.installUpdate(path) }
+
   @JavascriptInterface
   fun setSystemBars(theme: String) { activity.setSystemBars(theme) }
 
@@ -884,6 +918,13 @@ function patchAndroidManifest(file) {
         );
     }
 
+    if (!manifest.includes('android:authorities="${applicationId}.updates"')) {
+        manifest = manifest.replace('</application>', `    <provider android:name=".WorkPlanUpdateProvider"
+            android:authorities="\${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>\n    </application>`);
+    }
+
     if (
         manifest.includes('android:name=".MainActivity"') &&
         !manifest.includes('android:enableOnBackInvokedCallback=')
@@ -926,6 +967,10 @@ function patchGeneratedAndroidProject(mode) {
     if (!existsSync(androidDir)) return;
 
     const changed = [];
+    const updatePaths = join(androidDir, 'app', 'src', 'main', 'res', 'xml', 'update_paths.xml');
+    mkdirSync(dirname(updatePaths), { recursive: true });
+    const updateXml = '<?xml version="1.0" encoding="utf-8"?>\n<paths xmlns:android="http://schemas.android.com/apk/res/android"><cache-path name="verified_updates" path="updates/" /></paths>\n';
+    if (!existsSync(updatePaths) || readFileSync(updatePaths, 'utf8') !== updateXml) writeFileSync(updatePaths, updateXml);
     if (patchAndroidGradle(join(androidDir, 'app', 'build.gradle.kts'))) changed.push('Gradle');
     if (patchAndroidGradleProperties(join(androidDir, 'gradle.properties'))) changed.push('Gradle properties');
     if (patchAndroidManifest(join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml'))) changed.push('manifest');
