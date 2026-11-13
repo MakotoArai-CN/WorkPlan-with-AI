@@ -28,6 +28,7 @@ mod device;
 mod local_db;
 mod local_paths;
 mod updates;
+mod update_download;
 mod vault_guard;
 mod locale;
 
@@ -1573,6 +1574,9 @@ pub fn run() {
         .invoke_handler({
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             updates::check_update,
+            update_download::download_update,
+            update_download::cancel_update_download,
+            update_download::open_downloaded_update,
             set_autostart,
             get_autostart_status,
             get_app_version,

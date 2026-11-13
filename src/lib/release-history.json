@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.5.27",
+    "date": "2026-11-13",
+    "changes": {
+      "zh": [
+        "检查更新支持在应用内下载匹配当前平台的官方更新包，显示进度、取消和 SHA-256 校验，校验通过后可交给系统打开。",
+        "Android 通过系统授权与安装确认打开 APK；桌面端打开安装器、DMG 或独立 AppImage，不静默覆盖当前安装。",
+        "GitHub API 限流时使用官方发布页与校验清单获取更新包信息，仍只接受官方 HTTPS 来源并保留发布页入口。",
+        "Windows 安装器新增与应用浅色玫红风格一致的顶部横幅和欢迎页侧图，保留标准安装升级流程。"
+      ],
+      "en": [
+        "Download platform-matched official update packages inside the app with progress, cancellation and SHA-256 verification, then explicitly open the verified package.",
+        "Android uses system permission and installation confirmation; desktop opens the installer, DMG or standalone AppImage without silently replacing the existing installation.",
+        "Use official release pages and checksum manifests when the GitHub API is rate-limited, retaining HTTPS source restrictions and the release-page fallback.",
+        "Refresh Windows installer header and welcome artwork with the app's light rose styling while preserving standard installation and upgrade behavior."
+      ],
+      "ja": [
+        "対応する公式更新パッケージをアプリ内でダウンロードし、進捗、キャンセル、SHA-256 検証を表示します。検証後に明示的に開けます。",
+        "Android はシステムの許可・インストール確認を使い、デスクトップではインストーラー、DMG、独立 AppImage を開きます。既存環境を無断で上書きしません。",
+        "GitHub API の制限時は公式公開ページと検証一覧を使用し、HTTPS の公式配信元制限と公開ページへの導線を維持します。",
+        "Windows インストーラーのヘッダーと歓迎画面をアプリの明るいローズ調に合わせ、標準の導入・更新手順を維持します。"
+      ]
+    }
+  },
+  {
     "version": "0.5.26",
     "date": "2026-11-13",
     "changes": {

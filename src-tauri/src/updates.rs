@@ -27,15 +27,36 @@ fn release_info(data: Value, current: &str) -> Result<Value, String> {
         "published_at": data["published_at"].as_str().unwrap_or(""),
         "release_name": data["name"].as_str().unwrap_or("").chars().take(200).collect::<String>(),
         "release_notes": data["body"].as_str().unwrap_or("").chars().take(40000).collect::<String>(),
-        "release_url": format!("https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/tag/v{version}")
+        "release_url": format!("https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/tag/v{version}"),
+        "download": crate::update_download::select_asset(&data, version, std::env::consts::OS, std::env::consts::ARCH).ok()
     }))
 }
 
 #[tauri::command]
 pub async fn check_update() -> Result<Value, String> {
+    check_release_for_download(fetch_release(None).await?)
+}
+
+pub fn check_release_for_download(data: Value) -> Result<Value, String> {
+    release_info(data, env!("CARGO_PKG_VERSION"))
+}
+
+pub async fn fetch_release(version: Option<&str>) -> Result<Value, String> {
+    match fetch_api_release(version).await {
+        Ok(data) => Ok(data),
+        Err(_) => crate::update_download::fetch_public_release(version).await,
+    }
+}
+
+async fn fetch_api_release(version: Option<&str>) -> Result<Value, String> {
+    let endpoint = match version {
+        Some(version) if version_parts(version).is_some() => format!("https://api.github.com/repos/MakotoArai-CN/WorkPlan-with-AI/releases/tags/v{version}"),
+        Some(_) => return Err("Invalid update version".into()),
+        None => "https://api.github.com/repos/MakotoArai-CN/WorkPlan-with-AI/releases/latest".into(),
+    };
     let client = reqwest::Client::builder().timeout(Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::none()).build().map_err(|e| e.to_string())?;
-    let mut response = client.get("https://api.github.com/repos/MakotoArai-CN/WorkPlan-with-AI/releases/latest")
+    let mut response = client.get(endpoint)
         .header("User-Agent", "WorkPlan").header("Accept", "application/vnd.github+json")
         .send().await.map_err(|_| "无法连接更新服务，请检查网络后重试".to_string())?;
     if !response.status().is_success() { return Err(format!("更新服务返回 HTTP {}，请稍后重试", response.status().as_u16())); }
@@ -44,8 +65,7 @@ pub async fn check_update() -> Result<Value, String> {
         if bytes.len() + chunk.len() > 512 * 1024 { return Err("更新信息超过允许大小".into()); }
         bytes.extend_from_slice(&chunk);
     }
-    let data = serde_json::from_slice(&bytes).map_err(|_| "更新服务返回格式无效")?;
-    release_info(data, env!("CARGO_PKG_VERSION"))
+    serde_json::from_slice(&bytes).map_err(|_| "更新服务返回格式无效".into())
 }
 
 #[cfg(test)]

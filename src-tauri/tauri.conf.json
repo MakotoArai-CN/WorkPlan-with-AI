@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WorkPlan",
-  "version": "0.5.26",
+  "version": "0.5.27",
   "identifier": "com.makotoarai.workplan",
   "build": {
     "beforeBuildCommand": "bun run build",
@@ -50,6 +50,9 @@
     "windows": {
       "wix": null,
       "nsis": {
+        "headerImage": "installer-art/header.bmp",
+        "sidebarImage": "installer-art/sidebar.bmp",
+        "installerIcon": "icons/icon.ico",
         "displayLanguageSelector": true,
         "installerHooks": "installer-hooks.nsh"
       }
