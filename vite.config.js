@@ -132,17 +132,26 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.view.View
+import android.widget.FrameLayout
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import org.json.JSONArray
@@ -154,6 +163,9 @@ class MainActivity : TauriActivity() {
   private var backPressedCallback: OnBackPressedCallback? = null
   private var backInvokedCallback: OnBackInvokedCallback? = null
   private var pendingBackDispatches = 0
+  private var systemBarTheme: String? = null
+  private var systemBarScrim: View? = null
+  private val systemBarPaint = Paint()
 
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
@@ -171,18 +183,81 @@ class MainActivity : TauriActivity() {
     }
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    applySystemBars()
     installBackHandlers()
   }
 
   override fun onResume() {
     super.onResume()
+    applySystemBars()
     installBackHandlers()
     flushPendingBackDispatches()
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    applySystemBars()
   }
 
   @Deprecated("Deprecated in AndroidX Activity")
   override fun onBackPressed() {
     dispatchBackToWeb()
+  }
+
+  fun setSystemBars(theme: String) {
+    if (theme !in setOf("light", "dark", "ocean", "forest", "sunset", "rose", "frosted")) return
+    runOnUiThread { systemBarTheme = theme; applySystemBars() }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun applySystemBars() {
+    val dark = systemBarTheme == "dark" || (systemBarTheme == null &&
+      (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES)
+    val color = Color.parseColor(when (systemBarTheme) {
+      "dark" -> "#0f172a"
+      "ocean" -> "#e0f2fe"
+      "forest" -> "#ecfdf5"
+      "sunset" -> "#fff7ed"
+      "rose" -> "#fff1f2"
+      "frosted" -> "#eef4ff"
+      else -> if (dark) "#0f172a" else "#ffffff"
+    })
+    systemBarPaint.color = color
+    window.statusBarColor = color
+    window.navigationBarColor = color
+    if (Build.VERSION.SDK_INT >= 29) {
+      window.isStatusBarContrastEnforced = false
+      window.isNavigationBarContrastEnforced = false
+    }
+    val decor = window.decorView
+    WindowInsetsControllerCompat(window, decor).apply {
+      isAppearanceLightStatusBars = !dark
+      isAppearanceLightNavigationBars = !dark
+    }
+    if (systemBarScrim == null && decor is FrameLayout) {
+      // Android 15 enforces transparent edge-to-edge bars. Paint only their
+      // insets, not app content, so wallpaper cannot tint the notification area.
+      val scrim = object : View(this) {
+        override fun onDraw(canvas: Canvas) {
+          super.onDraw(canvas)
+          val insets = ViewCompat.getRootWindowInsets(this) ?: return
+          val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+          val navigation = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+          canvas.drawRect(0f, 0f, width.toFloat(), status.top.toFloat(), systemBarPaint)
+          canvas.drawRect(0f, (height - navigation.bottom).toFloat(), width.toFloat(), height.toFloat(), systemBarPaint)
+          canvas.drawRect(0f, 0f, navigation.left.toFloat(), height.toFloat(), systemBarPaint)
+          canvas.drawRect((width - navigation.right).toFloat(), 0f, width.toFloat(), height.toFloat(), systemBarPaint)
+        }
+      }
+      scrim.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+      scrim.isClickable = false
+      scrim.isFocusable = false
+      ViewCompat.setOnApplyWindowInsetsListener(scrim) { view, insets -> view.invalidate(); insets }
+      decor.addView(scrim, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+      systemBarScrim = scrim
+      ViewCompat.requestApplyInsets(scrim)
+    }
+    systemBarScrim?.invalidate()
   }
 
   private fun installBackHandlers() {
@@ -354,6 +429,9 @@ class MainActivity : TauriActivity() {
 }
 
 class WorkPlanAndroidBridge(private val activity: MainActivity) {
+  @JavascriptInterface
+  fun setSystemBars(theme: String) { activity.setSystemBars(theme) }
+
   @JavascriptInterface
   fun requestStoragePermissions() {
     activity.runOnUiThread {
@@ -680,11 +758,16 @@ const ANDROID_LIGHT_THEME = `<resources xmlns:tools="http://schemas.android.com/
         <item name="windowSplashScreenIconBackgroundColor">#2563eb</item>
         <item name="windowSplashScreenAnimationDuration">320</item>
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#ffffff</item>
         <item name="android:navigationBarColor">#f8fafc</item>
         <item name="postSplashScreenTheme">@style/Theme.workplan</item>
     </style>
 
     <style name="Theme.workplan" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#2563eb</item>
+        <item name="colorPrimaryDark">#ffffff</item>
+        <item name="android:statusBarColor">#ffffff</item>
+        <item name="android:windowLightNavigationBar">true</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">#f8fafc</item>
         <item name="android:navigationBarColor">#f8fafc</item>
@@ -700,10 +783,17 @@ const ANDROID_NIGHT_THEME = `<resources xmlns:tools="http://schemas.android.com/
         <item name="windowSplashScreenIconBackgroundColor">#1d4ed8</item>
         <item name="windowSplashScreenAnimationDuration">320</item>
         <item name="android:navigationBarColor">#0f172a</item>
+        <item name="android:statusBarColor">#0f172a</item>
+        <item name="android:windowLightStatusBar">false</item>
         <item name="postSplashScreenTheme">@style/Theme.workplan</item>
     </style>
 
     <style name="Theme.workplan" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#60a5fa</item>
+        <item name="colorPrimaryDark">#0f172a</item>
+        <item name="android:statusBarColor">#0f172a</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowBackground">#0f172a</item>
         <item name="android:navigationBarColor">#0f172a</item>
         <item name="android:fontFamily">sans</item>

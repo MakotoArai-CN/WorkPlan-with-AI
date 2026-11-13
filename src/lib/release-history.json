@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.5.26",
+    "date": "2026-11-13",
+    "changes": {
+      "zh": [
+        "Android 状态栏和导航栏随当前主题同步背景与图标明暗，修复继承系统紫色及主题切换后颜色不一致的问题。",
+        "为透明系统栏绘制独立安全区域底色，避免 Android 15 等边到边布局透出壁纸颜色；保留安全边距和触摸操作。",
+        "启动阶段与运行时共用系统栏主题映射，旧版桥接和浏览器环境保持兼容。"
+      ],
+      "en": [
+        "Synchronize Android status/navigation bar backgrounds and icon contrast with the app theme instead of inherited purple defaults or stale theme colors.",
+        "Paint dedicated system-bar inset surfaces for transparent edge-to-edge layouts such as Android 15, preserving safe areas and touch handling.",
+        "Share system-bar theme mapping between startup and runtime, with compatibility for older bridges and browsers."
+      ],
+      "ja": [
+        "Android のステータスバーとナビゲーションバーの色・アイコンをアプリのテーマに同期し、既定の紫色や切替時の不一致を修正しました。",
+        "Android 15 等の透明なシステムバー領域に専用の背景を描画し、壁紙の色が透ける問題を防ぎます。安全余白とタッチ操作は維持します。",
+        "起動時と実行中でシステムバーのテーマ設定を共通化し、古いブリッジやブラウザーとの互換性を保ちます。"
+      ]
+    }
+  },
+  {
     "version": "0.5.25",
     "date": "2026-11-13",
     "changes": {
