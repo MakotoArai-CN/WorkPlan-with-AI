@@ -4,22 +4,37 @@
     "date": "2026-11-13",
     "changes": {
       "zh": [
-        "检查更新支持在应用内下载匹配当前平台的官方更新包，显示进度、取消和 SHA-256 校验，校验通过后可交给系统打开。",
-        "Android 通过系统授权与安装确认打开 APK；桌面端打开安装器、DMG 或独立 AppImage，不静默覆盖当前安装。",
-        "GitHub API 限流时使用官方发布页与校验清单获取更新包信息，仍只接受官方 HTTPS 来源并保留发布页入口。",
-        "Windows 安装器新增与应用浅色玫红风格一致的顶部横幅和欢迎页侧图，保留标准安装升级流程。"
+        "应用内下载提供进度、取消、SHA-256 校验及官方源与内置镜像后备；全部下载来源失败时打开对应官方发布页。",
+        "Linux 仅为确认由 dpkg、rpm 或 pacman 管理的安装下载对应 deb、rpm 或 zst 到系统下载目录；不混装 AppImage，不执行系统包管理器，不覆盖已有下载文件。",
+        "Android 下载校验完成后交给系统安装器；Windows 使用安装器更新模式，升级及静默卸载不触发本地数据删除提示。",
+        "Windows 安装器新增顶部横幅和欢迎侧图。",
+        "修复 Android 边到边布局下顶部内容被系统栏遮挡、键盘弹出后底部操作不可见的问题，兼容横竖屏切换。",
+        "Markdown 图表按需加载并共享初始化，减少普通内容的启动开销；保留 SVG 文字标签及固有尺寸，修复标签缺失和异常放大。编辑器图标复用本地外部脚本，避免重复加载、同步请求和 CSP 内联执行错误。",
+        "隐私政策更新至 1.3，说明下载镜像接收的请求元数据及官方校验要求；原有用户需重新确认。",
+        "修改主密码时分片解密并准备新密文，中途锁定或失败不提交未完成结果；解锁后复用未改动条目的密文，避免首次保存重复加密整个密码库，并保留空密码字段的兼容性。",
+        "本地数据库的大快照分片传输，原生收齐并校验摘要后一次写入，减少主线程的大块 IPC 序列化；拒绝缺片、乱序、重复、过期及冲突写入，页面重载后清理未完成会话，保留旧调用、加密与失败重试。"
       ],
       "en": [
-        "Download platform-matched official update packages inside the app with progress, cancellation and SHA-256 verification, then explicitly open the verified package.",
-        "Android uses system permission and installation confirmation; desktop opens the installer, DMG or standalone AppImage without silently replacing the existing installation.",
-        "Use official release pages and checksum manifests when the GitHub API is rate-limited, retaining HTTPS source restrictions and the release-page fallback.",
-        "Refresh Windows installer header and welcome artwork with the app's light rose styling while preserving standard installation and upgrade behavior."
+        "In-app downloads include progress, cancellation, SHA-256 verification and built-in transport mirrors; open the official release page only after download sources fail.",
+        "On Linux, download matching deb/rpm/zst packages to system Downloads only when the running executable is owned by the matching package manager; never mix in AppImages, run a package manager or overwrite existing downloads.",
+        "Hand verified Android downloads to the system installer. Windows uses installer update mode; upgrade or silent uninstall must not prompt to delete local data.",
+        "Refresh Windows installer header and welcome artwork.",
+        "Keep Android content inside system bars and cutouts, keep bottom actions visible above the keyboard, and restore the layout after rotation or keyboard dismissal.",
+        "Load Markdown diagrams on demand with shared initialization, preserving SVG text labels and intrinsic dimensions. Reuse bundled external editor icon scripts to avoid repeated loads, synchronous requests and inline-script CSP errors.",
+        "Update the privacy policy to 1.3 with mirror request metadata and official verification requirements; renewed acceptance is required.",
+        "Time-slice decryption and new ciphertext preparation during master-password changes, without committing partial results after a lock or failure. Reuse unchanged ciphertext after unlock and preserve compatibility with empty secret fields.",
+        "Transfer large local snapshots in bounded chunks and commit only after native completeness and digest checks; reject missing, reordered, duplicate, expired or conflicting transfers and clean up interrupted sessions after reload, while retaining legacy calls, encryption and retries."
       ],
       "ja": [
-        "対応する公式更新パッケージをアプリ内でダウンロードし、進捗、キャンセル、SHA-256 検証を表示します。検証後に明示的に開けます。",
-        "Android はシステムの許可・インストール確認を使い、デスクトップではインストーラー、DMG、独立 AppImage を開きます。既存環境を無断で上書きしません。",
-        "GitHub API の制限時は公式公開ページと検証一覧を使用し、HTTPS の公式配信元制限と公開ページへの導線を維持します。",
-        "Windows インストーラーのヘッダーと歓迎画面をアプリの明るいローズ調に合わせ、標準の導入・更新手順を維持します。"
+        "アプリ内ダウンロードは進捗、キャンセル、SHA-256 検証と内蔵ミラーを利用し、全配信元で失敗した場合に公式公開ページを開きます。",
+        "Linux では実行ファイルを管理するパッケージマネージャーを確認し、対応する deb/rpm/zst だけをシステムのダウンロード先に保存します。AppImage の混在、管理ツールの実行、既存ファイルの上書きは行いません。",
+        "Android の検証済みパッケージをシステムインストーラーへ渡します。Windows は更新モードを使用し、更新や無人アンインストールでローカルデータの削除確認を行いません。",
+        "Windows インストーラーのヘッダーとウェルカム画像を更新しました。",
+        "Android の画面端レイアウトでシステムバーやキーボードが操作を隠す問題を修正し、画面回転やキーボード終了後も余白を正しく復元します。",
+        "Markdown の図を必要時だけ読み込み、初期化を共有します。SVG の文字と固有サイズを保ち、ラベル消失と過度な拡大を修正しました。同梱アイコンスクリプトを再利用し、重複読込・同期通信・CSP エラーを防ぎます。",
+        "プライバシーポリシーを 1.3 に更新し、ミラーへ送信するメタデータと公式検証の要件を明記しました。再同意が必要です。",
+        "マスターパスワード変更時の復号と暗号化を分割し、途中のロックや失敗では未完了の結果を保存しません。解除後は未変更の暗号文を再利用し、空のパスワード項目との互換性を維持します。",
+        "大きなローカル DB スナップショットを分割して転送し、ネイティブで全片とダイジェストを確認して一度に保存します。欠落・順序違い・重複・期限切れ・競合を拒否し、再読込後に未完了セッションを解放します。旧呼び出し・暗号化・再試行は維持します。"
       ]
     }
   },

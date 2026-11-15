@@ -1,3 +1,4 @@
+use crate::update_files::publish_without_overwrite;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -19,6 +20,8 @@ pub struct Asset {
     name: String,
     size: u64,
     digest: String,
+    #[serde(default)]
+    download_only: bool,
     #[serde(skip_serializing)]
     url: String,
 }
@@ -35,7 +38,7 @@ fn asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
         ("windows", "x64" | "arm64" | "x86") => Ok(format!("WorkPlan_{version}_{arch}-setup.exe")),
         ("macos", "x64") => Ok(format!("WorkPlan_{version}_x64.dmg")),
         ("macos", "arm64") => Ok(format!("WorkPlan_{version}_aarch64.dmg")),
-        ("linux", "x64") => Ok(format!("WorkPlan_{version}_amd64.AppImage")),
+        ("linux", "x64") => linux_asset_name(version),
         ("android", _) => Ok(format!(
             "workplan-android-{}.apk",
             if arch == "x64" { "x86_64" } else { arch }
@@ -44,14 +47,33 @@ fn asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
     }
 }
 
+fn linux_asset_name(version: &str) -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux_update::installed_package()
+            .map(|package| crate::linux_update::asset_name(version, package))
+            .ok_or(
+                "Cannot identify a supported deb/rpm/zst installation; use the release page".into(),
+            )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = version;
+        Err("Linux installation cannot be detected on this platform".into())
+    }
+}
+
 pub fn select_asset(data: &Value, version: &str, os: &str, arch: &str) -> Result<Asset, String> {
+    select_named_asset(data, version, &asset_name(version, os, arch)?)
+}
+
+fn select_named_asset(data: &Value, version: &str, name: &str) -> Result<Asset, String> {
     if data["draft"] != false
         || data["prerelease"] != false
         || data["tag_name"] != format!("v{version}")
     {
         return Err("Not a stable matching release".into());
     }
-    let name = asset_name(version, os, arch)?;
     let matches: Vec<_> = data["assets"]
         .as_array()
         .ok_or("Release has no assets")?
@@ -80,9 +102,12 @@ pub fn select_asset(data: &Value, version: &str, os: &str, arch: &str) -> Result
         return Err("Package is not from the official release".into());
     }
     Ok(Asset {
-        name,
+        name: name.into(),
         size,
         digest: digest.to_ascii_lowercase(),
+        download_only: name.ends_with(".deb")
+            || name.ends_with(".rpm")
+            || name.ends_with(".pkg.tar.zst"),
         url,
     })
 }
@@ -101,6 +126,58 @@ fn allowed_url(url: &url::Url) -> bool {
                     | "github-releases.githubusercontent.com"
             )
         )
+}
+
+const MIRRORS: [&str; 2] = ["https://ghfast.top/", "https://gh-proxy.com/"];
+
+fn package_sources(official: &str) -> Result<Vec<String>, String> {
+    let parsed = url::Url::parse(official).map_err(|_| "Invalid package source")?;
+    if !allowed_url(&parsed)
+        || parsed.host_str() != Some("github.com")
+        || !parsed
+            .path()
+            .starts_with("/MakotoArai-CN/WorkPlan-with-AI/releases/download/v")
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("Invalid official package source".into());
+    }
+    Ok(std::iter::once(official.to_string())
+        .chain(MIRRORS.iter().map(|mirror| format!("{mirror}{official}")))
+        .collect())
+}
+
+fn allowed_package_url(url: &url::Url) -> bool {
+    if allowed_url(url) {
+        return true;
+    }
+    if url.scheme() != "https"
+        || url.username() != ""
+        || url.password().is_some()
+        || url.port_or_known_default() != Some(443)
+    {
+        return false;
+    }
+    matches!(url.host_str(), Some("ghfast.top" | "gh-proxy.com"))
+        && url
+            .path()
+            .starts_with("/https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v")
+}
+
+fn package_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(12))
+        .read_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(1800))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() < 5 && allowed_package_url(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .build()
+        .map_err(|error| error.to_string())
 }
 
 fn release_version(url: &url::Url) -> Result<String, String> {
@@ -169,7 +246,11 @@ pub async fn fetch_public_release(requested: Option<&str>) -> Result<Value, Stri
     if requested.is_some_and(|requested| requested != version) {
         return Err("The latest release changed; check for updates again".into());
     }
-    let name = asset_name(&version, std::env::consts::OS, std::env::consts::ARCH)?;
+    let Ok(name) = asset_name(&version, std::env::consts::OS, std::env::consts::ARCH) else {
+        return Ok(
+            json!({"tag_name":format!("v{version}"),"draft":false,"prerelease":false,"assets":[]}),
+        );
+    };
     let base =
         format!("https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v{version}");
     let mut response = client
@@ -197,23 +278,35 @@ pub async fn fetch_public_release(requested: Option<&str>) -> Result<Value, Stri
         &name,
     )?;
     let package_url = format!("{base}/{name}");
-    let package = client
-        .head(&package_url)
-        .header("User-Agent", "WorkPlan")
-        .header("Accept-Encoding", "identity")
-        .send()
-        .await
-        .map_err(|_| "Unable to check official package size")?;
-    if !package.status().is_success() {
-        return Err("Official package is unavailable".into());
+    // Mirrors supply transport only. The hash above must have been obtained
+    // from the official HTTPS release; never use a mirror-provided checksum.
+    let transport = package_client()?;
+    let mut size = None;
+    for source in package_sources(&package_url)? {
+        let Ok(package) = transport
+            .head(source)
+            .header("User-Agent", "WorkPlan")
+            .header("Accept-Encoding", "identity")
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+        else {
+            continue;
+        };
+        if !package.status().is_success() || !allowed_package_url(package.url()) {
+            continue;
+        }
+        size = package
+            .headers()
+            .get(reqwest::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|size| *size > 0 && *size <= MAX_SIZE);
+        if size.is_some() {
+            break;
+        }
     }
-    let size = package
-        .headers()
-        .get(reqwest::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|size| *size > 0 && *size <= MAX_SIZE)
-        .ok_or("Official package size is unavailable")?;
+    let size = size.ok_or("Official package and built-in mirrors are unavailable")?;
     Ok(
         json!({"tag_name":format!("v{version}"),"draft":false,"prerelease":false,"assets":[{"name":name,"size":size,"digest":format!("sha256:{hash}"),"browser_download_url":package_url}]}),
     )
@@ -287,6 +380,15 @@ impl Drop for DownloadGuard {
 }
 
 fn verify_file(path: &std::path::Path, asset: &Asset) -> Result<(), String> {
+    verify_file_checked(path, asset, || Ok(()))
+}
+
+fn verify_file_checked(
+    path: &std::path::Path,
+    asset: &Asset,
+    check: impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    check()?;
     let metadata = fs::symlink_metadata(path).map_err(|_| "Downloaded package is missing")?;
     if !metadata.is_file() || metadata.len() != asset.size {
         return Err("Downloaded package size changed".into());
@@ -295,6 +397,7 @@ fn verify_file(path: &std::path::Path, asset: &Asset) -> Result<(), String> {
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 65536];
     loop {
+        check()?;
         let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
         if n == 0 {
             break;
@@ -304,7 +407,7 @@ fn verify_file(path: &std::path::Path, asset: &Asset) -> Result<(), String> {
     if format!("{:x}", hash.finalize()) != asset.digest {
         return Err("Downloaded package SHA-256 verification failed".into());
     }
-    Ok(())
+    check()
 }
 
 fn cleanup_old_packages(directory: &std::path::Path) {
@@ -388,6 +491,55 @@ pub fn cancel_update_download(id: String) {
     }
 }
 
+async fn receive_from_sources<F, Fut>(
+    sources: Vec<String>,
+    file: &mut fs::File,
+    asset: &Asset,
+    cancellation: &Cancellation,
+    mut fetch: F,
+    notify: impl Fn(Value),
+) -> Result<(), String>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<reqwest::Response, String>>,
+{
+    use std::io::{Seek, SeekFrom};
+    for (attempt, source) in sources.into_iter().enumerate() {
+        if cancellation.canceled.load(Ordering::Relaxed) {
+            return Err("Download canceled".into());
+        }
+        file.set_len(0).map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|error| error.to_string())?;
+        notify(json!({"received":0,"total":asset.size,"stage":"downloading","attempt":attempt}));
+        let result = cancelable(
+            async {
+                let response = fetch(source).await?;
+                receive_package(
+                    response,
+                    file,
+                    asset,
+                    &cancellation.canceled,
+                    |mut event| {
+                        event["attempt"] = json!(attempt);
+                        notify(event);
+                    },
+                )
+                .await
+            },
+            cancellation,
+        )
+        .await;
+        if result.is_ok() {
+            return Ok(());
+        }
+        if cancellation.canceled.load(Ordering::Relaxed) {
+            return Err("Download canceled".into());
+        }
+    }
+    Err("Official source and built-in mirrors failed or checksum did not match".into())
+}
+
 #[tauri::command]
 pub async fn download_update(
     app: tauri::AppHandle,
@@ -435,15 +587,27 @@ pub async fn download_update(
         std::env::consts::ARCH,
     )?;
     check_cancel()?;
-    let directory = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?
-        .join("updates");
+    let directory = if asset.download_only {
+        let directory = app
+            .path()
+            .download_dir()
+            .map_err(|_| "System Downloads directory is unavailable")?;
+        if !directory.is_absolute() {
+            return Err("System Downloads directory is invalid".into());
+        }
+        directory
+    } else {
+        app.path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("updates")
+    };
     fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     // Only our own nonce-prefixed files are eligible. Do not recurse or touch
     // exported packages, installation data, or arbitrary user files.
-    cleanup_old_packages(&directory);
+    if !asset.download_only {
+        cleanup_old_packages(&directory);
+    }
     let mut random = [0u8; 16];
     getrandom::fill(&mut random).map_err(|e| e.to_string())?;
     let nonce: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -458,53 +622,62 @@ pub async fn download_update(
         options.mode(0o600);
     }
     let mut file = options.open(&partial).map_err(|e| e.to_string())?;
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(20))
-        .read_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(1800))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() < 5 && allowed_url(attempt.url()) {
-                attempt.follow()
-            } else {
-                attempt.stop()
+    let client = package_client()?;
+    receive_from_sources(
+        package_sources(&asset.url)?,
+        &mut file,
+        &asset,
+        &cancellation,
+        |source| {
+            let client = client.clone();
+            async move {
+                let response = client
+                    .get(source)
+                    .header("User-Agent", "WorkPlan")
+                    .header("Accept-Encoding", "identity")
+                    .send()
+                    .await
+                    .map_err(|_| "Package download connection failed".to_string())?;
+                if !response.status().is_success() || !allowed_package_url(response.url()) {
+                    return Err(format!(
+                        "Update download returned HTTP {}",
+                        response.status().as_u16()
+                    ));
+                }
+                Ok(response)
             }
-        }))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let response = cancelable(
-        async {
-            client
-                .get(&asset.url)
-                .header("User-Agent", "WorkPlan")
-                .header("Accept-Encoding", "identity")
-                .send()
-                .await
-                .map_err(|_| "Unable to download the update package".to_string())
         },
-        &cancellation,
-    )
-    .await?;
-    if !response.status().is_success() || !allowed_url(response.url()) {
-        return Err(format!(
-            "Update download returned HTTP {}",
-            response.status().as_u16()
-        ));
-    }
-    cancelable(
-        receive_package(
-            response,
-            &mut file,
-            &asset,
-            &cancellation.canceled,
-            |mut event| {
-                event["id"] = json!(id);
-                let _ = progress.send(event);
-            },
-        ),
-        &cancellation,
+        |mut event| {
+            event["id"] = json!(id);
+            let _ = progress.send(event);
+        },
     )
     .await?;
     drop(file);
+    if asset.download_only {
+        let token = cancellation.clone();
+        // Slow/removable Downloads filesystems must not block async work or
+        // make cancellation stop working during publication and verification.
+        return tauri::async_runtime::spawn_blocking(move || {
+            let mut guard = guard;
+            let check = || {
+                if token.canceled.load(Ordering::Relaxed) {
+                    Err("Download canceled".to_string())
+                } else {
+                    Ok(())
+                }
+            };
+            let destination = publish_without_overwrite(&partial, &directory, &asset.name, || {
+                check().map_err(|error| std::io::Error::new(std::io::ErrorKind::Interrupted, error))
+            })?;
+            guard.partial = Some(destination.clone());
+            verify_file_checked(&destination, &asset, check)?;
+            guard.partial = None;
+            Ok(json!({"id":id,"name":asset.name,"size":asset.size,"verified":true,"download_only":true,"saved_path":destination.to_string_lossy()}))
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
     fs::rename(&partial, &path).map_err(|e| e.to_string())?;
     guard.partial = Some(path.clone());
     check_cancel()?;
@@ -518,40 +691,55 @@ pub async fn download_update(
         });
     guard.partial = None;
     if let Some(previous) = previous {
-        let _ = fs::remove_file(previous.path);
+        if !previous.asset.download_only {
+            let _ = fs::remove_file(previous.path);
+        }
     }
     Ok(json!({"id":id,"name":asset.name,"size":asset.size,"verified":true}))
 }
 
 #[tauri::command]
 pub async fn open_downloaded_update(id: String) -> Result<Value, String> {
-    let record = verified()
-        .lock()
-        .map_err(|e| e.to_string())?
-        .as_ref()
-        .filter(|item| item.id == id)
-        .cloned()
-        .ok_or("No verified download for this request")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        verify_file(&record.path, &record.asset)?;
-        #[cfg(target_os = "android")]
-        {
-            return Ok(json!({"android_path": record.path.to_string_lossy()}));
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            #[cfg(target_os = "linux")]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = id;
+        return Err("Linux updates are download-only; use the saved deb/rpm/zst package with your system package manager".into());
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let record = verified()
+            .lock()
+            .map_err(|e| e.to_string())?
+            .as_ref()
+            .filter(|item| item.id == id)
+            .cloned()
+            .ok_or("No verified download for this request")?;
+        tauri::async_runtime::spawn_blocking(move || {
+            verify_file(&record.path, &record.asset)?;
+            #[cfg(target_os = "android")]
             {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&record.path, fs::Permissions::from_mode(0o700))
-                    .map_err(|e| e.to_string())?;
+                return Ok(json!({"android_path": record.path.to_string_lossy()}));
             }
-            open::that(&record.path).map_err(|e| e.to_string())?;
-            Ok(json!({"opened":true}))
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
+            #[cfg(not(target_os = "android"))]
+            {
+                #[cfg(target_os = "windows")]
+                {
+                    std::process::Command::new(&record.path)
+                        .arg("/UPDATE")
+                        .spawn()
+                        .map_err(|error| error.to_string())?;
+                    return Ok(json!({"opened":true}));
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    open::that(&record.path).map_err(|e| e.to_string())?;
+                    Ok(json!({"opened":true}))
+                }
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
 }
 
 #[cfg(test)]
@@ -568,7 +756,6 @@ mod tests {
             ("windows", "aarch64"),
             ("windows", "x86_64"),
             ("macos", "aarch64"),
-            ("linux", "x86_64"),
             ("android", "arm"),
             ("android", "aarch64"),
             ("android", "x86_64"),
@@ -606,6 +793,66 @@ mod tests {
         ] {
             assert!(!allowed_url(&url::Url::parse(url).unwrap()));
         }
+    }
+
+    #[test]
+    fn mirrors_are_transport_only_and_cannot_change_repository_or_verification_rules() {
+        let official = "https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v0.5.27/WorkPlan_0.5.27_amd64.deb";
+        let sources = package_sources(official).unwrap();
+        assert_eq!(sources[0], official);
+        assert_eq!(sources.len(), 3);
+        for source in &sources {
+            assert!(allowed_package_url(&url::Url::parse(source).unwrap()));
+        }
+        for invalid in ["https://github.com/other/repo/releases/download/v1.0.0/payload", "https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v1.0.0/payload?mirror=evil", "http://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v1.0.0/payload"] {
+            assert!(package_sources(invalid).is_err());
+        }
+        for invalid in ["https://ghfast.top/https://attacker.invalid/payload", "https://ghfast.top.attacker.invalid/https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v1.0.0/a", "http://gh-proxy.com/https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v1.0.0/a"] {
+            assert!(!allowed_package_url(&url::Url::parse(invalid).unwrap()));
+        }
+        assert!(!allowed_url(&url::Url::parse(&sources[1]).unwrap()));
+    }
+
+    #[test]
+    fn distribution_packages_never_cross_select_or_become_executable_updates() {
+        for package in [
+            crate::linux_update::Package::Deb,
+            crate::linux_update::Package::Rpm,
+            crate::linux_update::Package::Arch,
+        ] {
+            let name = crate::linux_update::asset_name("0.6.0", package);
+            let mut data = fixture("windows", "x86_64");
+            data["assets"][0]["name"] = json!(name);
+            data["assets"][0]["browser_download_url"] = json!(format!(
+                "https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v0.6.0/{name}"
+            ));
+            let asset = select_named_asset(&data, "0.6.0", &name).unwrap();
+            assert!(asset.download_only);
+            assert!(!asset.name.ends_with(".AppImage"));
+            assert!(select_named_asset(&data, "0.6.0", "workplan-unrelated.rpm").is_err());
+        }
+    }
+
+    #[test]
+    fn download_publication_keeps_existing_files_and_does_not_execute_or_overwrite() {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("workplan-publish-{:x}", Sha256::digest(random)));
+        fs::create_dir(&directory).unwrap();
+        let existing = directory.join("workplan.pkg.tar.zst");
+        let partial = directory.join("isolated.part");
+        fs::write(&existing, b"user-owned-package").unwrap();
+        fs::write(&partial, b"verified-fixture").unwrap();
+        let saved =
+            publish_without_overwrite(&partial, &directory, "workplan.pkg.tar.zst", || Ok(())).unwrap();
+        assert_ne!(saved, existing);
+        assert_eq!(fs::read(&existing).unwrap(), b"user-owned-package");
+        assert_eq!(fs::read(&saved).unwrap(), b"verified-fixture");
+        assert!(!partial.exists());
+        fs::remove_file(existing).unwrap();
+        fs::remove_file(saved).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]
@@ -650,6 +897,43 @@ mod tests {
         fs::write(&path, b"longer").unwrap();
         assert!(verify_file(&path, &asset).is_err());
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn canceled_verification_cleans_published_file_but_preserves_existing_package() {
+        use std::cell::Cell;
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "workplan-cancel-publication-{:x}", Sha256::digest(random)
+        ));
+        fs::create_dir(&directory).unwrap();
+        let existing = directory.join("fixture.rpm");
+        let partial = directory.join("verified.part");
+        let bytes = vec![11; 256 * 1024];
+        fs::write(&existing, b"keep-existing").unwrap();
+        fs::write(&partial, &bytes).unwrap();
+        let asset = Asset {
+            name: "fixture.rpm".into(),
+            size: bytes.len() as u64,
+            digest: format!("{:x}", Sha256::digest(&bytes)),
+            download_only: true,
+            url: String::new(),
+        };
+        let published = publish_without_overwrite(&partial, &directory, &asset.name, || Ok(())).unwrap();
+        let guard = DownloadGuard { id: "isolated-verification-cancel".into(), partial: Some(published.clone()) };
+        let checks = Cell::new(0);
+        let result = verify_file_checked(&published, &asset, || {
+            checks.set(checks.get() + 1);
+            if checks.get() == 3 { Err("Download canceled".into()) } else { Ok(()) }
+        });
+        assert_eq!(result.unwrap_err(), "Download canceled");
+        drop(guard);
+        assert!(!published.exists());
+        assert!(!partial.exists());
+        assert_eq!(fs::read(&existing).unwrap(), b"keep-existing");
+        fs::remove_file(existing).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]
@@ -737,6 +1021,92 @@ mod tests {
     }
 
     #[test]
+    fn failed_or_corrupt_sources_retry_from_zero_and_the_final_verified_package_is_exact() {
+        for all_bad in [false, true] {
+            let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = server.local_addr().unwrap();
+            let worker = std::thread::spawn(move || {
+                for attempt in 0..3 {
+                    let (mut socket, _) = server.accept().unwrap();
+                    let mut request = [0u8; 4096];
+                    let _ = socket.read(&mut request);
+                    // first source returns HTTP failure, second valid-size but
+                    // corrupt data; last source succeeds only in the first case.
+                    let status = if attempt == 0 {
+                        "503 Unavailable"
+                    } else {
+                        "200 OK"
+                    };
+                    let body = if attempt == 2 && !all_bad {
+                        "test"
+                    } else {
+                        "evil"
+                    };
+                    let _ = write!(
+                        socket,
+                        "HTTP/1.1 {status}\r\nContent-Length: 4\r\nConnection: close\r\n\r\n{body}"
+                    );
+                }
+            });
+            let mut random = [0u8; 16];
+            getrandom::fill(&mut random).unwrap();
+            let path =
+                std::env::temp_dir().join(format!("workplan-mirrors-{:x}", Sha256::digest(random)));
+            let guard = DownloadGuard {
+                id: "mirror-test".into(),
+                partial: Some(path.clone()),
+            };
+            let mut file = fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+            let asset =
+                select_asset(&fixture("windows", "x86_64"), "0.6.0", "windows", "x86_64").unwrap();
+            let events = Mutex::new(Vec::new());
+            let result = tauri::async_runtime::block_on(async {
+                receive_from_sources(
+                    vec!["official".into(), "mirror-one".into(), "mirror-two".into()],
+                    &mut file,
+                    &asset,
+                    &Cancellation::default(),
+                    |_| async {
+                        // Only test transport uses loopback. Production creates
+                        // requests from package_sources and enforces its allowlist.
+                        let response = reqwest::Client::new()
+                            .get(format!("http://{address}"))
+                            .send()
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        if !response.status().is_success() {
+                            return Err("test source unavailable".into());
+                        }
+                        Ok(response)
+                    },
+                    |event| events.lock().unwrap().push(event),
+                )
+                .await
+            });
+            assert_eq!(result.is_ok(), !all_bad);
+            drop(file);
+            let events = events.lock().unwrap();
+            let restarts: Vec<_> = events
+                .iter()
+                .filter(|event| event["stage"] == "downloading" && event["received"] == 0)
+                .map(|event| event["attempt"].as_u64().unwrap())
+                .collect();
+            assert!(restarts.contains(&0) && restarts.contains(&1) && restarts.contains(&2));
+            if !all_bad {
+                assert_eq!(fs::read(&path).unwrap(), b"test");
+                verify_file(&path, &asset).unwrap();
+            }
+            drop(guard);
+            assert!(!path.exists());
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
     fn cancellation_interrupts_a_pending_network_future_without_waiting_for_timeout() {
         let token = Arc::new(Cancellation::default());
         let other = token.clone();
@@ -807,5 +1177,82 @@ mod tests {
             drop(guard);
             assert!(!path.exists());
         });
+    }
+
+    #[test]
+    #[ignore = "Needs official metadata in WORKPLAN_TEST_RELEASE_METADATA; downloads isolated deb/rpm/zst fixtures without installing"]
+    fn published_linux_packages_through_mirror_match_official_digests() {
+        let metadata = std::env::var("WORKPLAN_TEST_RELEASE_METADATA")
+            .expect("Provide the official GitHub release metadata JSON path");
+        let data: Value = serde_json::from_slice(&fs::read(metadata).unwrap()).unwrap();
+        let version = data["tag_name"].as_str().unwrap().trim_start_matches('v');
+        for package in [
+            crate::linux_update::Package::Deb,
+            crate::linux_update::Package::Rpm,
+            crate::linux_update::Package::Arch,
+        ] {
+            let name = crate::linux_update::asset_name(version, package);
+            let asset = select_named_asset(&data, version, &name).unwrap();
+            let mut random = [0u8; 16];
+            getrandom::fill(&mut random).unwrap();
+            let path = std::env::temp_dir().join(format!(
+                "workplan-mirror-fixture-{:x}",
+                Sha256::digest(random)
+            ));
+            let guard = DownloadGuard {
+                id: "isolated-mirror-download".into(),
+                partial: Some(path.clone()),
+            };
+            let mut file = fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+            tauri::async_runtime::block_on(async {
+                let client = package_client().unwrap();
+                // Exercise an actual built-in mirror using a hash obtained via
+                // authenticated GitHub metadata outside the transfer process.
+                let sources = package_sources(&asset.url)
+                    .unwrap()
+                    .into_iter()
+                    .skip(1)
+                    .collect();
+                receive_from_sources(
+                    sources,
+                    &mut file,
+                    &asset,
+                    &Cancellation::default(),
+                    |source| {
+                        let client = client.clone();
+                        async move {
+                            let response = client
+                                .get(source)
+                                .header("User-Agent", "WorkPlan")
+                                .header("Accept-Encoding", "identity")
+                                .send()
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            if !response.status().is_success()
+                                || !allowed_package_url(response.url())
+                            {
+                                return Err("Mirror fixture response invalid".into());
+                            }
+                            Ok(response)
+                        }
+                    },
+                    |_| {},
+                )
+                .await
+                .unwrap();
+            });
+            drop(file);
+            verify_file(&path, &asset).unwrap();
+            println!(
+                "Verified mirror download {} ({} bytes); no installation attempted",
+                asset.name, asset.size
+            );
+            drop(guard);
+            assert!(!path.exists());
+        }
     }
 }

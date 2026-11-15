@@ -26,9 +26,13 @@ use base64::Engine;
 mod autostart;
 mod device;
 mod local_db;
+mod snapshot_transfer;
 mod local_paths;
 mod updates;
 mod update_download;
+mod update_files;
+#[cfg(any(target_os = "linux", test))]
+mod linux_update;
 mod vault_guard;
 mod locale;
 
@@ -1604,6 +1608,10 @@ pub fn run() {
             device::reset_device_key,
             local_db::local_db_load,
             local_db::local_db_save,
+            local_db::local_db_transfer_begin,
+            local_db::local_db_transfer_append,
+            local_db::local_db_transfer_commit,
+            local_db::local_db_transfer_abort,
             vault_guard::vault_verify_master,
             local_db::local_db_info,
             local_db::local_db_backup,

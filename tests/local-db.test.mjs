@@ -23,9 +23,10 @@ mock.module('@tauri-apps/api/core', () => ({
         if (cmd === 'local_db_load') return dbContent;
         if (cmd === 'local_db_recover') return recoverContent;
         if (cmd === 'local_db_save') {
-            dbContent = args.content;
-            writes.push(JSON.parse(args.content));
-            return { path: 'C:/Users/test/.workplan/data.json', backupDir: 'C:/Users/test/.workplan/backups', exists: true, bytes: args.content.length, savedAt: Date.now() / 1000, backups: 1 };
+            expect(typeof args.content).toBe('object');
+            dbContent = JSON.stringify(args.content);
+            writes.push(JSON.parse(dbContent));
+            return { path: 'C:/Users/test/.workplan/data.json', backupDir: 'C:/Users/test/.workplan/backups', exists: true, bytes: dbContent.length, savedAt: Date.now() / 1000, backups: 1 };
         }
         throw new Error(`unexpected ${cmd}`);
     }
@@ -261,6 +262,26 @@ describe('home-directory local database', () => {
         });
         await initLocalDatabase();
         expect(localStorage.getItem('workplan_access_key')).toBeNull();
+    });
+
+    test('snapshot deduplication compares exact keys and values, not JSON escaping or key order', async () => {
+        localStorage.setItem('workplan_notes', 'quote " \\ newline\n unicode 笔记');
+        localStorage.setItem('workplan_access_key', 'synthetic-dedup');
+        await flushLocalDatabase();
+        const count = writes.length;
+        const note = localStorage.getItem('workplan_notes');
+        localStorage.removeItem('workplan_notes');
+        localStorage.setItem('workplan_notes', note);
+        await flushLocalDatabase();
+        expect(writes.length).toBe(count);
+        localStorage.setItem('workplan_notes', `${note} changed`);
+        await flushLocalDatabase();
+        expect(writes.length).toBe(count + 1);
+        expect(writes.at(-1).keys.workplan_notes).toBe(`${note} changed`);
+        localStorage.removeItem('workplan_notes');
+        await flushLocalDatabase();
+        expect(writes.length).toBe(count + 2);
+        expect(writes.at(-1).keys.workplan_notes).toBeUndefined();
     });
 
     test('memory mode backup includes notes that are no longer in WebView storage', async () => {

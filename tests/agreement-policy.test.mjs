@@ -9,6 +9,8 @@ test('all shipped policies identify the current version and cover current data f
         expect(policy.updated_at).toContain(AGREEMENT_VERSION);
         expect(policy.updated_at).toContain('2026');
         expect(policy.sharing_desc).toContain('GitHub');
+        for (const host of ['ghfast.top', 'gh-proxy.com']) expect(policy.sharing_desc).toContain(host);
+        expect(policy.sharing_desc).toContain('SHA-256');
         expect(policy.ai_desc.length).toBeGreaterThan(150);
         expect(policy.storage_desc.length).toBeGreaterThan(100);
     }
@@ -21,7 +23,7 @@ test('all shipped policies identify the current version and cover current data f
     expect(zh.changes_desc).not.toContain('继续使用视为');
 });
 
-for (const version of ['1.1', AGREEMENT_VERSION]) test(`agreement acceptance survives only for the current policy (${version})`, () => {
+for (const version of ['1.1', '1.2', AGREEMENT_VERSION]) test(`agreement acceptance survives only for the current policy (${version})`, () => {
     const script = `
         import {get} from 'svelte/store';
         import assert from 'node:assert/strict';

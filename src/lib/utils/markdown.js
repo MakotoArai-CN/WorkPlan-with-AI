@@ -8,36 +8,39 @@ import { escapeHtml, safeLinkUrl, safeImageUrl } from './safe-content.js';
 
 let mermaidModule = null;
 let mermaidInitialized = false;
+let mermaidLoading = null;
 
 async function initMermaid() {
     if (mermaidInitialized) return;
     if (typeof window === 'undefined') return;
-    try {
-        mermaidModule = await import('mermaid');
-        mermaidModule.default.initialize({
-            startOnLoad: false,
-            theme: 'default',
-            securityLevel: 'strict',
-            secure: ['securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'suppressErrorRendering', 'themeCSS', 'flowchart', 'htmlLabels', 'dompurifyConfig'],
-            themeCSS: '',
-            suppressErrorRendering: true,
-            maxTextSize: 50000,
-            maxEdges: 1000,
-            fontSize: 14,
-            flowchart: {
-                useMaxWidth: true,
+    if (!mermaidLoading) {
+        mermaidLoading = (async () => {
+            const loaded = await import('mermaid');
+            loaded.default.initialize({
+                startOnLoad: false,
+                theme: 'default',
+                securityLevel: 'strict',
                 htmlLabels: false,
-                curve: 'basis'
-            }
+                secure: ['securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'suppressErrorRendering', 'themeCSS', 'flowchart', 'htmlLabels', 'dompurifyConfig'],
+                themeCSS: '',
+                suppressErrorRendering: true,
+                maxTextSize: 50000,
+                maxEdges: 1000,
+                fontSize: 14,
+                flowchart: {
+                    useMaxWidth: true,
+                    htmlLabels: false,
+                    curve: 'basis'
+                }
+            });
+            mermaidModule = loaded;
+            mermaidInitialized = true;
+        })().catch(e => {
+            mermaidLoading = null;
+            console.warn('Mermaid not available:', e);
         });
-        mermaidInitialized = true;
-    } catch (e) {
-        console.warn('Mermaid not available:', e);
     }
-}
-
-if (typeof window !== 'undefined') {
-    initMermaid();
+    await mermaidLoading;
 }
 
 marked.use(markedHighlight({
@@ -129,6 +132,7 @@ const renderer = {
             
             if (typeof window !== 'undefined') {
                 setTimeout(async () => {
+                    if (!diagramPlaceholder(id)) return;
                     if (!mermaidInitialized) {
                         await initMermaid();
                     }

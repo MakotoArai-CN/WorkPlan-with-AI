@@ -69,7 +69,11 @@
                         <p role="status" class="text-xs text-slate-500">{$_($updateDownload.stage === 'verifying' ? 'settings.update_verifying' : $updateDownload.stage === 'canceling' ? 'settings.update_canceling' : 'settings.update_downloading')} · {percentage}%</p>
                     {:else if ['ready', 'opening'].includes($updateDownload.stage)}
                         <p role="status" class="text-sm text-emerald-700">{$_('settings.update_verified')}</p>
-                        <p class="text-xs text-slate-500">{$_('settings.update_install_hint')}</p>
+                        {#if $updateDownload.downloadOnly}
+                            <p class="text-xs break-all text-slate-500">{$updateDownload.savedPath}</p>
+                        {:else}
+                            <p class="text-xs text-slate-500">{$_('settings.update_install_hint')}</p>
+                        {/if}
                         {#if $updateDownload.permissionRequired}<p class="text-xs text-slate-500">{$_('settings.update_android_permission')}</p>{/if}
                     {/if}
                     {#if $updateDownload.error}<p role="alert" class="text-sm text-red-600">{$updateDownload.error}</p>{/if}
@@ -85,7 +89,9 @@
             {#if showDownload && downloading}
                 <button on:click={cancelUpdateDownload} disabled={$updateDownload.stage === 'canceling'} class="px-4 py-2 rounded-xl text-sm bg-slate-100 dark:bg-slate-700 disabled:opacity-50">{$_('common.cancel')}</button>
             {:else if showDownload && ['ready', 'opening'].includes($updateDownload.stage)}
+                {#if !$updateDownload.downloadOnly}
                 <button on:click={openDownloadedUpdate} disabled={$updateDownload.stage === 'opening'} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$_('settings.update_open_package')}</button>
+                {/if}
             {:else}
                 <button on:click={downloadUpdate} disabled={downloading} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$_('settings.update_download_in_app')}</button>
             {/if}

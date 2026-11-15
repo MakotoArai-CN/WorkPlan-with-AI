@@ -1,12 +1,13 @@
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, atomic::{AtomicU8, Ordering}};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_fs::FilePath;
@@ -16,6 +17,14 @@ const MAGIC: &[u8; 5] = b"WPDB2";
 const PORTABLE_MAGIC: &[u8; 5] = b"WPBP2";
 const PORTABLE_ITERATIONS: u32 = 600_000;
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+struct TransferSession {
+    id: String,
+    transfer: Option<crate::snapshot_transfer::Transfer>,
+    base: Option<[u8; 32]>,
+    phase: Arc<AtomicU8>, // 0 preparing, 1 canceled, 2 committing
+}
+static TRANSFER: Mutex<Option<TransferSession>> = Mutex::new(None);
+static TRANSFER_SWEEPER: OnceLock<()> = OnceLock::new();
 const SNAPSHOT_KEY: &[u8] = b"snapshot";
 const SAVED_AT_KEY: &[u8] = b"saved_at";
 const ACTIVE_KEY_FILE: &[u8] = b"active_key_file";
@@ -405,25 +414,139 @@ fn protect_account_snapshot(db: &sled::Db, next: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn local_db_save(content: String) -> Result<LocalDbInfo, String> {
-    tauri::async_runtime::spawn_blocking(move || local_db_save_impl(content)).await.map_err(|e| e.to_string())?
+pub async fn local_db_save(content: SnapshotInput) -> Result<LocalDbInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || local_db_save_impl(content.into_content()?)).await.map_err(|e| e.to_string())?
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum SnapshotInput {
+    Legacy(String),
+    Structured(serde_json::Value),
+}
+
+impl SnapshotInput {
+    fn into_content(self) -> Result<String, String> {
+        let content = match self {
+            Self::Legacy(content) => content,
+            Self::Structured(value) => serde_json::to_string(&value).map_err(|e| e.to_string())?,
+        };
+        Ok(content)
+    }
 }
 
 fn local_db_save_impl(content: String) -> Result<LocalDbInfo, String> {
+    local_db_save_checked(content, None)
+}
+
+fn local_db_save_checked(content: String, transfer: Option<(Option<[u8; 32]>, &AtomicU8)>) -> Result<LocalDbInfo, String> {
     validate_snapshot(&content)?;
     let _guard = WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     if content.len() > 64 * 1024 * 1024 {
         return Err("本地数据库超过 64MB，已拒绝写入".to_string());
     }
     let db = open_db()?;
+    if let Some((base, phase)) = transfer {
+        if phase.load(Ordering::Acquire) != 0 { return Err("Snapshot transfer canceled".into()); }
+        if snapshot_digest(&db)? != base { return Err("Database changed during snapshot transfer".into()); }
+    }
     protect_account_snapshot(&db, &content)?;
     backup_blob(&db)?;
     let sealed = seal_json(&content)?;
-    db.insert(SNAPSHOT_KEY, sealed).map_err(|e| format!("写入数据库失败: {e}"))?;
-    db.insert(SAVED_AT_KEY, timestamp().to_string().into_bytes()).map_err(|e| e.to_string())?;
+    if let Some((_, phase)) = transfer {
+        // Cancellation is accepted until this atomic commit boundary. Once
+        // committed, callers must not retry an apparently canceled write.
+        phase.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "Snapshot transfer canceled")?;
+    }
+    let mut batch = sled::Batch::default();
+    batch.insert(SNAPSHOT_KEY, sealed);
+    batch.insert(SAVED_AT_KEY, timestamp().to_string().into_bytes());
+    db.apply_batch(batch).map_err(|e| format!("写入数据库失败: {e}"))?;
     db.flush().map_err(|e| format!("刷新数据库失败: {e}"))?;
     let _ = fs::rename(legacy_path()?, root_dir()?.join("data.legacy.json"));
     local_db_info()
+}
+
+fn snapshot_digest(db: &sled::Db) -> Result<Option<[u8; 32]>, String> {
+    Ok(db.get(SNAPSHOT_KEY).map_err(|e| e.to_string())?.map(|blob| Sha256::digest(blob.as_ref()).into()))
+}
+
+#[tauri::command]
+pub async fn local_db_transfer_begin(saved_at: u64, entries: usize, units: usize) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let transfer = crate::snapshot_transfer::Transfer::new(saved_at, entries, units)?;
+        TRANSFER_SWEEPER.get_or_init(|| {
+            // One bounded sweeper for the process, not one sleeping thread per
+            // request. Abandoned renderer sessions cannot retain 64MB forever.
+            std::thread::spawn(|| loop {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                if let Ok(mut active) = TRANSFER.lock() {
+                    if active.as_ref().is_some_and(|session| session.transfer.as_ref().is_some_and(|transfer| transfer.expired())) {
+                        *active = None;
+                    }
+                }
+            });
+        });
+        let _write = WRITE_LOCK.lock().map_err(|e| e.to_string())?;
+        let db = open_db()?;
+        let base = snapshot_digest(&db)?;
+        let mut active = TRANSFER.lock().map_err(|e| e.to_string())?;
+        if active.as_ref().is_some_and(|session| session.transfer.as_ref().is_some_and(|transfer| transfer.expired())) {
+            *active = None;
+        }
+        if active.is_some() { return Err("A snapshot transfer is already active".into()); }
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).map_err(|e| e.to_string())?;
+        let id = random.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        *active = Some(TransferSession { id: id.clone(), transfer: Some(transfer), base, phase: Arc::new(AtomicU8::new(0)) });
+        Ok(id)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn local_db_transfer_append(id: String, index: usize, key: String, offset: usize, length: usize, data: String, last: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut active = TRANSFER.lock().map_err(|e| e.to_string())?;
+        let session = active.as_mut().filter(|session| session.id == id).ok_or("Unknown snapshot transfer")?;
+        let transfer = session.transfer.as_mut().ok_or("Snapshot transfer is committing")?;
+        let result = transfer.append(index, key, offset, length, data, last);
+        if result.is_err() { *active = None; }
+        result
+    }).await.map_err(|e| e.to_string())?
+}
+
+struct TransferGuard(String);
+impl Drop for TransferGuard {
+    fn drop(&mut self) {
+        if let Ok(mut active) = TRANSFER.lock() {
+            if active.as_ref().is_some_and(|session| session.id == self.0) { *active = None; }
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn local_db_transfer_commit(id: String, digest: String) -> Result<LocalDbInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (transfer, base, phase) = {
+            let mut active = TRANSFER.lock().map_err(|e| e.to_string())?;
+            let session = active.as_mut().filter(|session| session.id == id).ok_or("Unknown snapshot transfer")?;
+            (session.transfer.take().ok_or("Snapshot transfer is committing")?, session.base, session.phase.clone())
+        };
+        let _cleanup = TransferGuard(id);
+        let content = transfer.finish(&digest)?;
+        local_db_save_checked(content, Some((base, &phase)))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn local_db_transfer_abort(id: String) -> Result<(), String> {
+    let mut active = TRANSFER.lock().map_err(|e| e.to_string())?;
+    let Some(session) = active.as_ref().filter(|session| session.id == id) else { return Ok(()); };
+    session.phase.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| "Snapshot has reached its commit boundary")?;
+    if session.transfer.is_some() { *active = None; }
+    Ok(())
 }
 
 /// Recovery for the `planpro_` → `workplan_` rename: the JS mirror briefly
@@ -648,6 +771,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn structured_and_legacy_ipc_snapshots_share_validation_and_storage_format() {
+        let value = serde_json::json!({
+            "format":"workplan-local-db", "version":1, "savedAt":123,
+            "keys":{"workplan_notes":"[{\"title\":\"unicode-\u{7b14}\u{8bb0}\",\"content\":\"\\\\line\\nquote\\\"\"}]","planpro_access_key":"synthetic-key"}
+        });
+        let legacy = serde_json::to_string(&value).unwrap();
+        for input in [value.clone(), serde_json::Value::String(legacy)] {
+            let parsed: SnapshotInput = serde_json::from_value(input).unwrap();
+            let content = parsed.into_content().unwrap();
+            assert!(validate_snapshot(&content).is_ok());
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&content).unwrap(), value);
+        }
+        for invalid in [
+            serde_json::json!({"format":"wrong","version":1,"keys":{}}),
+            serde_json::json!({"format":"workplan-local-db","version":1,"keys":{"other":"value"}}),
+            serde_json::json!({"format":"workplan-local-db","version":1,"keys":{"workplan_notes":[]}}),
+            serde_json::json!(null),
+            serde_json::json!("not JSON"),
+        ] {
+            let input: SnapshotInput = serde_json::from_value(invalid).unwrap();
+            assert!(input.into_content().and_then(|content| validate_snapshot(&content)).is_err());
+        }
+    }
+
+    #[test]
     fn encrypted_snapshot_round_trips_without_plaintext() {
         let json = r#"{"format":"workplan-local-db","version":1,"keys":{"planpro_notes":"[{\"title\":\"secret\"}]"}}"#;
         let key = [0x51u8; 32];
@@ -798,6 +946,79 @@ mod tests {
         assert!(open_db().unwrap().get(ACTIVE_KEY_FILE).unwrap().is_some());
         assert!(!root.join(".local-db-key").exists());
         local_db_save_impl(original.into()).expect("recovered database remains writable");
+        let structured: serde_json::Value = serde_json::from_str(original).unwrap();
+        local_db_save_impl(SnapshotInput::Structured(structured.clone()).into_content().unwrap())
+            .expect("structured IPC snapshot uses the same encrypted database");
+        let loaded = local_db_load_impl().unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&loaded).unwrap(), structured);
+        local_db_save_impl(SnapshotInput::Legacy(original.into()).into_content().unwrap())
+            .expect("legacy IPC remains writable after a structured save");
+        assert_eq!(local_db_load_impl().unwrap().as_deref(), Some(original));
+        tauri::async_runtime::block_on(async {
+            let key = "workplan_notes";
+            let value = "chunked unicode \u{1f600} data";
+            let length = value.encode_utf16().count();
+            let mut hash = Sha256::new();
+            hash.update((key.len() as u64).to_le_bytes()); hash.update(key.as_bytes());
+            hash.update((length as u64).to_le_bytes()); hash.update(value.as_bytes());
+            let digest = format!("{:x}", hash.finalize());
+            let bytes_before = open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap();
+            let begin = || local_db_transfer_begin(123, 1, key.len() + length);
+
+            let id = begin().await.unwrap();
+            assert!(begin().await.is_err());
+            local_db_transfer_append(id.clone(), 0, key.into(), 0, length, "chunked ".into(), false).await.unwrap();
+            assert!(local_db_transfer_commit(id, digest.clone()).await.is_err());
+            assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), bytes_before);
+
+            let id = begin().await.unwrap();
+            local_db_transfer_append(id.clone(), 0, key.into(), 0, length, "chunked ".into(), false).await.unwrap();
+            assert!(local_db_transfer_append(id.clone(), 0, key.into(), 0, length, "chunked ".into(), false).await.is_err());
+            assert!(local_db_transfer_commit(id, digest.clone()).await.is_err());
+            assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), bytes_before);
+
+            let id = begin().await.unwrap();
+            local_db_transfer_append(id.clone(), 0, key.into(), 0, length, value.into(), true).await.unwrap();
+            local_db_transfer_abort("unknown-id".into()).unwrap();
+            local_db_transfer_abort(id.clone()).unwrap();
+            assert!(local_db_transfer_commit(id, digest.clone()).await.is_err());
+            assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), bytes_before);
+
+            let id = begin().await.unwrap();
+            local_db_transfer_append(id.clone(), 0, key.into(), 0, length, value.into(), true).await.unwrap();
+            assert!(local_db_transfer_commit(id, "0".repeat(64)).await.is_err());
+            assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), bytes_before);
+
+            let id = begin().await.unwrap();
+            local_db_transfer_append(id.clone(), 0, key.into(), 0, length, value.into(), true).await.unwrap();
+            local_db_save_impl(original.into()).unwrap();
+            let newer = open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap();
+            assert!(local_db_transfer_commit(id, digest.clone()).await.is_err());
+            assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), newer);
+
+            // A real encryption-key read failure must not swap the database.
+            let id = begin().await.unwrap();
+            local_db_transfer_append(id.clone(), 0, key.into(), 0, length, value.into(), true).await.unwrap();
+            let active_name = open_db().unwrap().get(ACTIVE_KEY_FILE).unwrap().unwrap();
+            let key_path = root.join(String::from_utf8(active_name.to_vec()).unwrap());
+            let key_bytes = fs::read(&key_path).unwrap();
+            fs::write(&key_path, b"invalid isolated key").unwrap();
+            assert!(local_db_transfer_commit(id, digest.clone()).await.is_err());
+            assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), newer);
+            fs::write(&key_path, key_bytes).unwrap();
+
+            let phase = AtomicU8::new(1);
+            assert!(local_db_save_checked(original.into(), Some((snapshot_digest(open_db().unwrap()).unwrap(), &phase))).is_err());
+            assert_eq!(open_db().unwrap().get(SNAPSHOT_KEY).unwrap().unwrap(), newer);
+
+            let id = begin().await.unwrap();
+            local_db_transfer_append(id.clone(), 0, key.into(), 0, length, "chunked ".into(), false).await.unwrap();
+            local_db_transfer_append(id.clone(), 0, key.into(), 8, length, value[8..].into(), true).await.unwrap();
+            local_db_transfer_commit(id, digest).await.unwrap();
+            let stored: serde_json::Value = serde_json::from_str(&local_db_load_impl().unwrap().unwrap()).unwrap();
+            assert_eq!(stored["keys"][key], value);
+            local_db_save_impl(original.into()).unwrap();
+        });
         // Retain the isolated fixture for inspection; it never uses user data.
         eprintln!("native compatibility fixture: {}", root.display());
     }
