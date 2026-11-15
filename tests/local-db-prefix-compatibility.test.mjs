@@ -5,6 +5,7 @@ function runIsolated(body) {
     const result = Bun.spawnSync([process.execPath, '--eval', `
         import assert from 'node:assert/strict';
         import { mock } from 'bun:test';
+        import { createHash } from 'node:crypto';
         const disk = new Map();
         class TestStorage {
             constructor(values = new Map()) { this.values = values; }
@@ -23,6 +24,7 @@ function runIsolated(body) {
         let currentSnapshot = null;
         let restoredSnapshot = null;
         let failSaves = false;
+        let transfer, onChunk, chunkCalls = 0;
         const writes = [];
         const restoreRequests = [];
         mock.module('@tauri-apps/api/core', () => ({ invoke: async (command, args) => {
@@ -35,8 +37,36 @@ function runIsolated(body) {
             }
             if (command === 'local_db_save') {
                 if (failSaves) throw new Error('synthetic write failure');
-                currentSnapshot = args.content;
-                writes.push(JSON.parse(args.content));
+                assert.equal(typeof args.content, 'object');
+                currentSnapshot = JSON.stringify(args.content);
+                writes.push(JSON.parse(currentSnapshot));
+                return {};
+            }
+            if (command === 'local_db_transfer_begin') {
+                assert.equal(transfer, undefined);
+                transfer = { snapshot: { format: 'workplan-local-db', version: 1, savedAt: args.savedAt, keys: {} }, hash: createHash('sha256') };
+                return 'synthetic-native-transfer';
+            }
+            if (command === 'local_db_transfer_append') {
+                chunkCalls++;
+                const key = args.key;
+                if (args.offset === 0) {
+                    const bytes = Buffer.alloc(8);bytes.writeBigUInt64LE(BigInt(Buffer.byteLength(key)));
+                    transfer.hash.update(bytes);transfer.hash.update(key);
+                    bytes.writeBigUInt64LE(BigInt(args.length));transfer.hash.update(bytes);
+                    transfer.snapshot.keys[key] = '';
+                }
+                transfer.hash.update(args.data);
+                transfer.snapshot.keys[key] += args.data;
+                onChunk?.();
+                return;
+            }
+            if (command === 'local_db_transfer_abort') { transfer = undefined; return; }
+            if (command === 'local_db_transfer_commit') {
+                assert.equal(args.digest, transfer.hash.digest('hex'));
+                if (failSaves) throw Error('synthetic chunk commit failure');
+                currentSnapshot = JSON.stringify(transfer.snapshot);
+                writes.push(JSON.parse(currentSnapshot));transfer = undefined;
                 return {};
             }
             if (command === 'vault_verify_master') {
@@ -183,6 +213,51 @@ test('a failed initial mirror flush retains both legacy and normalized working c
         await db.installLocalDatabaseMirror();
         assert.equal(localStorage.getItem('workplan_access_key'), 'webview-account');
         assert.equal(writes.at(-1).keys.workplan_notes, 'webview-notes');
+    `);
+});
+
+test('a failed snapshot is retried unchanged before deduplication marks it persisted', () => {
+    runIsolated(`
+        localStorage.setItem('workplan_access_key', 'synthetic-retry-account');
+        localStorage.setItem('workplan_notes', 'quote " and unicode 笔记');
+        console.warn = () => {};
+        failSaves = true;
+        assert.equal(await db.flushLocalDatabase(), null);
+        assert.equal(writes.length, 0);
+        failSaves = false;
+        await db.flushLocalDatabase();
+        assert.equal(writes.length, 1);
+        assert.equal(writes[0].keys.workplan_notes, 'quote " and unicode 笔记');
+        await db.flushLocalDatabase();
+        assert.equal(writes.length, 1);
+    `);
+});
+
+test('large memory snapshots keep write ordering and retry failed chunk commits without losing newer edits', () => {
+    runIsolated(`
+        const large = 'synthetic large note '.repeat(6000);
+        localStorage.setItem('workplan_access_key', 'synthetic-large-account');
+        localStorage.setItem('workplan_notes', large);
+        await db.initLocalDatabase();
+        await db.installLocalDatabaseMirror();
+        assert.equal(disk.has('workplan_notes'), false);
+        assert.ok(chunkCalls > 1);
+        const before = writes.length;
+        failSaves = true;console.warn = () => {};
+        localStorage.setItem('workplan_notes', large + ' newer');
+        await db.flushLocalDatabase();
+        assert.equal(writes.length, before);
+        assert.equal(transfer, undefined);
+        failSaves = false;
+        onChunk = () => { onChunk = null;localStorage.setItem('workplan_notes', large + ' latest'); };
+        const first = db.flushLocalDatabase();
+        await first;
+        assert.equal(writes.at(-1).keys.workplan_notes, large + ' newer');
+        await db.flushLocalDatabase();
+        assert.equal(writes.at(-1).keys.workplan_notes, large + ' latest');
+        const settled = writes.length;
+        await db.flushLocalDatabase();
+        assert.equal(writes.length, settled);
     `);
 });
 

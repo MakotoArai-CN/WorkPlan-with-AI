@@ -74,6 +74,8 @@ describe('release packaging', () => {
         expect(workflow).toContain('build-linux, build-arch, build-macos');
         expect(workflow).toContain('artifacts/**/*.pkg.tar.zst');
         expect(workflow).toContain('artifacts/SHA256SUMS');
+        expect(workflow).toContain('draft: true');
+        expect(workflow).not.toContain('draft: false');
         const arch = await readFile(new URL('../.github/workflows/arch-package.yml', import.meta.url), 'utf8');
         expect(arch).toContain('sudo -u builder makepkg --noconfirm');
         expect(arch).toContain('pacman -Qkk workplan-bin');

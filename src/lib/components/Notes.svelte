@@ -1,6 +1,6 @@
 <script>
     import { buildAutocompleteContext, normalizeSuggestion } from '../utils/notes-autocomplete.js';
-    import { createLatestEditorRequest, noteDraftChanged, rangeAtBlockStart, rangeAtEditorEnd } from '../utils/notes-editor.js';
+    import { createLatestEditorRequest, ensureVditorIcons, noteDraftChanged, rangeAtBlockStart, rangeAtEditorEnd } from '../utils/notes-editor.js';
     import { isTableRowLine, tableFromRow } from '../utils/markdown-table.js';
     import { matchesSearchQuery } from '../utils/search-text.js';
     import SelectMenu from './SelectMenu.svelte';
@@ -228,6 +228,7 @@
     async function initVditor(token) {
         if (!vditorContainer) return;
         const Vditor = (await import("vditor")).default;
+        await ensureVditorIcons();
         if (token !== editorInitToken || selectedEditorType !== 'vditor' || !editMode) return;
 
         const container = vditorContainer;

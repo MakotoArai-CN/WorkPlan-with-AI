@@ -53,3 +53,16 @@ test('blocked preference storage does not prevent following system dark mode at 
         localStorage: { get length() { throw Error('Blocked'); }, getItem() { throw Error('Blocked'); } } });
     expect(calls).toEqual(['dark']);
 });
+
+test('Android content stays inside system bars and cutouts without double WebView insets', () => {
+    const source = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
+    expect(source).toContain('installContentInsets()');
+    expect(source).toContain('findViewById<View>(android.R.id.content)');
+    expect(source).toContain('WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()');
+    expect(source).toContain('val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())');
+    expect(source).toContain('view.setPadding(safe.left, safe.top, safe.right, maxOf(safe.bottom, keyboard.bottom))');
+    expect(source).toContain('.setInsets(bars or WindowInsetsCompat.Type.ime(), Insets.NONE)');
+    expect(source).toContain('.setDisplayCutout(null)');
+    const handler = source.slice(source.indexOf('private fun installContentInsets()'), source.indexOf('@Suppress("DEPRECATION")'));
+    expect(handler).not.toContain('WindowInsetsCompat.CONSUMED');
+});

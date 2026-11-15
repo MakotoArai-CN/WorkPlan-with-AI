@@ -121,6 +121,23 @@ describe('v4 vault at rest', () => {
         expect(passwordsStore.decryptPassword(currentEntry().password)).toBe('gh-secret');
     });
 
+    test('empty optional secrets survive storage, master rotation and portable sync', async () => {
+        expect(passwordsStore.replaceFromPortableSync({ passwords: [
+            { id: 'empty-secret', title: 'Metadata only', password: '', notes: 'Keep metadata' }
+        ] }).success).toBe(true);
+        passwordsStore.lock();
+        passwordsStore.load();
+        expect(await passwordsStore.unlock(MASTER)).toBe(true);
+        expect(currentEntry().password).toBe('');
+        const replacement = 'Fixture-Empty-Secret-Rotation!583';
+        expect((await passwordsStore.changeMasterPassword(MASTER, replacement)).success).toBe(true);
+        passwordsStore.lock();
+        passwordsStore.load();
+        expect(await passwordsStore.unlock(replacement)).toBe(true);
+        expect(currentEntry().notes).toBe('Keep metadata');
+        expect((await passwordsStore.getPortableSyncPayloadAsync()).passwords[0].password).toBe('');
+    });
+
     test('a lock during master derivation cannot reopen the session', async () => {
         const changing = passwordsStore.changeMasterPassword(MASTER, 'new-unusual-master-2026');
         passwordsStore.lock();
@@ -159,6 +176,18 @@ describe('v4 vault at rest', () => {
         const unchanged = JSON.parse(localStorage.getItem('workplan_passwords')).find(row => row.id === previous.id);
         expect(unchanged.meta).toBe(previous.meta);
         expect(unchanged.password).toBe(previous.password);
+    });
+
+    test('unlock hydration retains ciphertext for unchanged entries on the next save', async () => {
+        const before = JSON.parse(localStorage.getItem('workplan_passwords'))[0];
+        passwordsStore.lock();
+        passwordsStore.load();
+        expect(await passwordsStore.unlock(MASTER)).toBe(true);
+        passwordsStore.addPassword({ title: 'Another row after unlock', password: 'synthetic-second-secret' });
+        await flush();
+        const after = JSON.parse(localStorage.getItem('workplan_passwords')).find(row => row.id === before.id);
+        expect(after.meta).toBe(before.meta);
+        expect(after.password).toBe(before.password);
     });
 
     test('the eleventh failure disables only opted-in quick unlock and never deletes records', async () => {

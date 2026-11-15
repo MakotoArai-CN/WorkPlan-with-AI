@@ -7,6 +7,8 @@ test('update checks deduplicate, settle errors, preserve closed state and fence 
         import {mock} from 'bun:test';
         import {get} from 'svelte/store';
         let calls=0, release;
+        let external=[];
+        mock.module('./src/lib/utils/open-external.js',()=>({openExternalUrl:async url=>{external.push(url);return true;}}));
         mock.module('@tauri-apps/api/core',()=>({Channel:class {},invoke:async command=>{
             assert.equal(command,'check_update');calls++;return new Promise(resolve=>{release=resolve;});
         }}));
@@ -24,6 +26,8 @@ test('update checks deduplicate, settle errors, preserve closed state and fence 
         assert.equal(get(updateDialog).data.latest_version,'0.5.18');assert.equal(get(updateDialog).loading,false);
         mock.module('@tauri-apps/api/core',()=>({Channel:class {},invoke:async()=>{throw new Error('synthetic network outage');}}));
         await checkForUpdates();assert.ok(get(updateDialog).error.includes('synthetic network outage'));assert.equal(get(updateDialog).loading,false);
+        assert.deepEqual(external,['https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/latest']);
+        const hidden=checkForUpdates();closeUpdateDialog();await hidden;assert.equal(external.length,1);
     `;
     const result = Bun.spawnSync([process.execPath, '--eval', script], { cwd: fileURLToPath(new URL('..', import.meta.url)) });
     expect(result.stderr.toString()).toBe('');

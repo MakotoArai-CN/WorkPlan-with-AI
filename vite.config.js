@@ -151,6 +151,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -188,6 +189,7 @@ class MainActivity : TauriActivity() {
     }
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    installContentInsets()
     applySystemBars()
     installBackHandlers()
   }
@@ -238,6 +240,22 @@ class MainActivity : TauriActivity() {
     val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
       .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     startActivity(intent)
+  }
+
+  private fun installContentInsets() {
+    val content = findViewById<View>(android.R.id.content)
+    val bars = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+      val safe = insets.getInsets(bars)
+      val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
+      view.setPadding(safe.left, safe.top, safe.right, maxOf(safe.bottom, keyboard.bottom))
+      // Native layout owns the safe area; do not apply it again inside WebView.
+      WindowInsetsCompat.Builder(insets)
+        .setInsets(bars or WindowInsetsCompat.Type.ime(), Insets.NONE)
+        .setDisplayCutout(null)
+        .build()
+    }
+    ViewCompat.requestApplyInsets(content)
   }
 
   @Suppress("DEPRECATION")
@@ -1257,7 +1275,6 @@ export default defineConfig(({ command, mode }) => {
                             id.includes('@milkdown/') ||
                             id.includes('vditor') ||
                             id.includes('marked') ||
-                            id.includes('mermaid') ||
                             id.includes('katex') ||
                             id.includes('highlight.js')
                         ) {

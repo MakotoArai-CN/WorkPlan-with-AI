@@ -188,6 +188,12 @@ function createPasswordsStore() {
         }
         const cached = encodedEntries.get(entry);
         if (cached) return cached;
+        const encoded = encodeEntryWithKey(entry, vaultEntryKey, storageSalt);
+        encodedEntries.set(entry, encoded);
+        return encoded;
+    }
+
+    function encodeEntryWithKey(entry, key, salt) {
         const meta = {
             title: entry.title || '',
             username: entry.username || '',
@@ -198,19 +204,19 @@ function createPasswordsStore() {
         const rawPassword = String(entry.password || '');
         // Legacy v3 values are already ciphertext. Never wrap them again; the
         // background migrator replaces them with v4 entries.
-        const password = rawPassword.startsWith('v4:') || rawPassword.startsWith('v3:')
+        const password = !rawPassword ? '' : rawPassword.startsWith('v4:') || rawPassword.startsWith('v3:')
             ? rawPassword
-            : encryptVaultPayload(rawPassword, vaultEntryKey);
+            : encryptVaultPayload(rawPassword, key);
         const encoded = {
             id: entry.id,
-            meta: encryptVaultEntryFields(meta, vaultEntryKey),
+            meta: encryptVaultEntryFields(meta, key),
             password,
-            kdfSalt: storageSalt,
+            kdfSalt: salt,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
             schema: 2
         };
-        encodedEntries.set(entry, encoded);
+        if (!encoded.meta || (rawPassword && !encoded.password)) throw new Error('密码条目加密失败，未保存数据');
         return encoded;
     }
 
@@ -278,8 +284,10 @@ function createPasswordsStore() {
         if (!vaultSecret || !vaultEntryKey) return;
         const state = get({ subscribe });
         const hydrated = [];
+        const hydratedEncoded = new WeakMap();
         const key = vaultEntryKey;
         const generation = secretsGeneration;
+        const salt = getVaultMeta()?.salt;
         let sliceStart = performance.now();
         for (const entry of state.passwords) {
             if (performance.now() - sliceStart > 8) {
@@ -293,6 +301,12 @@ function createPasswordsStore() {
                 if (!meta) throw new Error('密码库元数据损坏，已停止解锁以避免覆盖数据');
                 next = { ...next, ...meta };
                 delete next.meta;
+                // Hydration changes object identity, not persisted content.
+                // Retain authenticated ciphertext so the first subsequent save
+                // does not encrypt every unchanged entry again.
+                const value = String(entry.password || '');
+                if (String(entry.meta).startsWith('v4:') && (!value || value.startsWith('v4:'))
+                    && entry.kdfSalt === salt) hydratedEncoded.set(next, entry);
             }
             // Do NOT re-encrypt every legacy entry here. Each old entry needs
             // a 10k PBKDF2 pass; doing that inside unlock() freezes the UI when
@@ -302,6 +316,8 @@ function createPasswordsStore() {
         const categories = collectPasswordCategories(state.categories, hydrated);
         const nextState = { ...state, passwords: hydrated, categories };
         saveSettings({ categories });
+        encodedEntries = hydratedEncoded;
+        encodedKey = key;
         update(() => nextState);
         migrationDone = true;
     }
@@ -859,7 +875,6 @@ function createPasswordsStore() {
             // Flush pending old-key writes before the key swap.
             saveImmediate(state);
 
-            const BATCH_SIZE = 50;
             const passwords = state.passwords;
             const reEncryptedPasswords = [];
             const failedPasswords = [];
@@ -878,22 +893,24 @@ function createPasswordsStore() {
             }
 
             const decryptedEntries = [];
-            for (let i = 0; i < passwords.length; i += BATCH_SIZE) {
-                await new Promise(resolve => setTimeout(resolve, 0));
-                const batch = passwords.slice(i, i + BATCH_SIZE);
-                for (const p of batch) {
-                    const plain = !p.password ? '' : String(p.password).startsWith('v4:')
-                        ? decryptVaultPayload(p.password, oldEntryKey)
-                        : await decryptAsync(p.password, oldSecret);
-                    if (plain === null) {
-                        // Never rewrite an entry we could not read: encrypt('') is
-                        // null and would permanently destroy the stored secret.
-                        failedPasswords.push(p.title || p.id);
-                        continue;
-                    }
-                    decryptedEntries.push({ entry: p, plain });
+            let decryptSliceStart = performance.now();
+            for (const p of passwords) {
+                if (performance.now() - decryptSliceStart > 8) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                    if (!unchanged()) return { success: false, error: '密码库数据或会话已更改，请重试' };
+                    decryptSliceStart = performance.now();
                 }
+                const plain = !p.password ? '' : String(p.password).startsWith('v4:')
+                    ? decryptVaultPayload(p.password, oldEntryKey)
+                    : await decryptAsync(p.password, oldSecret);
                 if (!unchanged()) return { success: false, error: '密码库数据或会话已更改，请重试' };
+                if (plain === null) {
+                    // Never rewrite an entry we could not read: encrypt('') is
+                    // null and would permanently destroy the stored secret.
+                    failedPasswords.push(p.title || p.id);
+                    continue;
+                }
+                decryptedEntries.push({ entry: p, plain });
             }
 
             if (failedPasswords.length > 0) {
@@ -911,16 +928,31 @@ function createPasswordsStore() {
             // old one: every later save/cancel then fails to encrypt/decrypt.
             // Swap under a guard and roll the session back on failure.
             let newEntryKey;
+            const stagedEncoded = new WeakMap();
             try {
                 newEntryKey = await ensureVaultEntryKey(newSecret);
+                const salt = getVaultMeta()?.salt || '';
+                let sliceStart = performance.now();
                 for (const { entry, plain } of decryptedEntries) {
-                    reEncryptedPasswords.push({
+                    if (performance.now() - sliceStart > 8) {
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                        if (!unchanged()) {
+                            resetVaultKeyCache();
+                            return { success: false, error: '密码库数据或会话已更改，请重试' };
+                        }
+                        sliceStart = performance.now();
+                    }
+                    const nextEntry = {
                         ...entry,
-                        password: encryptVaultPayload(plain, newEntryKey),
+                        password: plain ? encryptVaultPayload(plain, newEntryKey) : '',
                         updatedAt: now
-                    });
+                    };
+                    if (plain && !nextEntry.password) throw new Error('密码条目加密失败');
+                    stagedEncoded.set(nextEntry, encodeEntryWithKey(nextEntry, newEntryKey, salt));
+                    reEncryptedPasswords.push(nextEntry);
                 }
             } catch (error) {
+                resetVaultKeyCache();
                 return { success: false, error: `主密码更新失败：${error.message || error}` };
             }
 
@@ -931,6 +963,11 @@ function createPasswordsStore() {
             currentMasterPassword = newPassword;
             vaultSecret = newSecret;
             vaultEntryKey = newEntryKey;
+            const previousEncoded = encodedEntries;
+            const previousEncodedKey = encodedKey;
+            // Commit reuses prepared ciphertext; no second full encryption pass.
+            encodedEntries = stagedEncoded;
+            encodedKey = newEntryKey;
             try {
                 update(s => {
                     const newState = { ...s, passwords: reEncryptedPasswords, masterPasswordHash: newHash };
@@ -943,6 +980,8 @@ function createPasswordsStore() {
                 vaultSecret = oldSecret;
                 resetVaultKeyCache();
                 vaultEntryKey = oldEntryKey;
+                encodedEntries = previousEncoded;
+                encodedKey = previousEncodedKey;
                 return { success: false, error: `主密码更新保存失败：${error.message || error}` };
             }
 

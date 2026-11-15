@@ -1,5 +1,5 @@
 import createDOMPurify from 'dompurify';
-import { escapeHtml, safeImageUrl, safeInlineStyle, safeLinkUrl } from './safe-content.js';
+import { diagramImageDimensions, escapeHtml, safeImageUrl, safeInlineStyle, safeLinkUrl } from './safe-content.js';
 
 const purifier = typeof window === 'undefined' ? null : createDOMPurify(window);
 const FORBIDDEN_TAGS = [
@@ -111,10 +111,21 @@ export function sanitizeDiagramSvg(svg) {
     if (!purifier?.isSupported) return '';
     // SVG is displayed as an image document, never inserted into the app DOM.
     // Its CSS cannot restyle the WebView and links cannot navigate the app.
-    return purifier.sanitize(String(svg ?? ''), {
+    const sanitized = purifier.sanitize(String(svg ?? ''), {
         USE_PROFILES: { svg: true, svgFilters: true },
         FORBID_TAGS: ['script', 'foreignObject', 'a', 'image', 'use', 'animate', 'animateMotion', 'animateTransform', 'set'],
         FORBID_ATTR: ['href', 'xlink:href', 'src'],
         ALLOW_DATA_ATTR: false
     });
+    // Percentage SVG sizes are relative to the host when used as an image;
+    // preserve the diagram's intrinsic viewBox size instead of stretching it.
+    const template = document.createElement('template');
+    template.innerHTML = sanitized;
+    const root = template.content.querySelector('svg');
+    const dimensions = root && diagramImageDimensions(root.getAttribute('width'), root.getAttribute('viewBox'));
+    if (dimensions) {
+        root.setAttribute('width', String(dimensions.width));
+        root.setAttribute('height', String(dimensions.height));
+    }
+    return template.innerHTML;
 }

@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { escapeHtml, safeImageUrl, safeInlineStyle, safeLinkUrl, safeMediaDataUrl } from '../src/lib/utils/safe-content.js';
+import { diagramImageDimensions, escapeHtml, safeImageUrl, safeInlineStyle, safeLinkUrl, safeMediaDataUrl } from '../src/lib/utils/safe-content.js';
+
+test('diagram images retain viewBox dimensions instead of stretching a percentage width', () => {
+    expect(diagramImageDimensions('100%', '0 0 132 174')).toEqual({ width: 132, height: 174 });
+    expect(diagramImageDimensions('100% ', '-5,-10,120.5,260.25')).toEqual({ width: 120.5, height: 260.25 });
+    expect(diagramImageDimensions('132px', '0 0 132 174')).toBeNull();
+    for (const box of ['', '0 0 0 2', '0 0 -1 2', '0 0 1 NaN', '0 0 Infinity 2', '0 0 1 2 3']) {
+        expect(diagramImageDimensions('100%', box)).toBeNull();
+    }
+});
 
 describe('untrusted content URLs', () => {
     test('rejects executable/local/control-character URLs for links', () => {

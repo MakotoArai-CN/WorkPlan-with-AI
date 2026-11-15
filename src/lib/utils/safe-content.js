@@ -63,3 +63,10 @@ export function safeInlineStyle(value) {
         return [];
     }).join(';');
 }
+
+export function diagramImageDimensions(width, viewBox) {
+    if (!String(width ?? '').trim().endsWith('%')) return null;
+    const box = String(viewBox ?? '').trim().split(/[\s,]+/).map(Number);
+    return box.length === 4 && box.every(Number.isFinite) && box[2] > 0 && box[3] > 0
+        ? { width: box[2], height: box[3] } : null;
+}

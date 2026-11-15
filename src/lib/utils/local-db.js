@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauriRuntime } from './runtime.js';
 import { ERASE_KEY } from './vault-protection.js';
+import { needsSnapshotTransfer, saveSnapshotTransfer } from './snapshot-transfer.js';
 
 const SNAPSHOT_FORMAT = 'workplan-local-db';
 const SNAPSHOT_VERSION = 1;
@@ -148,11 +149,16 @@ function readSnapshot(raw) {
 
 async function saveSnapshot(keys = collectKeys()) {
     if (!isTauriRuntime) return null;
-    const fingerprint = JSON.stringify(keys);
-    if (fingerprint === persistedKeys) return null;
+    const names = Object.keys(keys);
+    if (persistedKeys && names.length === Object.keys(persistedKeys).length
+        && names.every(key => keys[key] === persistedKeys[key])) return null;
     const snapshot = buildSnapshot(keys);
-    const info = await invoke('local_db_save', { content: JSON.stringify(snapshot) });
-    persistedKeys = fingerprint;
+    // Pass the object once: stringifying here makes IPC escape the entire
+    // snapshot a second time, which blocks mobile WebViews on large vaults.
+    const info = needsSnapshotTransfer(keys)
+        ? await saveSnapshotTransfer(snapshot, invoke)
+        : await invoke('local_db_save', { content: snapshot });
+    persistedKeys = { ...keys };
     localStorage.setItem(MARKER_KEY, String(snapshot.savedAt));
     return info;
 }
@@ -321,7 +327,7 @@ export async function initLocalDatabase() {
 
         dbAuthoritative = true;
         // A recovered backup is not necessarily the current on-disk snapshot.
-        persistedKeys = recoveredFromBackup ? null : JSON.stringify(normalizeKeys(snapshot.keys));
+        persistedKeys = recoveredFromBackup ? null : normalizeKeys(snapshot.keys);
         if (snapshot.keys?.[ERASE_KEY]) {
             // A deliberate wipe always wins over a stale WebView working copy.
             let journal;

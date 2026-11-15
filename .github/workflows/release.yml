@@ -814,7 +814,7 @@ jobs:
           name: Release ${{ needs.get-version.outputs.version }}
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
-          draft: false
+          draft: true
           prerelease: false
           files: |
             artifacts/**/*.deb
