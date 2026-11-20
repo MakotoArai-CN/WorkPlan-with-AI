@@ -165,6 +165,6 @@ test('NSIS artwork is deterministic, correct-sized BMP and does not replace stan
     expect(hook.indexOf('${If} $UpdateMode = 1')).toBeLessThan(hook.indexOf('RMDir /r'));
     expect(hook).toContain('IfSilent workplan_keep_local_data');
     expect(hook).toContain('MB_DEFBUTTON2');
-    const native = readFileSync(new URL('../src-tauri/src/update_download.rs', import.meta.url), 'utf8');
-    expect(native).toContain('.arg("/UPDATE")');
+    const native = readFileSync(new URL('../src-tauri/src/windows_update.rs', import.meta.url), 'utf8');
+    expect(native.includes('/S /UPDATE /D=')).toBe(true);
 });

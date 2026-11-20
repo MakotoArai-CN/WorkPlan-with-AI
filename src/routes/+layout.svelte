@@ -16,7 +16,7 @@
     import { formatLocalDate } from '$lib/utils/datetime.js';
     import { showExitToast } from '$lib/stores/navigation.js';
     import GlobalModal from '$lib/components/GlobalModal.svelte';
-    import { updateDialog, checkForUpdates } from '$lib/stores/updates.js';
+    import { updateDialog, checkForUpdates, resumeUpdateInstallation } from '$lib/stores/updates.js';
     const loadUpdateDialog = () => import('$lib/components/UpdateDialog.svelte');
     let updateModule;
     $: if ($updateDialog.show && !updateModule) updateModule = loadUpdateDialog();
@@ -89,6 +89,7 @@
             if (isWebDemo || destroyed) return;
             await settingsInit;
             if (destroyed) return;
+            void resumeUpdateInstallation();
 
             const currentSettings = get(settingsStore);
             if (currentSettings.closeToQuit) {

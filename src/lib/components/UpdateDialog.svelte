@@ -5,11 +5,14 @@
     import { settingsStore } from '../stores/settings.js';
     import { getReleaseDate, getReleaseNotes, officialReleaseUrl, publicReleaseNotes } from '../utils/release-history.js';
     import { openExternalUrl } from '../utils/open-external.js';
+    import { copyText } from '../utils/clipboard.js';
     import { _, locale } from 'svelte-i18n';
 
     const bundledVersion = typeof __WORKPLAN_VERSION__ === 'string' ? __WORKPLAN_VERSION__ : '';
     let opening = false;
     let openError = '';
+    let commandCopied = false;
+    $: if ($updateDownload.id) { commandCopied = false; }
     $: currentVersion = $settingsStore.appVersion || bundledVersion;
     $: version = $updateDialog.data?.latest_version || currentVersion;
     $: notes = $updateDialog.data
@@ -47,7 +50,7 @@
         {:else}
             {#if $updateDialog.error}
                 <p role="alert" class="text-sm text-red-600">{$updateDialog.error}</p>
-                <p class="text-xs text-slate-500">{$_('settings.release_offline_hint')}</p>
+                {#if !$updateDialog.installationError}<p class="text-xs text-slate-500">{$_('settings.release_offline_hint')}</p>{/if}
             {:else if $updateDialog.data}
                 <p role="status" class="text-sm font-bold text-slate-700 dark:text-slate-200">{$updateDialog.data.has_update ? $_('settings.update_available') : $_('settings.up_to_date')}</p>
             {/if}
@@ -67,12 +70,19 @@
                     {#if downloading}
                         <progress class="w-full accent-blue-600" value={$updateDownload.received} max={$updateDownload.total || 1} aria-label={$_('settings.update_downloading')}></progress>
                         <p role="status" class="text-xs text-slate-500">{$_($updateDownload.stage === 'verifying' ? 'settings.update_verifying' : $updateDownload.stage === 'canceling' ? 'settings.update_canceling' : 'settings.update_downloading')} · {percentage}%</p>
-                    {:else if ['ready', 'opening'].includes($updateDownload.stage)}
-                        <p role="status" class="text-sm text-emerald-700">{$_('settings.update_verified')}</p>
-                        {#if $updateDownload.downloadOnly}
+                    {:else if ['ready', 'opening', 'handoff'].includes($updateDownload.stage)}
+                        {#if !$updateDownload.recovered}<p role="status" class="text-sm text-emerald-700">{$_('settings.update_verified')}</p>{/if}
+                        {#if $updateDownload.savedPath}
                             <p class="text-xs break-all text-slate-500">{$updateDownload.savedPath}</p>
-                        {:else}
-                            <p class="text-xs text-slate-500">{$_('settings.update_install_hint')}</p>
+                        {/if}
+                        <p role="status" class="text-xs text-slate-500">{$_($updateDownload.stage === 'opening' ? 'settings.update_installing' : $updateDownload.stage === 'handoff' ? 'settings.update_handoff' : 'settings.update_install_hint')}</p>
+                        {#if $updateDownload.installation}
+                            <p class="text-xs text-slate-500">{$_('settings.update_installation_type')}: {$updateDownload.installation.kind === 'unknown' ? $_('settings.update_installation_unknown') : $updateDownload.installation.kind.toUpperCase()}</p>
+                        {/if}
+                        {#if $updateDownload.canceled}<p role="status" class="text-xs text-slate-500">{$_('settings.update_install_canceled')}</p>{/if}
+                        {#if $updateDownload.installation?.manual_command && $updateDownload.stage === 'ready'}
+                            <pre class="text-xs whitespace-pre-wrap break-all select-text">{$updateDownload.installation.manual_command}</pre>
+                            <button on:click={async () => { commandCopied = await copyText($updateDownload.installation.manual_command); }} class="px-4 py-2 rounded-xl text-sm border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-200">{$_(commandCopied ? 'settings.update_command_copied' : 'settings.update_copy_command')}</button>
                         {/if}
                         {#if $updateDownload.permissionRequired}<p class="text-xs text-slate-500">{$_('settings.update_android_permission')}</p>{/if}
                     {/if}
@@ -88,12 +98,15 @@
         {:else if !$updateDialog.loading && $updateDialog.data?.has_update && $updateDialog.data?.download}
             {#if showDownload && downloading}
                 <button on:click={cancelUpdateDownload} disabled={$updateDownload.stage === 'canceling'} class="px-4 py-2 rounded-xl text-sm bg-slate-100 dark:bg-slate-700 disabled:opacity-50">{$_('common.cancel')}</button>
-            {:else if showDownload && ['ready', 'opening'].includes($updateDownload.stage)}
-                {#if !$updateDownload.downloadOnly}
-                <button on:click={openDownloadedUpdate} disabled={$updateDownload.stage === 'opening'} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$_('settings.update_open_package')}</button>
+            {:else if showDownload && ['ready', 'opening', 'handoff'].includes($updateDownload.stage)}
+                {#if $updateDownload.installation?.automatic}
+                    <button on:click={openDownloadedUpdate} disabled={$updateDownload.stage !== 'ready'} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$_('settings.update_install_now')}</button>
+                {/if}
+                {#if !$updateDownload.downloadOnly || $updateDownload.installation}
+                <button on:click={() => openDownloadedUpdate(true)} disabled={$updateDownload.stage !== 'ready'} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$_('settings.update_open_package')}</button>
                 {/if}
             {:else}
-                <button on:click={downloadUpdate} disabled={downloading} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$_('settings.update_download_in_app')}</button>
+                <button on:click={downloadUpdate} disabled={downloading} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$_($updateDialog.data.download.automatic_install ? 'settings.update_download_and_install' : 'settings.update_download_in_app')}</button>
             {/if}
         {:else if !$updateDialog.loading && officialReleaseUrl(version)}
             <button on:click={openRelease} disabled={opening} class="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white disabled:opacity-50">{$updateDialog.data?.has_update ? $_('settings.download') : $_('settings.view_release')}</button>

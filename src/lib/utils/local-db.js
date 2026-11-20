@@ -418,6 +418,14 @@ export async function flushLocalDatabase() {
     }
 }
 
+// Installation can close this process. Unlike the ordinary best-effort flush,
+// a failed or incomplete save must stop that handoff.
+export async function prepareLocalDatabaseForUpdate() {
+    if (!isTauriRuntime) return;
+    if (hydrating || erasing) throw new Error('Local database is busy; retry the update after it finishes');
+    await flushPendingMirror();
+}
+
 export async function localDatabaseInfo() {
     if (!isTauriRuntime) return null;
     return invoke('local_db_info');

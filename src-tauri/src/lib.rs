@@ -31,6 +31,9 @@ mod local_paths;
 mod updates;
 mod update_download;
 mod update_files;
+mod update_install;
+#[cfg(target_os = "windows")]
+mod windows_update;
 #[cfg(any(target_os = "linux", test))]
 mod linux_update;
 mod vault_guard;
@@ -1582,6 +1585,8 @@ pub fn run() {
             update_download::download_update,
             update_download::cancel_update_download,
             update_download::open_downloaded_update,
+            update_download::complete_update_handoff,
+            update_download::get_update_install_status,
             set_autostart,
             get_autostart_status,
             get_app_version,

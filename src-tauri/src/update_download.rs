@@ -35,7 +35,13 @@ fn asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
         _ => return Err("Unsupported update architecture".into()),
     };
     match (os, arch) {
-        ("windows", "x64" | "arm64" | "x86") => Ok(format!("WorkPlan_{version}_{arch}-setup.exe")),
+        ("windows", "x64" | "arm64" | "x86") => {
+            if crate::update_install::detect().kind == crate::update_install::Kind::Msi {
+                Ok(format!("WorkPlan_{version}_{arch}_en-US.msi"))
+            } else {
+                Ok(format!("WorkPlan_{version}_{arch}-setup.exe"))
+            }
+        }
         ("macos", "x64") => Ok(format!("WorkPlan_{version}_x64.dmg")),
         ("macos", "arm64") => Ok(format!("WorkPlan_{version}_aarch64.dmg")),
         ("linux", "x64") => linux_asset_name(version),
@@ -50,6 +56,9 @@ fn asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
 fn linux_asset_name(version: &str) -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
+        if crate::update_install::appimage_path().is_some() {
+            return Ok(format!("WorkPlan_{version}_amd64.AppImage"));
+        }
         crate::linux_update::installed_package()
             .map(|package| crate::linux_update::asset_name(version, package))
             .ok_or(
@@ -351,11 +360,21 @@ struct Active {
 #[derive(Clone)]
 struct Verified {
     id: String,
+    version: String,
     path: PathBuf,
     asset: Asset,
 }
 static ACTIVE: OnceLock<Mutex<Option<Active>>> = OnceLock::new();
 static VERIFIED: OnceLock<Mutex<Option<Verified>>> = OnceLock::new();
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+// Only a successfully started/finished installer can request an application exit.
+static HANDOFF: Mutex<Option<(String, bool, Option<PathBuf>)>> = Mutex::new(None);
+struct InstallGuard;
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        INSTALLING.store(false, Ordering::SeqCst);
+    }
+}
 fn active() -> &'static Mutex<Option<Active>> {
     ACTIVE.get_or_init(|| Mutex::new(None))
 }
@@ -547,6 +566,9 @@ pub async fn download_update(
     id: String,
     progress: Channel<Value>,
 ) -> Result<Value, String> {
+    if INSTALLING.load(Ordering::SeqCst) {
+        return Err("An update is already being installed".into());
+    }
     if id.len() > 80 || id.is_empty() || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
     {
         return Err("Invalid download ID".into());
@@ -554,6 +576,10 @@ pub async fn download_update(
     let cancellation = Arc::new(Cancellation::default());
     {
         let mut state = active().lock().map_err(|e| e.to_string())?;
+        if INSTALLING.load(Ordering::SeqCst) || HANDOFF.lock().map_err(|e| e.to_string())?.is_some()
+        {
+            return Err("An installer handoff is in progress".into());
+        }
         if state.is_some() {
             return Err("An update is already downloading".into());
         }
@@ -672,8 +698,11 @@ pub async fn download_update(
             })?;
             guard.partial = Some(destination.clone());
             verify_file_checked(&destination, &asset, check)?;
+            let installation = crate::update_install::detect();
+            let plan = crate::update_install::plan(&installation, &asset.name, &destination);
+            *verified().lock().map_err(|e| e.to_string())? = Some(Verified { id:id.clone(), version, path:destination.clone(), asset:asset.clone() });
             guard.partial = None;
-            Ok(json!({"id":id,"name":asset.name,"size":asset.size,"verified":true,"download_only":true,"saved_path":destination.to_string_lossy()}))
+            Ok(json!({"id":id,"name":asset.name,"size":asset.size,"verified":true,"download_only":true,"saved_path":destination.to_string_lossy(),"installation":plan}))
         })
         .await
         .map_err(|error| error.to_string())?;
@@ -686,6 +715,7 @@ pub async fn download_update(
         .map_err(|e| e.to_string())?
         .replace(Verified {
             id: id.clone(),
+            version,
             path: path.clone(),
             asset: asset.clone(),
         });
@@ -695,27 +725,50 @@ pub async fn download_update(
             let _ = fs::remove_file(previous.path);
         }
     }
-    Ok(json!({"id":id,"name":asset.name,"size":asset.size,"verified":true}))
+    let plan = crate::update_install::plan(&crate::update_install::detect(), &asset.name, &path);
+    Ok(
+        json!({"id":id,"name":asset.name,"size":asset.size,"verified":true,"saved_path":path.to_string_lossy(),"installation":plan}),
+    )
 }
 
 #[tauri::command]
-pub async fn open_downloaded_update(id: String) -> Result<Value, String> {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = id;
-        return Err("Linux updates are download-only; use the saved deb/rpm/zst package with your system package manager".into());
+pub async fn open_downloaded_update(
+    app: tauri::AppHandle,
+    id: String,
+    manual: Option<bool>,
+) -> Result<Value, String> {
+    if INSTALLING.swap(true, Ordering::SeqCst) {
+        return Err("An update is already being installed".into());
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let record = verified()
-            .lock()
-            .map_err(|e| e.to_string())?
-            .as_ref()
-            .filter(|item| item.id == id)
-            .cloned()
-            .ok_or("No verified download for this request")?;
-        tauri::async_runtime::spawn_blocking(move || {
+    let guard = InstallGuard;
+    if HANDOFF.lock().map_err(|e| e.to_string())?.is_some() {
+        return Err("An installer handoff is already pending".into());
+    }
+    if active().lock().map_err(|e| e.to_string())?.is_some() {
+        return Err("An update is still downloading".into());
+    }
+    let record = verified()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .as_ref()
+        .filter(|item| item.id == id)
+        .cloned()
+        .ok_or("No verified download for this request")?;
+    tauri::async_runtime::spawn_blocking(move || {
+            let _guard = guard;
             verify_file(&record.path, &record.asset)?;
+            if manual == Some(true) && !cfg!(target_os = "android") {
+                // Opening is an explicit fallback action. No executable format
+                // is passed to a shell and no automatic shutdown is requested.
+                #[cfg(target_os = "windows")]
+                crate::windows_update::open_manual(&crate::update_install::detect(), &record.path)?;
+                #[cfg(not(target_os = "windows"))]
+                open::that(&record.path).map_err(|e| e.to_string())?;
+                return Ok(json!({"opened":true}));
+            }
+            let installation = crate::update_install::detect();
+            let plan = crate::update_install::plan(&installation, &record.asset.name, &record.path);
+            if !plan.automatic { return Err("Automatic installation is unavailable; use the saved package and update command".into()); }
             #[cfg(target_os = "android")]
             {
                 return Ok(json!({"android_path": record.path.to_string_lossy()}));
@@ -724,13 +777,29 @@ pub async fn open_downloaded_update(id: String) -> Result<Value, String> {
             {
                 #[cfg(target_os = "windows")]
                 {
-                    std::process::Command::new(&record.path)
-                        .arg("/UPDATE")
-                        .spawn()
-                        .map_err(|error| error.to_string())?;
-                    return Ok(json!({"opened":true}));
+                    let directory = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("updates");
+                    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+                    let (result,acknowledgement) = crate::windows_update::start(&installation, &record.path, record.asset.size, &record.asset.digest, &record.id, &record.version, &directory)?;
+                    if result["exit_required"] == true { *HANDOFF.lock().map_err(|e| e.to_string())? = Some((record.id, false, Some(acknowledgement))); }
+                    return Ok(result);
                 }
-                #[cfg(not(target_os = "windows"))]
+                #[cfg(target_os = "linux")]
+                {
+                    use std::process::{Command, Stdio};
+                    if installation.kind == crate::update_install::Kind::Appimage {
+                        replace_appimage(&record.path, &record.asset)?;
+                    } else {
+                        let (program, _) = crate::update_install::linux_command(&installation.kind, &record.path).ok_or("No matching package manager")?;
+                        let status = Command::new("/usr/bin/pkexec").args(["--disable-internal-agent", "/bin/sh", "-c", include_str!("update_install.sh"), "workplan-update"])
+                            .arg(&record.path).arg(record.asset.size.to_string()).arg(&record.asset.digest).arg(program)
+                            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_err(|e| e.to_string())?;
+                        if status.code() == Some(126) { return Ok(json!({"opened":false,"canceled":true})); }
+                        if !status.success() { return Err(format!("Package manager exited with code {:?}; use the saved package and command to retry",status.code())); }
+                    }
+                    *HANDOFF.lock().map_err(|e| e.to_string())? = Some((record.id, true, None));
+                    return Ok(json!({"opened":true,"installed":true,"restart_required":true}));
+                }
+                #[cfg(not(any(target_os = "windows", target_os = "linux")))]
                 {
                     open::that(&record.path).map_err(|e| e.to_string())?;
                     Ok(json!({"opened":true}))
@@ -739,12 +808,187 @@ pub async fn open_downloaded_update(id: String) -> Result<Value, String> {
         })
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[cfg(target_os = "linux")]
+fn replace_appimage(source: &std::path::Path, asset: &Asset) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let target =
+        crate::update_install::appimage_path().ok_or("Cannot identify the running AppImage")?;
+    let directory = target.parent().ok_or("AppImage directory unavailable")?;
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).map_err(|e| e.to_string())?;
+    let temporary = directory.join(format!(".workplan-update-{:x}", Sha256::digest(nonce)));
+    let result = (|| {
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|e| e.to_string())?;
+        let mut input = fs::File::open(source).map_err(|e| e.to_string())?;
+        std::io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
+        let mode = fs::metadata(&target)
+            .map_err(|e| e.to_string())?
+            .permissions()
+            .mode()
+            & 0o777;
+        output
+            .set_permissions(fs::Permissions::from_mode(mode))
+            .map_err(|e| e.to_string())?;
+        output.sync_all().map_err(|e| e.to_string())?;
+        drop(output);
+        verify_file(&temporary, asset)?;
+        fs::rename(&temporary, &target).map_err(|e| e.to_string())?;
+        // The rename has already committed. A filesystem that does not support
+        // directory fsync must not be reported as an uninstalled update.
+        let _ = fs::File::open(directory).and_then(|dir| dir.sync_all());
+        Ok(())
+    })();
+    let _ = fs::remove_file(temporary);
+    result
+}
+
+#[tauri::command]
+pub fn complete_update_handoff(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut state = HANDOFF.lock().map_err(|e| e.to_string())?;
+    let (_, restart, acknowledgement) = state
+        .as_ref()
+        .filter(|(request, _, _)| request == &id)
+        .ok_or("No installer handoff is pending")?;
+    let restart = *restart;
+    if let Some(path) = acknowledgement {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
     }
+    *state = None;
+    drop(state);
+    if restart {
+        app.restart();
+    } else {
+        app.exit(0);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_update_install_status(app: tauri::AppHandle) -> Result<Value, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let path = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("updates/last-install.json");
+        let Some(mut value) = crate::windows_update::read_status(&path) else {
+            return Ok(Value::Null);
+        };
+        if value["reported"] == true
+            || !matches!(
+                value["state"].as_str(),
+                Some("failed" | "canceled" | "installed")
+            )
+        {
+            return Ok(Value::Null);
+        }
+        value["reported"] = json!(true);
+        value["recovery"] = recover_windows_package(&path.parent().unwrap().to_path_buf(), &value)
+            .unwrap_or(Value::Null);
+        fs::write(path, serde_json::to_vec(&value).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        return Ok(value);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        Ok(Value::Null)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn recover_windows_package(directory: &std::path::Path, receipt: &Value) -> Option<Value> {
+    // Recovery offers a command, not automatic replay of a mutable on-disk
+    // receipt. A new in-app attempt must fetch official metadata and verify.
+    let version = receipt["version"].as_str()?;
+    crate::updates::version_parts(version)?;
+    let path = PathBuf::from(receipt["package"].as_str()?);
+    if !path.is_absolute()
+        || path.parent()?.canonicalize().ok()? != directory.canonicalize().ok()?
+    {
+        return None;
+    }
+    let meta = fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let leaf = path.file_name()?.to_str()?;
+    let (nonce, name) = leaf.split_once('-')?;
+    if nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        "x86" => "x86",
+        _ => return None,
+    };
+    if name != format!("WorkPlan_{version}_{arch}-setup.exe")
+        && name != format!("WorkPlan_{version}_{arch}_en-US.msi")
+    {
+        return None;
+    }
+    let mut plan = crate::update_install::plan(&crate::update_install::detect(), name, &path);
+    plan.automatic = false;
+    Some(json!({"name":name,"saved_path":path.to_string_lossy(),"installation":plan}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn restart_recovery_is_cache_scoped_and_never_grants_an_automatic_install() {
+        let mut nonce = [0u8; 16];
+        getrandom::fill(&mut nonce).unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "workplan-recovery-test-{:x}",
+            Sha256::digest(nonce)
+        ));
+        fs::create_dir(&directory).unwrap();
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "x64",
+            "aarch64" => "arm64",
+            _ => "x86",
+        };
+        let package = directory.join(format!(
+            "{}-WorkPlan_0.6.0_{arch}_en-US.msi",
+            "a".repeat(32)
+        ));
+        fs::write(&package, b"test").unwrap();
+        let mut receipt = json!({"version":"0.6.0","package":package});
+        let plan = recover_windows_package(&directory, &receipt).unwrap();
+        assert_eq!(plan["installation"]["automatic"], false);
+        assert!(plan.get("verified").is_none());
+        assert!(plan["installation"]["manual_command"]
+            .as_str()
+            .unwrap()
+            .contains("msiexec.exe"));
+        receipt["version"] = json!("../../evil");
+        assert!(recover_windows_package(&directory, &receipt).is_none());
+        receipt["version"] = json!("0.6.0");
+        assert!(recover_windows_package(directory.parent().unwrap(), &receipt).is_none());
+        let unrelated = directory.join("unrelated.exe");
+        fs::write(&unrelated, b"test").unwrap();
+        receipt["package"] = json!(unrelated);
+        assert!(recover_windows_package(&directory, &receipt).is_none());
+        fs::remove_file(package).unwrap();
+        fs::remove_file(unrelated).unwrap();
+        fs::remove_dir(directory).unwrap();
+    }
+
     fn fixture(os: &str, arch: &str) -> Value {
         let name = asset_name("0.6.0", os, arch).unwrap();
         json!({"tag_name":"v0.6.0","draft":false,"prerelease":false,"assets":[{"name":name,"size":4,"digest":format!("sha256:{:x}",Sha256::digest(b"test")),"browser_download_url":format!("https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/download/v0.6.0/{name}")}]})
@@ -845,7 +1089,8 @@ mod tests {
         fs::write(&existing, b"user-owned-package").unwrap();
         fs::write(&partial, b"verified-fixture").unwrap();
         let saved =
-            publish_without_overwrite(&partial, &directory, "workplan.pkg.tar.zst", || Ok(())).unwrap();
+            publish_without_overwrite(&partial, &directory, "workplan.pkg.tar.zst", || Ok(()))
+                .unwrap();
         assert_ne!(saved, existing);
         assert_eq!(fs::read(&existing).unwrap(), b"user-owned-package");
         assert_eq!(fs::read(&saved).unwrap(), b"verified-fixture");
@@ -905,7 +1150,8 @@ mod tests {
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).unwrap();
         let directory = std::env::temp_dir().join(format!(
-            "workplan-cancel-publication-{:x}", Sha256::digest(random)
+            "workplan-cancel-publication-{:x}",
+            Sha256::digest(random)
         ));
         fs::create_dir(&directory).unwrap();
         let existing = directory.join("fixture.rpm");
@@ -920,12 +1166,20 @@ mod tests {
             download_only: true,
             url: String::new(),
         };
-        let published = publish_without_overwrite(&partial, &directory, &asset.name, || Ok(())).unwrap();
-        let guard = DownloadGuard { id: "isolated-verification-cancel".into(), partial: Some(published.clone()) };
+        let published =
+            publish_without_overwrite(&partial, &directory, &asset.name, || Ok(())).unwrap();
+        let guard = DownloadGuard {
+            id: "isolated-verification-cancel".into(),
+            partial: Some(published.clone()),
+        };
         let checks = Cell::new(0);
         let result = verify_file_checked(&published, &asset, || {
             checks.set(checks.get() + 1);
-            if checks.get() == 3 { Err("Download canceled".into()) } else { Ok(()) }
+            if checks.get() == 3 {
+                Err("Download canceled".into())
+            } else {
+                Ok(())
+            }
         });
         assert_eq!(result.unwrap_err(), "Download canceled");
         drop(guard);

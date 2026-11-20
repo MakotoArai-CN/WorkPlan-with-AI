@@ -16,7 +16,7 @@ pub fn package_owner(manager: &str, result: &str) -> Option<Package> {
     }
     .trim()
     .to_ascii_lowercase();
-    if !["workplan", "workplan-bin", "workplan-with-ai"].contains(&owner.as_str()) {
+    if !["workplan", "work-plan", "workplan-bin", "workplan-with-ai"].contains(&owner.as_str()) {
         return None;
     }
     match manager {
@@ -125,6 +125,16 @@ mod tests {
         );
         assert_eq!(
             package_owner("dpkg-query", "workplan:amd64: /usr/bin/workplan\n"),
+            Some(Package::Deb)
+        );
+        // Tauri publishes the Debian package as `work-plan`, despite the
+        // executable being named `workplan` and the asset `WorkPlan_*.deb`.
+        assert_eq!(
+            package_owner("dpkg-query", "work-plan: /usr/bin/workplan\n"),
+            Some(Package::Deb)
+        );
+        assert_eq!(
+            package_owner("dpkg-query", "work-plan:amd64: /usr/bin/workplan\n"),
             Some(Package::Deb)
         );
         assert_eq!(package_owner("rpm", "WorkPlan"), Some(Package::Rpm));
