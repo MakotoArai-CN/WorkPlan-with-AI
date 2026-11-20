@@ -17,6 +17,10 @@ import { describeOperation } from '../utils/ai-operation-policy.js';
 import { READ_APP_DATA_TOOL, queryApplicationData } from '../utils/ai-app-query.js';
 import { fitFileSearchReport } from '../utils/file-search-report.js';
 import { buildConversationContext, conversationBeforeRequest, conversationContextKey, fileConversationObservation } from '../utils/ai-conversation-context.js';
+import { forbidsWebSearch, getProviderSearch, isPublicWebQuery } from '../utils/ai-web-search.js';
+import { abortable } from '../utils/ai-transport.js';
+import { describeToolFailure } from '../utils/local-tools.js';
+import { isTauriRuntime } from '../utils/runtime.js';
 
 const STORAGE_KEY = 'workplan_ai_config';
 const AI_CHAT_HISTORY_KEY = 'workplan_ai_chat_history';
@@ -218,9 +222,9 @@ export const aiChatCapabilities = derived(
         const localFilesAvailable = $runtime.probed
             ? localFilesSettingAvailable && ($runtime.localFilesRuntimeAvailable !== false)
             : localFilesSettingAvailable;
-        const webSearchAvailable = $runtime.probed
-            ? toolsUsable && ($runtime.webSearchRuntimeAvailable !== false)
-            : toolsUsable;
+        const providerSearchOffered = Boolean(getProviderSearch($config));
+        const bundledSearchAvailable = $runtime.webSearchRuntimeAvailable ?? isTauriRuntime;
+        const webSearchAvailable = toolRouterEnabled && connectionReady && (providerSearchOffered || bundledSearchAvailable);
         const toolCallAvailable = $runtime.probed
             ? ($runtime.toolCallRuntimeAvailable !== false)
             : true;
@@ -239,6 +243,8 @@ export const aiChatCapabilities = derived(
             localFilesRequireConfirmation: localFilesAvailable &&
                 ($settings.localFileConfig?.requireConfirmation ?? true),
             webSearchAvailable,
+            webSearchVerified: $runtime.webSearchRuntimeAvailable === true,
+            providerSearchOffered,
             toolCallRuntimeAvailable: toolCallAvailable,
             nativeToolCallRuntimeAvailable: nativeToolCallAvailable,
             workspaceRoot: $settings.workspaceRoot || '',
@@ -272,18 +278,12 @@ export async function probeAiCapabilities() {
 
     try {
         const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('search_web', { query: 'test', maxResults: 1 });
-        webSearchOk = true;
+        const results = await invoke('search_web', { query: 'DuckDuckGo', maxResults: 1 });
+        webSearchOk = Array.isArray(results) && results.length > 0;
+        if (!webSearchOk) details.webSearch = { ok: false, kind: 'error', message: 'DuckDuckGo 未返回测试结果' };
     } catch (e) {
-        const errMsg = String(e?.message || e || '').toLowerCase();
-        const failure = describeToolFailure(e);
-        details.webSearch = { ok: failure.kind !== 'unsupported', ...failure };
-        if (errMsg.includes('not found') || errMsg.includes('not implemented') ||
-            errMsg.includes('no such') || errMsg.includes('plugin')) {
-            webSearchOk = false;
-        } else {
-            webSearchOk = true;
-        }
+        webSearchOk = false;
+        details.webSearch = { ok: false, ...describeToolFailure(e) };
     }
 
     try {
@@ -977,11 +977,13 @@ function stripMediaForStorage(message) {
 }
 
 function persistAiChatHistory(history, sessions, activeSessionId, { maxMessages = 100, maxSessions = 30 } = {}) {
-    const safeHistory = history.slice(-maxMessages).map(stripMediaForStorage);
+    // Google returns its suggestions for display with the live answer.
+    const persistable = messages => messages.filter(message => !message?.transient).slice(-maxMessages).map(stripMediaForStorage);
+    const safeHistory = persistable(history);
     const safeSessions = sessions.slice(0, maxSessions).map(session => ({
         ...session,
         history: Array.isArray(session.history)
-            ? session.history.slice(-maxMessages).map(stripMediaForStorage)
+            ? persistable(session.history)
             : []
     }));
     localStorage.setItem(AI_CHAT_HISTORY_KEY, JSON.stringify(safeHistory));
@@ -1821,13 +1823,24 @@ async function runLocalFilePlan(plan, userText, config, requireConfirmation = tr
 }
 
 async function runWebSearchPlan(plan, userText, config, onProgress = null) {
+    const current = () => {
+        if (config.signal?.aborted || config.isCurrent && !config.isCurrent() || get(settingsStore).enableAiChatTools === false) {
+            throw new DOMException('操作已取消或工具已关闭', 'AbortError');
+        }
+    };
+    current();
+    if (forbidsWebSearch(userText)) {
+        return { role: 'assistant', type: 'text', content: '用户要求离线作答，未访问网页。' };
+    }
     const explicitUrl = String(plan?.url || '').trim();
     if (explicitUrl) {
         if (!isExplicitWebFetchTarget(userText, explicitUrl)) {
             return { role: 'assistant', type: 'text', content: '未访问用户未明确提供的网页地址。请提供完整网址，或改用网页搜索。' };
         }
         if (onProgress) onProgress('fetching');
-        const pageContent = await fetchWebContent(explicitUrl, 5000);
+        const pageContent = await abortable(fetchWebContent(explicitUrl, 5000), config.signal);
+        current();
+        if (!pageContent) return { role: 'assistant', type: 'text', content: `无法读取网页内容：${explicitUrl}` };
         if (onProgress) onProgress('generating');
         const summarized = await finalizeToolAnswer(
             userText,
@@ -1848,42 +1861,65 @@ async function runWebSearchPlan(plan, userText, config, onProgress = null) {
         };
     }
 
-    const results = await searchWeb({
-        query: plan.query || userText,
-        maxResults: plan.maxResults || 6
-    });
-
-    // Fetch page content for top results to give AI richer context
-    let pageContents = '';
-    if (results.length > 0) {
-        if (onProgress) onProgress('fetching');
-        const fetches = await Promise.allSettled(
-            results.slice(0, 3).map(r => fetchWebContent(r.url, 3000))
-        );
-        const contents = fetches
-            .map((r, i) => r.status === 'fulfilled' && r.value ? `[${results[i].title}]\n${r.value}` : null)
-            .filter(Boolean);
-        if (contents.length > 0) {
-            pageContents = '\n\n网页正文摘录:\n' + contents.join('\n\n---\n\n');
+    const normalize = value => value.trim().replace(/\s+/g, ' ');
+    const query = normalize(String(plan.query || ''));
+    // The model may have read private data or previous messages. Require the
+    // actual outbound terms to come verbatim from this turn for either engine.
+    if (!query || query.length > 4000 || !normalize(userText).includes(query)) {
+        return { role: 'assistant', type: 'text', content: '未发送网页搜索请求。请用户在本轮消息里直接提供要查询的公开关键词。' };
+    }
+    if (getProviderSearch(config)) {
+        const { callProviderWebSearch } = await import('../utils/ai-providers.js');
+        current();
+        try {
+            const searched = await callProviderWebSearch(config, query);
+            current();
+            if (searched) return { role: 'assistant', type: 'web_search_result', query, ...searched };
+        } catch (error) {
+            current();
+            if (error?.name === 'AbortError') throw error;
+            return { role: 'assistant', type: 'error', content: error.message, originalText: userText };
         }
     }
 
+    let results;
+    try {
+        results = await abortable(searchWeb({ query, maxResults: plan.maxResults || 6 }), config.signal);
+    } catch (error) {
+        current();
+        if (error?.name === 'AbortError') throw error;
+        return { role: 'assistant', type: 'error', content: error.message, originalText: userText };
+    }
+    current();
+    if (!results.length) return { role: 'assistant', type: 'web_search_result', query, entries: [] };
+
+    // Fetch page content for top results to give AI richer context
+    if (onProgress) onProgress('fetching');
+    const fetches = await abortable(Promise.allSettled(
+        results.slice(0, 3).map(r => fetchWebContent(r.url, 3000))
+    ), config.signal);
+    current();
+    const contents = fetches.map((r, i) => r.status === 'fulfilled' && r.value ? `[${results[i].title}]\n${r.value}` : null).filter(Boolean);
+    const pageContents = contents.length ? '\n\n网页正文摘录:\n' + contents.join('\n\n---\n\n') : '';
+
     if (onProgress) onProgress('generating');
     const fallback = formatWebSearchResult(results);
-    const summarized = await finalizeToolAnswer(
-        userText,
-        {
+    let summary = '';
+    try {
+        summary = await finalizeToolAnswer(userText, {
             operation: 'web_search',
             response_goal: plan.response_goal || '根据网页搜索结果直接回答用户，并保留关键链接。'
-        },
-        fallback + pageContents,
-        config
-    );
+        }, fallback + pageContents, config);
+    } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        // Still show the actual sources if the follow-up model request fails.
+    }
+    current();
     return {
         role: 'assistant',
         type: 'web_search_result',
-        query: plan.query || userText,
-        summary: summarized || `已找到 ${results.length} 条网页结果。`,
+        query,
+        summary,
         entries: results,
         message: plan.message || '已完成网页搜索。'
     };
@@ -2094,7 +2130,7 @@ function buildNativeToolDefinitions(allowLocalFiles = true, allowApplicationData
                 parameters: {
                     type: 'object',
                     properties: {
-                        query: { type: 'string', description: '搜索关键词。访问 URL 时也要给一个简短主题。' },
+                        query: { type: 'string', description: '从本轮用户原话截取连续的公开关键词，不翻译或补全。访问 URL 时也给出简短主题。' },
                         url: { type: 'string', description: '用户明确给出的 URL，可选。' },
                         maxResults: { type: 'integer', minimum: 1, maximum: 8 },
                         response_goal: { type: 'string', description: '搜索后应该如何回答用户。' },
@@ -2707,7 +2743,7 @@ async function executeNativeToolCall(toolCall, userText, config, assistantContex
         return await runWebSearchPlan({
             mode: 'web',
             url: args.url || '',
-            query: args.query || userText,
+            query: args.query,
             maxResults: args.maxResults || 6,
             response_goal: args.response_goal || '根据网页搜索结果直接回答用户，并保留关键链接。',
             message: args.message || '已通过原生工具调用执行网页搜索。'
@@ -2810,7 +2846,7 @@ async function requestOnDemandReply(text, config, context = {}, attachments = []
     const api = await import('../utils/ai-providers.js');
     const isCurrent = config.isCurrent || captureAiOperationGuard(config.signal, false);
     const toolsEnabled = get(settingsStore).enableAiChatTools !== false;
-    const supportsNative = toolsEnabled && api.canProviderUseNativeTools(config.provider);
+    const supportsNative = toolsEnabled && api.canProviderUseNativeTools(config.provider, config);
     const bodyFormat = api.getProviderBodyFormat(config.provider);
     const userContent = buildUserMessageContentForAI({ content: text, attachments }, bodyFormat);
     const previous = buildConversationContext(history, { contextKey });
@@ -2832,6 +2868,7 @@ async function requestOnDemandReply(text, config, context = {}, attachments = []
 当前页面类型：${context.scope === 'notes' ? '笔记页面' : '通用聊天'}，${context.activeNoteId ? '有选中笔记，可查询current_note' : '未显式选择笔记'}。标题、正文和其他记录必须查询才能获得。
 本地路径交由系统原生解析，不猜测系统目录，不自行拼接用户目录别名。授权只代表指定范围的访问权限，不代表目标存在或操作成功。权限或路径失败时如实说明，不盲目重试；读取内容不等于运行或验证其行为。
 所有工具都按最小必要范围执行：先定位明确对象，再查询所需字段或关键内容。多候选时先澄清，不自动扩大权限、目录或数据范围。以工具返回的实际范围、条件、错误和截断标记为准，不编造结果缺失的原因；已有足够事实时立即回答。只返回确认卡片的操作尚未执行，已失败的变更不自动重试。
+仅在用户需要公开网页信息时调用 workplan_web_search。搜索词必须从本轮用户原话连续截取，不翻译、不从历史、应用记录、文件或附件补全。缺少明确主题时先请用户给出公开关键词。用户要求离线作答时不要搜索。
 ${context.scope === 'notes' ? '工作文档模式：通过工具取得正文后保持原有Markdown结构，直接给出草稿，不声称已保存。' : ''}
 查询其他笔记先列出标题，再按真实ID读取单篇；分页与截断必须告知范围。锁定、删除或查询失败时准确说明，不编造数据。仅用户明确要求保存/修改/删除时可请求变更工具；返回确认卡片不等于执行成功。
 回复风格：${['default', 'fun', 'professional', 'concise', 'teacher'].includes(chatStyle) ? chatStyle : 'default'}。
@@ -2840,7 +2877,12 @@ ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用�
         ...previous.messages,
         bodyFormat === 'google' && Array.isArray(userContent) ? { role: 'user', parts: userContent } : { role: 'user', content: userContent }
     ];
-    if (!supportsNative) return annotate({ role: 'assistant', type: 'text', content: await api.callAIWithMessages(config, messages) });
+    const explicitSearch = toolsEnabled && !initialResult && !attachments.length && text.length <= 4000 && isPublicWebQuery(text);
+    const searchDirectly = async () => annotate(await runWebSearchPlan({ query: text }, text, { ...config, isCurrent }));
+    if (!supportsNative) {
+        if (explicitSearch) return searchDirectly();
+        return annotate({ role: 'assistant', type: 'text', content: await api.callAIWithMessages(config, messages) });
+    }
     const allowFiles = get(settingsStore).localFileConfig?.enabled === true;
     const actionTools = buildNativeToolDefinitions(allowFiles, true);
     const tools = [READ_APP_DATA_TOOL, ...actionTools];
@@ -2879,7 +2921,7 @@ ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用�
                     current.items = args.source === 'templates' ? state.templates : args.source === 'scheduled' ? state.scheduledTasks : state.tasks;
                 }
                 if (['workplan_project_action', 'workplan_notes_action', 'workplan_worklog_action'].includes(call.name)) applicationData = true;
-                const result = await executeNativeToolCall(call, text, { ...config, rawToolResults: true }, current,
+                const result = await executeNativeToolCall(call, text, { ...config, isCurrent, rawToolResults: true }, current,
                     get(settingsStore).localFileConfig?.requireConfirmation ?? true, () => {}, allowFiles);
                 if (call.name === 'workplan_local_file') rememberFile(args, result);
                 return { data: result?.toolData || result, applied: result?.applied === true,
@@ -2889,6 +2931,7 @@ ${supportsNative ? '' : '当前连接未提供原生工具，不能查询应用�
         return annotate(reply);
     } catch (error) {
         if (isNativeToolUnsupportedError(error)) {
+            if (explicitSearch && !applicationData && isCurrent()) return searchDirectly();
             throw new Error('当前API或模型未支持原生工具调用，未读取应用数据。请在AI设置选择支持tool_calls的模型后重试。');
         }
         throw error;
@@ -3285,6 +3328,7 @@ export function exportChatToMarkdown() {
     const lines = [`# ${title}\n`];
 
     for (const msg of history) {
+        if (msg.transient) continue;
         if (msg.role === 'user') {
             lines.push(`**You:**\n> ${msg.content.replace(/\n/g, '\n> ')}\n`);
             if (msg.attachments?.length) {

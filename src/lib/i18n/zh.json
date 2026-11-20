@@ -800,6 +800,7 @@
     "pending_confirm": "待确认",
     "pending_add": "待添加",
     "web_search_result": "网页搜索结果",
+    "search_suggestions": "Google 搜索建议",
     "search_query_label": "搜索词：{query}",
     "open_link": "打开",
     "no_results": "未找到可用结果。",

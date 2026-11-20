@@ -800,6 +800,7 @@
     "pending_confirm": "確認待ち",
     "pending_add": "追加待ち",
     "web_search_result": "Web検索結果",
+    "search_suggestions": "Google 検索候補",
     "search_query_label": "検索ワード：{query}",
     "open_link": "開く",
     "no_results": "結果が見つかりませんでした。",

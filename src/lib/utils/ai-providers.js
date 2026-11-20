@@ -1,7 +1,8 @@
 import { assertProviderMessages } from './ai-attachment-policy.js';
 import { isTauriRuntime } from './runtime.js';
-import { resolveRequestHeaders } from './ai-request-fingerprint.js';
+import { normalizeRequestHeaders, resolveRequestHeaders } from './ai-request-fingerprint.js';
 import { abortable, addEndpointQuery, boundedNumber, createAiStreamParser, MAX_AI_RESPONSE_CHARS, readAiResponseJson, readAiResponseText, providerHttpError, safeProviderError, throwIfAborted } from './ai-transport.js';
+import { getProviderSearch, isProviderSearchUnsupported, parseProviderSearch, providerSearchRequest } from './ai-web-search.js';
 
 const PROVIDER_CONFIGS = {
     openai: {
@@ -456,12 +457,13 @@ async function fetchWithTauri(url, options = {}) {
         if (typeof fetch !== 'function') {
             throw new Error('当前环境不支持 HTTP 请求');
         }
+        if (options.noRedirect) fetchOptions.redirect = 'error';
         return await fetch(safeUrl, fetchOptions);
     }
 
     try {
         const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-        return await tauriFetch(safeUrl, fetchOptions);
+        return await tauriFetch(safeUrl, options.noRedirect ? { ...fetchOptions, maxRedirections: 0 } : fetchOptions);
     } catch (e) {
         throwIfAborted(options.signal);
         const errorMsg = safeProviderError(e);
@@ -950,6 +952,31 @@ function getEffectiveEndpoint(provider, providerId, config) {
         return normalizeChatEndpoint(config.customEndpoint, providerId);
     }
     return provider.endpoint;
+}
+
+export async function callProviderWebSearch(config, query) {
+    if (!getProviderSearch(config)) return null;
+    const providerId = config.provider || 'openai';
+    const apiKey = config.apiKey?.trim();
+    if (!apiKey) throw new Error('未配置 API Key');
+    throwIfAborted(config.signal);
+    const model = validateModel(PROVIDER_CONFIGS[providerId], config.model, getCachedModels(providerId));
+    const { url, body, headers } = providerSearchRequest(providerId, model, query, apiKey);
+    const projectHeaders = providerId === 'openai' ? normalizeRequestHeaders(
+        Object.entries(config.customHeaders || {}).filter(([name]) => /^openai-(organization|project)$/i.test(name.trim()))
+    ) : {};
+    const response = await abortable(fetchWithTauri(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers, ...projectHeaders },
+        body, signal: config.signal, noRedirect: true
+    }), config.signal);
+    if (!response.ok) {
+        const error = providerHttpError(response.status, await abortable(readAiResponseText(response), config.signal), [apiKey]);
+        if (isProviderSearchUnsupported(error)) return null;
+        throw error;
+    }
+    const result = await abortable(readAiResponseJson(response), config.signal);
+    throwIfAborted(config.signal);
+    return parseProviderSearch(providerId, result);
 }
 
 export async function callAI(config, userMessage, systemPrompt, options = {}) {

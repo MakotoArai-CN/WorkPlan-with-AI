@@ -800,6 +800,7 @@
     "pending_confirm": "pending",
     "pending_add": "to add",
     "web_search_result": "Web Search Results",
+    "search_suggestions": "Google Search suggestions",
     "search_query_label": "Query: {query}",
     "open_link": "Open",
     "no_results": "No results found.",
