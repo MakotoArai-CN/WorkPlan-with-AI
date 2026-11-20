@@ -41,6 +41,7 @@
         getNavigationDepth,
     } from "../stores/navigation.js";
     import { openExternalUrl } from "../utils/open-external.js";
+    import SearchSuggestions from './SearchSuggestions.svelte';
     import { safeImageUrl, safeMediaDataUrl } from "../utils/safe-content.js";
     import { attachmentCapabilities } from '../utils/ai-attachment-policy.js';
     import { resizeTextarea, observeTextareaResize } from "../utils/textarea-autosize.js";
@@ -129,8 +130,9 @@
             label: $_("ai_chat.capability_web_search"),
             active: $aiChatCapabilities.webSearchAvailable,
             icon: $aiChatCapabilities.webSearchAvailable ? "ph-globe" : "ph-globe-hemisphere-west",
-            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.webSearchAvailable : null,
-            detail: $aiChatRuntimeCapabilities.details?.webSearch?.message || '',
+            runtime: $aiChatCapabilities.probed && (!$aiChatCapabilities.providerSearchOffered || $aiChatCapabilities.webSearchVerified)
+                ? $aiChatCapabilities.webSearchAvailable : null,
+            detail: $aiChatCapabilities.providerSearchOffered ? '' : $aiChatRuntimeCapabilities.details?.webSearch?.message || '',
         },
     ];
 
@@ -1916,7 +1918,12 @@
                                     {/if}
                                     {#if msg.summary}
                                         <div class="mt-3 rounded-xl bg-white dark:bg-slate-800 border border-cyan-100 dark:border-cyan-900/50 p-3">
-                                            <MarkdownRenderer content={msg.summary} />
+                                            {#if msg.suggestions?.length}
+                                                <div class="whitespace-pre-wrap break-words">{msg.summary}</div>
+                                            {:else}
+                                                <MarkdownRenderer content={msg.summary} openLinksExternally />
+                                            {/if}
+                                            <SearchSuggestions suggestions={msg.suggestions || []} />
                                         </div>
                                     {/if}
                                     <div class="mt-3 space-y-2 max-h-80 overflow-y-auto">

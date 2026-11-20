@@ -5,14 +5,30 @@
     import { _ } from 'svelte-i18n';
     import { get } from 'svelte/store';
     import { copyText } from '../utils/clipboard.js';
+    import { openExternalUrl } from '../utils/open-external.js';
     import 'highlight.js/styles/github-dark.css';
     import 'katex/dist/katex.min.css';
 
     export let content = '';
     export let inline = false;
+    export let openLinksExternally = false;
 
     let renderedContent = '';
     let container;
+
+    function externalLinks(node, enabled) {
+        const followLink = event => {
+            const link = event.target.closest?.('a[target="_blank"][href]');
+            if (!enabled || !link) return;
+            event.preventDefault();
+            void openExternalUrl(link.href);
+        };
+        node.addEventListener('click', followLink);
+        return {
+            update(value) { enabled = value; },
+            destroy() { node.removeEventListener('click', followLink); }
+        };
+    }
 
     $: {
         if (isMarkdown(content)) {
@@ -78,9 +94,9 @@
     {/if}
 {:else}
     {#if inline}
-        <span bind:this={container} class="markdown-content inline-markdown">{@html renderedContent}</span>
+        <span bind:this={container} use:externalLinks={openLinksExternally} class="markdown-content inline-markdown">{@html renderedContent}</span>
     {:else}
-        <div bind:this={container} class="markdown-content">{@html renderedContent}</div>
+        <div bind:this={container} use:externalLinks={openLinksExternally} class="markdown-content">{@html renderedContent}</div>
     {/if}
 {/if}
 

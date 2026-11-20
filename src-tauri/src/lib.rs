@@ -746,6 +746,7 @@ async fn search_web(
 
     let limit = max_results.unwrap_or(6).clamp(1, 10);
     let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
         .user_agent(concat!(
             "Mozilla/5.0 (compatible; WorkPlan/",
             env!("CARGO_PKG_VERSION"),

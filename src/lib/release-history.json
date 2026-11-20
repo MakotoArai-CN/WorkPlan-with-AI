@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.5.28",
+    "date": "2026-11-20",
+    "changes": {
+      "zh": [
+        "联网查询优先使用支持的 OpenAI、Claude 或 Gemini 官方搜索，在 AI 聊天和侧栏助手中显示可打开的来源。",
+        "连接不支持官方搜索或未返回可用来源时，使用内置 DuckDuckGo。网页搜索只发送当前消息里的查询词。"
+      ],
+      "en": [
+        "Use supported OpenAI, Claude, or Gemini web search first and show clickable sources in AI Chat and the side assistant.",
+        "Use the built-in DuckDuckGo search if the connection lacks native search or returns no usable sources. Only send search terms from the current message."
+      ],
+      "ja": [
+        "対応する OpenAI、Claude、Gemini の公式ウェブ検索を優先し、AI チャットとサイドアシスタントに開ける参照元を表示します。",
+        "公式検索に非対応の場合や利用できる参照元がない場合は、内蔵の DuckDuckGo を使います。検索には現在のメッセージに含まれる語句のみを送信します。"
+      ]
+    }
+  },
+  {
     "version": "0.5.27",
     "date": "2026-11-13",
     "changes": {

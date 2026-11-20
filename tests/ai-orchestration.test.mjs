@@ -37,6 +37,15 @@ function scenario(body) {
         let confirms = 0;
         let confirm = async () => true;
         let capturedMessages;
+        let providerSearchReply = null;
+        const dummyCredential = ['unit', 'fixture', 'only'].join('-');
+        const providerQueries = [], bundledQueries = [], fetchedUrls = [];
+        const searchSource = { title: 'Svelte release', url: 'https://svelte.dev/blog/', source: 'OpenAI', snippet: '' };
+        const webCall = (query, url) => ({ name: 'workplan_web_search', arguments: JSON.stringify({ query, url }) });
+        mock.module('./src/lib/utils/web-search.js', () => ({
+            searchWeb: async args => { bundledQueries.push(args.query); return [{ ...searchSource, source: 'DuckDuckGo' }]; },
+            fetchWebContent: async url => { fetchedUrls.push(url); return 'Svelte release page excerpt'; }
+        }));
         mock.module('./src/lib/stores/settings.js', () => ({ settingsStore }));
         mock.module('./src/lib/stores/tasks.js', () => ({ taskStore }));
         mock.module('./src/lib/stores/notes.js', () => ({ notesStore }));
@@ -58,6 +67,10 @@ function scenario(body) {
         }));
         mock.module('./src/lib/utils/ai-providers.js', () => ({
             canProviderUseNativeTools: () => nativeSupported,
+            callProviderWebSearch: async (config, query) => {
+                providerQueries.push(query);
+                return typeof providerSearchReply === 'function' ? await providerSearchReply(config) : providerSearchReply;
+            },
             callAIWithMessagesAndTools: async (_config, messages) => {
                 requests++; capturedMessages = JSON.parse(JSON.stringify(messages));
                 if (!messages.some(message=>message.role==='tool')) initialMessages = capturedMessages;
@@ -331,11 +344,129 @@ test('application capabilities require actual function-call support rather than 
     ai.aiChatRuntimeCapabilities.set({probed:true,toolCallRuntimeAvailable:true,nativeToolCallRuntimeAvailable:false,localFilesRuntimeAvailable:true,webSearchRuntimeAvailable:true});
     let capabilities=get(ai.aiChatCapabilities);
     assert.equal(capabilities.applicationToolsAvailable,false);
-    assert.equal(capabilities.localFilesAvailable,false);assert.equal(capabilities.webSearchAvailable,false);
+    assert.equal(capabilities.localFilesAvailable,false);assert.equal(capabilities.webSearchAvailable,true);
     ai.aiChatRuntimeCapabilities.update(s=>({...s,nativeToolCallRuntimeAvailable:true}));
     assert.equal(get(ai.aiChatCapabilities).applicationToolsAvailable,true);
     settingsStore.update(s=>({...s,enableAiChatTools:false}));
     assert.equal(get(ai.aiChatCapabilities).applicationToolsAvailable,false);
+`));
+
+test('official search returns to both chat surfaces without running DuckDuckGo or ordinary chat', () => scenario(`
+    ai.aiConfig.set({ provider:'openai', apiKey:dummyCredential, model:'gpt-5' });
+    await ai.sendChatMessage('你好');
+    assert.equal(get(ai.aiChatHistory).at(-1).type,'text');
+    assert.deepEqual(providerQueries,[]);
+    providerSearchReply={summary:'Svelte update [1](<https://svelte.dev/blog/>)',entries:[searchSource]};
+    response={toolCalls:[webCall('Svelte')]};
+    await ai.sendChatMessage('联网搜索 Svelte 最新版本');
+    const result=get(ai.aiChatHistory).at(-1);
+    assert.equal(result.type,'web_search_result');
+    assert.equal(result.summary,providerSearchReply.summary);
+    assert.equal(result.entries[0].url,searchSource.url);
+    await ai.sendAiMessage('Search the web for Svelte');
+    assert.equal(get(ai.chatHistory).at(-1).type,'web_search_result');
+    assert.deepEqual(providerQueries,['Svelte','Svelte']);
+    assert.deepEqual(bundledQueries,[]);
+`));
+
+test('no cited provider reply falls back to DuckDuckGo; a compatible gateway goes straight to DuckDuckGo', () => scenario(`
+    ai.aiConfig.set({ provider:'openai', apiKey:dummyCredential, model:'gpt-5' });
+    response={toolCalls:[webCall('Svelte')]};
+    await ai.sendChatMessage('联网搜索 Svelte');
+    assert.deepEqual(providerQueries,['Svelte']);
+    assert.equal(get(ai.aiChatHistory).at(-1).entries[0].source,'DuckDuckGo');
+    ai.aiConfig.update(config=>({...config,customEndpoint:'https://gateway.invalid/v1'}));
+    await ai.sendChatMessage('联网搜索 Svelte');
+    assert.deepEqual(providerQueries,['Svelte']);
+    assert.deepEqual(bundledQueries,['Svelte','Svelte']);
+`));
+
+test('unsupported function calling still allows explicit searches; tools off and capability questions do not search', () => scenario(`
+    ai.aiConfig.set({ provider:'anthropic', apiKey:dummyCredential, model:'claude-test' });
+    nativeSupported=false;
+    providerSearchReply={summary:'Svelte update',entries:[searchSource]};
+    await ai.sendChatMessage('网页搜索功能怎么用？');
+    assert.equal(get(ai.aiChatHistory).at(-1).type,'text');
+    const prompt='Search the web for Svelte';
+    await ai.sendChatMessage(prompt);
+    assert.equal(get(ai.aiChatHistory).at(-1).type,'web_search_result');
+    settingsStore.update(s=>({...s,enableAiChatTools:false}));
+    await ai.sendChatMessage(prompt);
+    assert.equal(get(ai.aiChatHistory).at(-1).type,'text');
+    await ai.sendAiMessage(prompt);
+    assert.equal(get(ai.chatHistory).at(-1).type,'text');
+    assert.deepEqual(providerQueries,[prompt]);
+    assert.deepEqual(bundledQueries,[]);
+`));
+
+test('model cannot send data derived from a local read, an attachment or chat history to either engine', () => scenario(`
+    ai.aiConfig.set({ provider:'openai', apiKey:dummyCredential });
+    await ai.sendChatMessage('History-only term XYZ');
+    modelDriver = messages => messages.some(message=>message.role==='tool')
+        ? {content:'Provide public search terms',toolCalls:[webCall('Original content'),webCall('History-only term XYZ'),webCall('ATTACHMENT_SECRET')]}
+        : {toolCalls:[{name:'workplan_read_data',arguments:'{"source":"current_note"}'}]};
+    ai.aiChatContext.set({scope:'notes',activeNoteId:'note-1'});
+    await ai.sendChatMessage('Read this note and find the public Svelte release', 'default', null,
+        {attachments:[{name:'sample.txt',content:'ATTACHMENT_SECRET'}]});
+    assert.deepEqual(providerQueries,[]);
+    assert.deepEqual(bundledQueries,[]);
+    assert.deepEqual(fetchedUrls,[]);
+    assert.ok(JSON.stringify(capturedMessages).includes('Original content'));
+`));
+
+test('explicit URL fetch keeps its route; model-invented URLs and offline requests make no calls', () => scenario(`
+    ai.aiConfig.set({ provider:'openai', apiKey:dummyCredential });
+    response={toolCalls:[webCall('Svelte',searchSource.url)]};
+    await ai.sendChatMessage('Read https://svelte.dev/blog/');
+    assert.equal(get(ai.aiChatHistory).at(-1).entries[0].source,'Direct URL');
+    await ai.sendChatMessage('Hello, tell me about Svelte');
+    await ai.sendChatMessage('不要联网搜索 Svelte');
+    assert.deepEqual(fetchedUrls,[searchSource.url]);
+    assert.deepEqual(providerQueries,[]);
+    assert.deepEqual(bundledQueries,[]);
+`));
+
+test('provider errors remain visible without retrying the search on another engine', () => scenario(`
+    ai.aiConfig.set({ provider:'openai', apiKey:dummyCredential });
+    response={toolCalls:[webCall('Svelte')]};
+    providerSearchReply=()=>{throw new Error('HTTP 429: quota exceeded');};
+    await ai.sendChatMessage('联网搜索 Svelte');
+    assert.equal(get(ai.aiChatHistory).at(-1).type,'error');
+    assert.match(get(ai.aiChatHistory).at(-1).content,/quota exceeded/);
+    assert.deepEqual(providerQueries,['Svelte']);
+    assert.deepEqual(bundledQueries,[]);
+`));
+
+test('an aborted search does not show late citations or start a fallback', () => scenario(`
+    ai.aiConfig.set({ provider:'openai', apiKey:dummyCredential });
+    response={toolCalls:[webCall('Svelte')]};
+    let resolveSearch, signal;
+    providerSearchReply=config=>new Promise(resolve=>{resolveSearch=resolve;signal=config.signal;});
+    const pending=ai.sendChatMessage('联网搜索 Svelte');
+    while (!resolveSearch) await new Promise(resolve=>setTimeout(resolve,0));
+    ai.stopStreaming();
+    assert.equal(signal.aborted,true);
+    resolveSearch(null);
+    await pending;
+    assert.equal(get(ai.aiChatHistory).at(-1).type,'text');
+    assert.deepEqual(bundledQueries,[]);
+`));
+
+test('Google grounding appears in the live reply and stays out of disk history and export', () => scenario(`
+    ai.aiConfig.set({ provider:'google', apiKey:dummyCredential });
+    nativeSupported=false;
+    globalThis.window={};
+    const suggestions=[{title:'Svelte current release',url:'https://www.google.com/search?q=svelte'}];
+    providerSearchReply={summary:'GOOGLE_GROUNDED_ANSWER',entries:[searchSource],suggestions,transient:true};
+    await ai.sendChatMessage('联网搜索 Svelte');
+    assert.deepEqual(get(ai.aiChatHistory).at(-1).suggestions,suggestions);
+    const { unpackLocalJson } = await import('./src/lib/utils/local-compress.js');
+    const sessions=unpackLocalJson(storage.get('workplan_ai_chat_sessions'));
+    assert.ok(sessions.sessions.some(session=>session.history.some(message=>message.role==='user')));
+    for (const saved of [storage.get('workplan_ai_chat_history'),JSON.stringify(sessions),ai.exportChatToMarkdown()]) {
+        assert.ok(!saved.includes('GOOGLE_GROUNDED_ANSWER'));
+        assert.ok(!saved.includes('www.google.com'));
+    }
 `));
 
 test('unsupported attachments fail before history, model calls or composer clearing', () => scenario(`

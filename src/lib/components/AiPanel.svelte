@@ -17,6 +17,7 @@
     import { taskStore } from "../stores/tasks.js";
     import { showAlert, showConfirm } from "../stores/modal.js";
     import { openExternalUrl } from "../utils/open-external.js";
+    import SearchSuggestions from './SearchSuggestions.svelte';
     import { resizeTextarea, observeTextareaResize } from "../utils/textarea-autosize.js";
     import { captureMessageApproval } from "../utils/ai-message-approval.js";
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
@@ -1422,7 +1423,12 @@
                             {/if}
                             {#if msg.summary}
                                 <div class="bg-cyan-50 border border-cyan-200 rounded-lg p-2.5 text-[11px] text-slate-600 leading-6 mb-3 min-w-0">
-                                    <MarkdownRenderer content={msg.summary} />
+                                    {#if msg.suggestions?.length}
+                                        <div class="whitespace-pre-wrap break-words">{msg.summary}</div>
+                                    {:else}
+                                        <MarkdownRenderer content={msg.summary} openLinksExternally />
+                                    {/if}
+                                    <SearchSuggestions suggestions={msg.suggestions || []} />
                                 </div>
                             {/if}
                             <div class="space-y-2 max-h-72 overflow-y-auto">
