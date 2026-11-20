@@ -6,6 +6,7 @@
     import SelectMenu from './SelectMenu.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import { notesStore, activeNote, notesList, noteCategories } from "../stores/notes.js";
+    import { registerUpdatePreparation } from '../stores/updates.js';
     import { showConfirm, showToast } from "../stores/modal.js";
     import { renderMarkdown } from "../utils/markdown.js";
     import { sanitizeEditorPreview, hardenVditorLute } from "../utils/safe-html.js";
@@ -58,6 +59,7 @@
     let editorInitializing = false;
     let editorError = '';
     let autoSaveTimer = null;
+    let unregisterUpdatePreparation = () => {};
     let editingNoteId = null;
     let editorComposing = false;
     let selectedCategory = null;
@@ -105,6 +107,10 @@
     }
 
     onMount(async () => {
+        unregisterUpdatePreparation = registerUpdatePreparation(() => {
+            if (editorComposing) throw new Error(t('settings.update_finish_editing'));
+            flushPendingEdits({ strict: true });
+        });
         notesStore.load();
         isMobile = window.innerWidth < 768;
         window.addEventListener("resize", handleResize);
@@ -117,6 +123,7 @@
     });
 
     onDestroy(() => {
+        unregisterUpdatePreparation();
         window.removeEventListener("resize", handleResize);
         document.removeEventListener("keydown", handleKeydown);
         flushPendingEdits();
@@ -503,7 +510,7 @@
     // Persist the in-memory editor buffer before the editor is torn down or the
     // user switches notes. Without this, switching notes (or leaving the page)
     // while auto-save is off silently discards every keystroke.
-    function flushPendingEdits() {
+    function flushPendingEdits({ strict = false } = {}) {
         cancelAutoSave();
         if (!editMode) return;
         const note = get(notesStore).notes.find(item => item.id === editingNoteId);
@@ -513,6 +520,13 @@
             title: editTitle.trim() ? editTitle : note.title,
             content: editContent,
         });
+        if (strict) {
+            const current = get(notesStore).notes.find(item => item.id === note.id);
+            const saved = JSON.parse(localStorage.getItem('workplan_notes') || 'null')?.notes?.find(item => item.id === note.id);
+            if (!saved || saved.title !== current?.title || saved.content !== current?.content) {
+                throw new Error(t('settings.update_save_failed'));
+            }
+        }
     }
 
     // Imported notes can miss title/content, so never call toLowerCase on the

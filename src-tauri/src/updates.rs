@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::time::Duration;
 
-fn version_parts(value: &str) -> Option<Vec<u32>> {
+pub(crate) fn version_parts(value: &str) -> Option<Vec<u32>> {
     let value = value.strip_prefix('v').unwrap_or(value);
     let parts: Vec<_> = value.split('.').collect();
     if parts.len() != 3 { return None; }
@@ -20,7 +20,7 @@ fn release_info(data: Value, current: &str) -> Result<Value, String> {
     let version = latest.trim_start_matches('v');
     // Derive an official, version-specific destination; never trust a URL
     // embedded in a remote release response or its Markdown body.
-    Ok(json!({
+    let mut info = json!({
         "has_update": latest_parts > current_parts,
         "current_version": current,
         "latest_version": version,
@@ -29,7 +29,13 @@ fn release_info(data: Value, current: &str) -> Result<Value, String> {
         "release_notes": data["body"].as_str().unwrap_or("").chars().take(40000).collect::<String>(),
         "release_url": format!("https://github.com/MakotoArai-CN/WorkPlan-with-AI/releases/tag/v{version}"),
         "download": crate::update_download::select_asset(&data, version, std::env::consts::OS, std::env::consts::ARCH).ok()
-    }))
+    });
+    if let Some(name) = info["download"]["name"].as_str() {
+        let installation = crate::update_install::detect();
+        let plan = crate::update_install::plan(&installation, name, std::path::Path::new(name));
+        info["download"]["automatic_install"] = json!(plan.automatic && installation.kind != crate::update_install::Kind::Dmg);
+    }
+    Ok(info)
 }
 
 #[tauri::command]

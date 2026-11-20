@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.5.29",
+    "date": "2026-11-20",
+    "changes": {
+      "zh": [
+        "应用内更新按当前安装识别 Windows MSI/NSIS、Linux deb/rpm/Arch 包和 AppImage，避免自动混装。",
+        "支持的安装在下载校验后自动保存数据并交给专用安装流程；Windows 安装助手等待结果并重新启动应用，Linux 保留系统授权和包管理器的校验要求。",
+        "无法自动安装或安装失败时保留安装包，显示完整保存路径及可复制的手动更新命令；打开安装包与安装完成使用不同状态。"
+      ],
+      "en": [
+        "Match in-app updates to the current Windows MSI/NSIS installation, Linux deb/rpm/Arch package, or AppImage, without automatic format conversion.",
+        "Save data and start supported installation workflows after download verification. A Windows helper tracks the installer and relaunches the app; Linux retains system authorization and package-manager checks.",
+        "Keep the package, full path, and copyable update command when automatic installation is unavailable or fails. Opening a package is distinct from completing installation."
+      ],
+      "ja": [
+        "Windows の MSI/NSIS、Linux の deb/rpm/Arch パッケージ、AppImage を現在のインストールに合わせて選び、形式を自動で切り替えないようにしました。",
+        "対応環境ではダウンロードの検証後にデータを保存して更新を開始します。Windows の補助プロセスは結果を確認してアプリを再起動し、Linux ではシステム認証とパッケージ管理の検証を維持します。",
+        "自動更新できない場合や失敗した場合はパッケージを保持し、保存先とコピー可能な更新コマンドを表示します。パッケージを開いた状態とインストール完了を区別します。"
+      ]
+    }
+  },
+  {
     "version": "0.5.28",
     "date": "2026-11-20",
     "changes": {
