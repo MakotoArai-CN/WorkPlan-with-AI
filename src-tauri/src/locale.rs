@@ -1,3 +1,9 @@
+static APP_LANGUAGE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn current_language() -> Option<String> {
+    APP_LANGUAGE.lock().ok().and_then(|language| language.clone()).or_else(system_locale)
+}
+
 #[cfg(any(target_os = "linux", test))]
 pub fn effective_posix_locale(values: &[Option<String>]) -> Option<String> {
     values.iter().flatten().find(|value| !value.trim().is_empty()).map(|value| value.trim().to_string())
@@ -43,6 +49,7 @@ pub fn set_app_language(app: tauri::AppHandle, language: String) -> Result<(), S
     if !["zh", "zh-Hant", "en", "ja", "ko", "ru"].contains(&language.as_str()) {
         return Err("Unsupported language".into());
     }
+    *APP_LANGUAGE.lock().map_err(|_| "Cannot update application language")? = Some(language.clone());
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         use tauri::Manager;

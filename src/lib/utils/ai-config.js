@@ -31,3 +31,35 @@ export function migrateRemovedProvider(profile = {}) {
         customModel: '', customEndpoint: '', accountId: '', providerConfigs: { ...providerConfigs, custom: {} }
     };
 }
+
+/**
+ * Resolve which model value (if any) should be applied after refreshing a
+ * provider's model list. A user-saved or in-flight-edited model must never be
+ * overwritten just because it is missing from the refreshed suggestion list
+ * (e.g. when a /models fetch fails or omits custom/manual model IDs).
+ */
+export function resolveModelAfterRefresh({
+    providerId,
+    savedModel,
+    initialModel,
+    models = [],
+    defaultModel = ''
+} = {}) {
+    const rawSaved = String(savedModel || '');
+    const rawInitial = String(initialModel || '');
+    if (rawSaved !== rawInitial) {
+        return null;
+    }
+    if (!Array.isArray(models) || models.length === 0) {
+        return null;
+    }
+    const current = rawSaved.trim();
+    if (providerId === 'custom') {
+        return current ? null : models[0];
+    }
+    if (current && current !== 'auto') {
+        return null;
+    }
+    const preferredDefault = String(defaultModel || '').trim();
+    return preferredDefault || models[0];
+}

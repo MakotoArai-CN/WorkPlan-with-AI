@@ -44,6 +44,7 @@
     import SearchSuggestions from './SearchSuggestions.svelte';
     import { safeImageUrl, safeMediaDataUrl } from "../utils/safe-content.js";
     import { attachmentCapabilities } from '../utils/ai-attachment-policy.js';
+    import { getCapabilityStatus } from '../utils/local-tools.js';
     import { resizeTextarea, observeTextareaResize } from "../utils/textarea-autosize.js";
     import { captureMessageApproval } from "../utils/ai-message-approval.js";
     import { exportToMarkdown, describeSavedLocation } from "../utils/export.js";
@@ -52,6 +53,7 @@
         normalizePriority,
     } from "../utils/task-vocabulary.js";
     import MarkdownRenderer from "./MarkdownRenderer.svelte";
+    import CommandSettingsGuide from './CommandSettingsGuide.svelte';
     import SidebarResizeHandle from './SidebarResizeHandle.svelte';
     import { _ } from "svelte-i18n";
     import { get } from "svelte/store";
@@ -112,29 +114,56 @@
         {
             id: "application",
             label: $_("ai_chat.capability_application"),
-            active: $aiChatCapabilities.applicationToolsAvailable,
             icon: "ph-squares-four",
-            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.nativeToolCallRuntimeAvailable : null,
-            detail: $aiChatRuntimeCapabilities.details?.nativeToolCall?.message || '',
+            status: getCapabilityStatus({
+                probed: $aiChatCapabilities.probed || !!$aiChatRuntimeCapabilities.details?.nativeToolCall,
+                available: $aiChatCapabilities.applicationToolsAvailable,
+                enabled: $aiChatCapabilities.applicationToolsConfigured,
+                failureKind: $aiChatRuntimeCapabilities.details?.nativeToolCall?.kind || $aiChatRuntimeCapabilities.details?.toolCall?.kind
+            }),
+            detail: $aiChatRuntimeCapabilities.details?.nativeToolCall?.message || $aiChatRuntimeCapabilities.details?.toolCall?.message || '',
         },
         {
             id: "files",
             label: $_("ai_chat.capability_local_files"),
-            active: $aiChatCapabilities.localFilesAvailable,
             icon: $aiChatCapabilities.localFilesAvailable ? "ph-folder-open" : "ph-folder-simple",
-            runtime: $aiChatCapabilities.probed ? $aiChatCapabilities.localFilesAvailable : null,
-            detail: $aiChatRuntimeCapabilities.details?.localFiles?.message || '',
+            status: getCapabilityStatus({
+                probed: $aiChatCapabilities.probed || !!($aiChatRuntimeCapabilities.details?.localFiles && $aiChatRuntimeCapabilities.details?.nativeToolCall),
+                available: $aiChatCapabilities.localFilesAvailable,
+                enabled: $aiChatCapabilities.localFilesConfigured,
+                failureKind: ($aiChatRuntimeCapabilities.details?.localFiles?.kind && $aiChatRuntimeCapabilities.details.localFiles.kind !== 'ok')
+                    ? $aiChatRuntimeCapabilities.details.localFiles.kind
+                    : $aiChatRuntimeCapabilities.details?.nativeToolCall?.kind
+            }),
+            detail: $aiChatRuntimeCapabilities.details?.localFiles?.message || $aiChatRuntimeCapabilities.details?.nativeToolCall?.message || '',
         },
         {
             id: "search",
             label: $_("ai_chat.capability_web_search"),
-            active: $aiChatCapabilities.webSearchAvailable,
             icon: $aiChatCapabilities.webSearchAvailable ? "ph-globe" : "ph-globe-hemisphere-west",
-            runtime: $aiChatCapabilities.probed && (!$aiChatCapabilities.providerSearchOffered || $aiChatCapabilities.webSearchVerified)
-                ? $aiChatCapabilities.webSearchAvailable : null,
-            detail: $aiChatCapabilities.providerSearchOffered ? '' : $aiChatRuntimeCapabilities.details?.webSearch?.message || '',
+            status: getCapabilityStatus({
+                probed: ($aiChatCapabilities.probed && (!$aiChatCapabilities.providerSearchOffered || $aiChatCapabilities.webSearchVerified))
+                    || (!$aiChatCapabilities.providerSearchOffered && !!($aiChatRuntimeCapabilities.details?.webSearch && $aiChatRuntimeCapabilities.details?.nativeToolCall)),
+                available: $aiChatCapabilities.webSearchAvailable,
+                enabled: $aiChatCapabilities.applicationToolsConfigured,
+                failureKind: $aiChatCapabilities.providerSearchOffered
+                    ? ''
+                    : (($aiChatRuntimeCapabilities.details?.webSearch?.kind && $aiChatRuntimeCapabilities.details.webSearch.kind !== 'ok')
+                        ? $aiChatRuntimeCapabilities.details.webSearch.kind
+                        : $aiChatRuntimeCapabilities.details?.nativeToolCall?.kind)
+            }),
+            detail: $aiChatCapabilities.providerSearchOffered
+                ? ''
+                : ($aiChatRuntimeCapabilities.details?.webSearch?.message || $aiChatRuntimeCapabilities.details?.nativeToolCall?.message || ''),
         },
     ];
+
+    const capabilityStatusClasses = {
+        unknown: "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600",
+        available: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
+        unavailable: "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800",
+        restricted: "bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800",
+    };
 
     let isProbing = false;
     async function handleProbeCapabilities() {
@@ -1219,18 +1248,18 @@
                 {#each capabilityBadges as badge}
                     <div
                         title={badge.detail || badge.label}
-                        class={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border ${
-                            badge.active
-                                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
-                                : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600"
-                        }`}
+                        class={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border ${capabilityStatusClasses[badge.status]}`}
                     >
                         <i class={`ph ${badge.icon}`}></i>
                         {badge.label}
-                        {#if badge.runtime === true}
+                        {#if badge.status === 'available'}
                             <i class="ph-fill ph-check-circle text-emerald-500 text-[10px]"></i>
-                        {:else if badge.runtime === false}
+                        {:else if badge.status === 'unavailable'}
                             <i class="ph-fill ph-x-circle text-red-400 text-[10px]"></i>
+                        {:else if badge.status === 'restricted'}
+                            <i class="ph-fill ph-warning-circle text-orange-500 text-[10px]"></i>
+                        {:else if $aiChatCapabilities.probing}
+                            <i class="ph ph-circle-notch animate-spin text-slate-400 text-[10px]"></i>
                         {/if}
                     </div>
                 {/each}
@@ -1536,6 +1565,10 @@
                                             <span>{$_(`ai_chat.tool_step_${msg.currentStep}`)}</span>
                                         </div>
                                     {/if}
+                                </div>
+                            {:else if msg.type === 'command_settings'}
+                                <div class="p-3 md:p-4 rounded-2xl text-sm shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-none">
+                                    <CommandSettingsGuide content={msg.content} />
                                 </div>
                             {:else if msg.type === "file_confirm"}
                                 <div

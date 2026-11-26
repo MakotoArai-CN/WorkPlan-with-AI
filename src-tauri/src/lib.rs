@@ -38,6 +38,7 @@ mod windows_update;
 mod linux_update;
 mod vault_guard;
 mod locale;
+mod command_execution;
 
 static CLOSE_TO_QUIT: AtomicBool = AtomicBool::new(false);
 
@@ -1590,6 +1591,10 @@ pub fn run() {
             set_autostart,
             get_autostart_status,
             get_app_version,
+            command_execution::get_command_execution_status,
+            command_execution::set_command_execution_enabled,
+            command_execution::execute_command,
+            command_execution::cancel_command_execution,
             locale::set_app_language,
             get_workspace_root,
             resolve_local_path,

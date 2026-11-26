@@ -37,6 +37,7 @@
         parseRequestHeadersText,
         serializeRequestHeaders,
     } from "../utils/ai-request-fingerprint.js";
+    import { resolveModelAfterRefresh } from "../utils/ai-config.js";
 
     function t(key, opts) { return get(_)(key, opts); }
 
@@ -118,12 +119,14 @@
             if (!isLatestRequest()) return;
             currentModels = models || [];
             modelsLoadedForKey = loadKey;
-            if (currentModels.length > 0) {
-                const savedModel = $aiConfig.customModel;
-                const userChangedModel = savedModel !== initialCustomModel;
-                if (!userChangedModel && (!savedModel || !currentModels.includes(savedModel))) {
-                    updateAiConfig({ customModel: currentModels[0] });
-                }
+            const nextCustomModel = resolveModelAfterRefresh({
+                providerId,
+                savedModel: $aiConfig.customModel,
+                initialModel: initialCustomModel,
+                models: currentModels,
+            });
+            if (nextCustomModel) {
+                updateAiConfig({ customModel: nextCustomModel });
             }
             return;
         }
@@ -137,20 +140,15 @@
         currentModels = models || [];
         modelsLoadedForKey = loadKey;
 
-        if (currentModels.length > 0) {
-            const savedModel = $aiConfig.model;
-            const userChangedModel = savedModel !== initialModel;
-            const canKeepAuto = providerId === "custom";
-            if (
-                !userChangedModel &&
-                (
-                    !savedModel ||
-                    (!canKeepAuto && savedModel === "auto") ||
-                    (savedModel !== "auto" && !currentModels.includes(savedModel))
-                )
-            ) {
-                updateAiConfig({ model: currentModels[0] });
-            }
+        const nextModel = resolveModelAfterRefresh({
+            providerId,
+            savedModel: $aiConfig.model,
+            initialModel,
+            models: currentModels,
+            defaultModel: currentProvider?.defaultModel || "",
+        });
+        if (nextModel) {
+            updateAiConfig({ model: nextModel });
         }
     }
 
@@ -264,14 +262,14 @@
             });
             return;
         }
-        updateAiConfig({ customHeaders });
-        saveAiConfig();
-        settingsStore.setDailyReportPrompt(dailyPrompt);
-        settingsStore.setWeeklyReportPrompt(weeklyPrompt);
         updateAiConfig({
+            customHeaders,
             dailyReportPrompt: dailyPrompt,
             weeklyReportPrompt: weeklyPrompt,
         });
+        saveAiConfig();
+        settingsStore.setDailyReportPrompt(dailyPrompt);
+        settingsStore.setWeeklyReportPrompt(weeklyPrompt);
         showAiSettings.set(false);
         await showAlert({
             title: t('ai_settings_page.save_ok'),

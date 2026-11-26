@@ -1,4 +1,5 @@
 <script>
+    import CommandSettingsGuide from './CommandSettingsGuide.svelte';
     import { onMount, tick } from "svelte";
     import {
         captureAiOperationGuard,
@@ -719,6 +720,8 @@
                         {:else}
                             <MarkdownRenderer content={msg.content || ""} />
                         {/if}
+                    {:else if msg.type === 'command_settings'}
+                        <CommandSettingsGuide content={msg.content} />
                     {:else if msg.type === "loading"}
                         <div class="flex items-center gap-2 py-1">
                             <div class="flex gap-1">

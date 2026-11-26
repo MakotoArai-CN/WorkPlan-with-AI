@@ -3,6 +3,7 @@ import {
     LOCAL_TOOL_SPECS,
     createToolProbeResult,
     describeToolFailure,
+    getCapabilityStatus,
     probeLocalTools,
     summarizeProbe
 } from '../src/lib/utils/local-tools.js';
@@ -32,6 +33,8 @@ describe('tool failure classification', () => {
         expect(describeToolFailure('cmd not implemented').kind).toBe('unsupported');
         expect(describeToolFailure('permission denied: /home/u').kind).toBe('permission');
         expect(describeToolFailure('TLS certificate verify failed').kind).toBe('network');
+        expect(describeToolFailure('HTTP 401: invalid credentials').kind).toBe('permission');
+        expect(describeToolFailure('未配置 API Key').kind).toBe('configuration');
         expect(describeToolFailure('something odd').kind).toBe('error');
     });
 
@@ -42,6 +45,18 @@ describe('tool failure classification', () => {
         expect(result.ok).toBe(false);
         expect(result.message).toContain('boom');
         expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    });
+});
+
+describe('capability status', () => {
+    test('maps untested, available, unavailable and restricted states', () => {
+        expect(getCapabilityStatus()).toBe('unknown');
+        expect(getCapabilityStatus({ probed: true, available: true })).toBe('available');
+        expect(getCapabilityStatus({ probed: true })).toBe('unavailable');
+        expect(getCapabilityStatus({ probed: true, available: true, enabled: false })).toBe('restricted');
+        expect(getCapabilityStatus({ probed: true, failureKind: 'permission' })).toBe('restricted');
+        expect(getCapabilityStatus({ probed: true, failureKind: 'network' })).toBe('restricted');
+        expect(getCapabilityStatus({ probed: true, failureKind: 'unsupported' })).toBe('unavailable');
     });
 });
 

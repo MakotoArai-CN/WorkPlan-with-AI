@@ -28,6 +28,14 @@ test('application answers and legacy answer bodies are not replayed as currently
     expect(encoded).toContain('Inspect a record');
 });
 
+test('a command settings guide preserves the request without granting execution permission', () => {
+    const guide = { ...answer('命令执行已关闭，请打开设置'), type: 'command_settings',
+        toolData: { enabled: false, executed: false } };
+    const result = buildConversationContext([question('运行测试命令'), guide]);
+    expect(result.messages.map(message => message.content)).toEqual(['运行测试命令', '命令执行已关闭，请打开设置']);
+    expect(JSON.stringify(result)).not.toContain('toolData');
+});
+
 test('side-panel histories are scoped to the page and selected note', () => {
     const key = conversationContextKey({ scope: 'notes', activeNoteId: 'a' });
     const history = [{ ...question('Selected request'), conversationKey: key }, answer('Selected answer'),

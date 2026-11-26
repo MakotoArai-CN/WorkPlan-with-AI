@@ -4,6 +4,7 @@ export function describeOperation(call, args) {
     const identity = { ...args };
     for (const field of ['message', 'response_goal', 'reason', 'summary']) delete identity[field];
     const readOnly = call.name === 'workplan_read_data' || call.name === 'workplan_web_search'
+        || call.name === 'workplan_command' && ['status', 'open_settings'].includes(args.operation)
         || call.name === 'workplan_local_file' && ['search', 'read'].includes(args.operation)
         || ['workplan_notes_action', 'workplan_worklog_action'].includes(call.name) && args.action === 'list'
         || call.name === 'workplan_project_action' && args.operation === 'query';

@@ -1,6 +1,6 @@
 [package]
 name = "workplan"
-version = "0.5.29"
+version = "0.5.30"
 description = "WorkPlan with AI - Task Management"
 authors = ["MakotoArai-CN"]
 edition = "2021"
@@ -49,6 +49,10 @@ tauri-plugin-biometric = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 default = []
