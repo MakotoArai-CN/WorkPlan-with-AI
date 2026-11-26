@@ -21,7 +21,7 @@ export function buildConversationContext(history = [], { maxCharacters = 600000,
             turns.push(turn);
         } else if (turn && message?.role === 'assistant') {
             const metadata = message.conversationContext;
-            if (message.type === 'text' && typeof message.content === 'string') {
+            if (['text', 'command_settings'].includes(message.type) && typeof message.content === 'string') {
                 // Legacy replies have no access provenance. Keep the user's
                 // request, but do not resurrect possibly locked record bodies.
                 const content = metadata?.version === 1 && !metadata.applicationData ? message.content : APP_RESULT;

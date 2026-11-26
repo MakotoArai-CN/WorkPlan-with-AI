@@ -44,6 +44,15 @@ export const LOCAL_TOOL_SPECS = [
 const UNSUPPORTED_PATTERN = /(not found|not implemented|unknown command|no such command|不支持|未实现|找不到命令|command .*not)/i;
 const PERMISSION_PATTERN = /(permission denied|access denied|not allowed|forbidden|权限|拒绝)/i;
 const NETWORK_PATTERN = /(timed? ?out|timeout|connection|dns|tls|ssl|certificate|network|网络|连接)/i;
+const CONFIGURATION_PATTERN = /(未配置|请配置|invalid api key|missing api key|api key required|invalid api endpoint|未配置 api|配置无效)/i;
+
+export function getCapabilityStatus({ probed = false, available = false, enabled = true, failureKind = '' } = {}) {
+    if (!probed) return 'unknown';
+    if (!enabled) return 'restricted';
+    if (available) return 'available';
+    if (['configuration', 'network', 'permission'].includes(failureKind)) return 'restricted';
+    return 'unavailable';
+}
 
 /**
  * Turn a raw invoke rejection into a stable category plus the original text, so
@@ -56,8 +65,9 @@ export function describeToolFailure(error) {
     const text = raw.trim() || '未知错误';
     let kind = 'error';
     if (UNSUPPORTED_PATTERN.test(text)) kind = 'unsupported';
-    else if (PERMISSION_PATTERN.test(text)) kind = 'permission';
+    else if (PERMISSION_PATTERN.test(text) || /\b(?:unauthorized|invalid credentials|http 401|http 403|http 429|rate.?limit|quota exceeded)\b/i.test(text)) kind = 'permission';
     else if (NETWORK_PATTERN.test(text)) kind = 'network';
+    else if (CONFIGURATION_PATTERN.test(text)) kind = 'configuration';
     return { kind, message: text };
 }
 

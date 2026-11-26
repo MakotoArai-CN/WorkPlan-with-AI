@@ -11,6 +11,7 @@ function scenario(body) {
         globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) };
         globalThis.fetch = async () => { throw new Error('Unexpected real network request'); };
         const settingsStore = writable({ enableAiChatTools: true, enableOvertime: true, workspaceRoot: '/workspace', localFileConfig: { enabled: true, requireConfirmation: true, trustedDirectories: [] } });
+        mock.module('svelte-i18n', () => ({ _: writable(key => key) }));
         settingsStore.addTrustedDirectory = directory => settingsStore.update(state=>({...state,localFileConfig:{...state.localFileConfig,trustedDirectories:[...state.localFileConfig.trustedDirectories,directory]}}));
         const taskStore = Object.assign(writable({ accessKey: 'account-a', tasks: [], templates: [], scheduledTasks: [], overtimeRecords: [], leaveRecords: [{ id: 'leave-1', startDate: '2026-11-11', endDate: '2026-11-11', unit: 'day', duration: 1, type: 'annual', paid: true, note: 'original' }] }), {
             updateLeaveRecord(id, updates) { taskStore.update(state => ({ ...state, leaveRecords: state.leaveRecords.map(record => record.id === id ? { ...record, ...updates } : record) })); },
@@ -46,6 +47,11 @@ function scenario(body) {
             searchWeb: async args => { bundledQueries.push(args.query); return [{ ...searchSource, source: 'DuckDuckGo' }]; },
             fetchWebContent: async url => { fetchedUrls.push(url); return 'Svelte release page excerpt'; }
         }));
+        let capturedTools;
+        let commandEnabled = false;
+        mock.module('./src/lib/stores/command-execution.js', () => ({
+            commandExecutionStore: { refresh: async () => ({ enabled: commandEnabled, supported: true, platform: 'windows', shell: 'powershell' }) }
+        }));
         mock.module('./src/lib/stores/settings.js', () => ({ settingsStore }));
         mock.module('./src/lib/stores/tasks.js', () => ({ taskStore }));
         mock.module('./src/lib/stores/notes.js', () => ({ notesStore }));
@@ -71,7 +77,8 @@ function scenario(body) {
                 providerQueries.push(query);
                 return typeof providerSearchReply === 'function' ? await providerSearchReply(config) : providerSearchReply;
             },
-            callAIWithMessagesAndTools: async (_config, messages) => {
+            callAIWithMessagesAndTools: async (_config, messages, tools) => {
+                capturedTools = tools;
                 requests++; capturedMessages = JSON.parse(JSON.stringify(messages));
                 if (!messages.some(message=>message.role==='tool')) initialMessages = capturedMessages;
                 if (modelDriver) return await modelDriver(messages);
@@ -467,6 +474,77 @@ test('Google grounding appears in the live reply and stays out of disk history a
         assert.ok(!saved.includes('GOOGLE_GROUNDED_ANSWER'));
         assert.ok(!saved.includes('www.google.com'));
     }
+`));
+
+test('capability detection records local, web and native tool results even when checks fail', () => scenario(`
+    mock.module('@tauri-apps/api/core', () => ({
+        invoke: async command => {
+            if (command === 'get_workspace_root') throw new Error('permission denied: workspace');
+            if (command === 'search_web') throw new Error('network timeout');
+            throw new Error('unexpected command');
+        }
+    }));
+    response.toolCalls = [{name:'workplan_probe_tool',arguments:'{"value":"ok"}'}];
+    const result = await ai.probeAiCapabilities();
+    assert.equal(result.nativeToolCallRuntimeAvailable, true);
+    assert.equal(result.localFilesRuntimeAvailable, false);
+    assert.equal(result.webSearchRuntimeAvailable, false);
+    const runtime = get(ai.aiChatRuntimeCapabilities);
+    assert.equal(runtime.probed, true);
+    assert.equal(runtime.probing, false);
+    assert.equal(runtime.details.localFiles.kind, 'permission');
+    assert.equal(runtime.details.webSearch.kind, 'network');
+    assert.equal(get(ai.aiChatCapabilities).applicationToolsAvailable, true);
+`));
+
+test('changing the model cancels an older capability probe and fences its late results', () => scenario(`
+    mock.module('@tauri-apps/api/core',()=>({invoke:async()=>'/workspace'}));
+    let modelStarted,finishModel;
+    const started=new Promise(resolve=>{modelStarted=resolve;});
+    modelDriver=async()=>{modelStarted();return new Promise(resolve=>{finishModel=resolve;});};
+    const probe=ai.probeAiCapabilities();
+    await started;
+    ai.updateAiConfig({model:'changed-model'});
+    await probe;
+    finishModel({toolCalls:[{name:'workplan_probe_tool',arguments:'{"value":"ok"}'}]});
+    await new Promise(resolve=>setTimeout(resolve,0));
+    const runtime=get(ai.aiChatRuntimeCapabilities);
+    assert.equal(runtime.probed,false);assert.equal(runtime.probing,false);
+    assert.equal(runtime.nativeToolCallRuntimeAvailable,null);assert.deepEqual(runtime.details,{});
+`));
+
+test('AI queries the disabled command switch without executing or enabling it', () => scenario(`
+    response.toolCalls = [{id:'command-status',name:'workplan_command',arguments:'{"operation":"status"}'}];
+    await ai.sendChatMessage('命令执行功能是否开启？');
+    assert.ok(capturedTools.some(tool=>tool.function.name==='workplan_command'));
+    const result = JSON.parse(capturedMessages.find(message=>message.role==='tool').content).untrusted_data;
+    assert.equal(result.enabled,false);assert.equal(result.supported,true);
+    assert.equal(result.settings.section,'command-execution');
+    assert.equal(commandEnabled,false);
+`));
+
+test('disabled command execution returns a settings guide in full chat and the side assistant', () => scenario(`
+    response.toolCalls = [{id:'command-guide',name:'workplan_command',arguments:'{"operation":"execute","command":"echo MUST_NOT_RUN"}'}];
+    await ai.sendChatMessage('执行 echo MUST_NOT_RUN');
+    assert.equal(get(ai.aiChatHistory).at(-1).type,'command_settings');
+    assert.equal(get(ai.aiChatHistory).at(-1).toolData.executed,false);
+    await ai.sendAiMessage('打开命令执行设置');
+    assert.equal(get(ai.chatHistory).at(-1).type,'command_settings');
+    assert.equal(commandEnabled,false);
+`));
+
+test('AI command results retain actual exit codes and output through the native tool protocol', () => scenario(`
+    commandEnabled=true;
+    let executions=0;
+    mock.module('@tauri-apps/api/core',()=>({invoke:async (name,args)=>{
+        assert.equal(name,'execute_command');assert.equal(args.command,'echo fixture');executions++;
+        return {executed:true,exitCode:3,stdout:'fixture',stderr:'test error',timedOut:false};
+    }}));
+    response.toolCalls=[{id:'command-exec',name:'workplan_command',arguments:'{"operation":"execute","command":"echo fixture"}'}];
+    await ai.sendChatMessage('执行 echo fixture');
+    assert.equal(executions,1);
+    const result=JSON.parse(capturedMessages.find(message=>message.role==='tool').content).untrusted_data;
+    assert.equal(result.exitCode,3);assert.equal(result.stderr,'test error');
 `));
 
 test('unsupported attachments fail before history, model calls or composer clearing', () => scenario(`

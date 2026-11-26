@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.5.30",
+    "date": "2026-11-26",
+    "changes": {
+      "zh": [
+        "修复 AI 提供商配置保存后重新打开或刷新模型列表时，已保存的模型名被默认列表首项覆盖的问题。",
+        "增加默认关闭的本地命令执行工具与设置引导，支持按平台控制命令执行并区分能力检测与实际可用状态。"
+      ],
+      "en": [
+        "Preserve saved AI provider model selections when reopening settings or refreshing the model list instead of overwriting them with the first suggested model.",
+        "Add opt-in local command execution controls with settings guidance and parallel runtime capability probing."
+      ],
+      "ja": [
+        "AI プロバイダー設定の再オープンやモデル一覧更新時に、保存済みのモデル名が候補先頭で上書きされないよう修正しました。",
+        "既定で無効なローカルコマンド実行設定と案内画面を追加し、実行時機能の並列診断に対応しました。"
+      ]
+    }
+  },
+  {
     "version": "0.5.29",
     "date": "2026-11-20",
     "changes": {

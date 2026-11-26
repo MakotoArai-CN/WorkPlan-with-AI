@@ -1,6 +1,8 @@
 <script>
     import SelectMenu from './SelectMenu.svelte';
     import { settingsStore } from "../stores/settings.js";
+    import { commandExecutionStore } from '../stores/command-execution.js';
+    import { settingsFocusTarget } from '../stores/settings-navigation.js';
     import { taskStore } from "../stores/tasks.js";
     import { passwordsStore } from "../stores/passwords.js";
     import { secureSyncStatus, syncNotesNow, syncPasswordsNow, syncWorklogNow } from "../utils/secure-sync.js";
@@ -29,6 +31,33 @@
 
     let checkingUpdate = false;
     let showDataRepair = false;
+    let commandExecutionInput;
+
+    onMount(() => {
+        void commandExecutionStore.refresh().catch(() => {});
+    });
+
+    $: if ($settingsFocusTarget === 'command-execution' && commandExecutionInput && $commandExecutionStore.loaded) {
+        tick().then(() => {
+            if (!commandExecutionInput?.isConnected) return;
+            commandExecutionInput.closest('[data-command-settings]')?.scrollIntoView({ block: 'center' });
+            commandExecutionInput.focus({ preventScroll: true });
+            settingsFocusTarget.set(null);
+        });
+    }
+
+    async function toggleCommandExecution(event) {
+        const input = event.currentTarget;
+        const enabled = input.checked;
+        input.checked = get(commandExecutionStore).enabled;
+        try {
+            await commandExecutionStore.setEnabled(enabled);
+        } catch (error) {
+            showToast({ message: get(_)('settings.command_execution_update_failed'), type: 'error' });
+        } finally {
+            input.checked = get(commandExecutionStore).enabled;
+        }
+    }
 
     $: databaseProviderOptions = DATABASE_PROVIDER_CATALOG.map(provider => ({ value: provider.id, label: provider.name }));
     let themeGridEl;
@@ -837,6 +866,31 @@
                             class="sr-only peer"
                         />
                         <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                    </label>
+                </div>
+                <div data-command-settings class="flex items-center justify-between gap-4">
+                    <div>
+                        <div class="font-bold text-slate-700 dark:text-slate-200 text-sm md:text-base">{$_('settings.command_execution')}</div>
+                        <div id="command-execution-description" class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.command_execution_desc')}</div>
+                        {#if $commandExecutionStore.error}
+                            <div class="text-[10px] md:text-xs text-red-500">{$_('settings.command_execution_update_failed')}</div>
+                        {:else if $commandExecutionStore.loaded && !$commandExecutionStore.supported}
+                            <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{$_('settings.command_execution_unsupported')}</div>
+                        {/if}
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                            bind:this={commandExecutionInput}
+                            type="checkbox"
+                            role="switch"
+                            aria-label={$_('settings.command_execution')}
+                            aria-describedby="command-execution-description"
+                            checked={$commandExecutionStore.enabled}
+                            disabled={!$commandExecutionStore.loaded || !$commandExecutionStore.supported || $commandExecutionStore.loading}
+                            on:change={toggleCommandExecution}
+                            class="sr-only peer"
+                        />
+                        <div class="w-11 h-6 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 peer-disabled:opacity-50"></div>
                     </label>
                 </div>
                 <div class="flex items-center justify-between">

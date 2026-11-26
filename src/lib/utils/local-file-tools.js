@@ -212,6 +212,7 @@ export async function getAndroidStoragePermissionStatus() {
 }
 
 export async function getWorkspaceRoot() {
+    if (!isTauriRuntime) return '';
     try {
         return await invoke('get_workspace_root');
     } catch (error) {

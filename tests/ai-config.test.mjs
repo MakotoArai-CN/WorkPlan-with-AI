@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { pruneProviderConfigs, migrateRemovedProvider } from '../src/lib/utils/ai-config.js';
+import { pruneProviderConfigs, migrateRemovedProvider, resolveModelAfterRefresh } from '../src/lib/utils/ai-config.js';
 
 const key = 'sk-test-custom';
 
@@ -54,4 +54,59 @@ test('profile status never becomes part of a connection name and only known defa
     expect(migrateRemovedProvider({provider:'custom',name:'连接 2（需重新配置）（需重新配置）'}).name).toBe('连接 2');
     expect(migrateRemovedProvider({provider:'custom',name:'我的服务（需重新配置）'}).name).toBe('我的服务（需重新配置）');
     expect(migrateRemovedProvider({provider:'custom',name:'默认连接（需重新配置）',customEndpoint:'https://example.com'}).name).toBe('默认连接（需重新配置）');
+});
+
+describe('resolveModelAfterRefresh', () => {
+    test('preserves a saved built-in provider model even when refreshed models omit it', () => {
+        expect(resolveModelAfterRefresh({
+            providerId: 'openai',
+            savedModel: 'gpt-4o-custom-alias',
+            initialModel: 'gpt-4o-custom-alias',
+            models: ['gpt-6-astra', 'gpt-6.1-sol'],
+            defaultModel: 'gpt-6.1-sol'
+        })).toBeNull();
+    });
+
+    test('preserves a saved custom provider model when /models returns a different list', () => {
+        expect(resolveModelAfterRefresh({
+            providerId: 'custom',
+            savedModel: 'my-private-deployment',
+            initialModel: 'my-private-deployment',
+            models: ['llama-3.3-70b', 'qwen-2.5-72b']
+        })).toBeNull();
+    });
+
+    test('fills empty custom model from refreshed list without overwriting user edits', () => {
+        expect(resolveModelAfterRefresh({
+            providerId: 'custom',
+            savedModel: '',
+            initialModel: '',
+            models: ['llama-3.3-70b', 'qwen-2.5-72b']
+        })).toBe('llama-3.3-70b');
+
+        expect(resolveModelAfterRefresh({
+            providerId: 'custom',
+            savedModel: 'typed-during-fetch',
+            initialModel: '',
+            models: ['llama-3.3-70b']
+        })).toBeNull();
+    });
+
+    test('resolves unset or auto built-in model to provider defaultModel before fetched models[0]', () => {
+        expect(resolveModelAfterRefresh({
+            providerId: 'openai',
+            savedModel: 'auto',
+            initialModel: 'auto',
+            models: ['babbage-002', 'gpt-6.1-sol'],
+            defaultModel: 'gpt-6.1-sol'
+        })).toBe('gpt-6.1-sol');
+
+        expect(resolveModelAfterRefresh({
+            providerId: 'ollama',
+            savedModel: '',
+            initialModel: '',
+            models: ['qwen2.5:14b'],
+            defaultModel: ''
+        })).toBe('qwen2.5:14b');
+    });
 });

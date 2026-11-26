@@ -6399,13 +6399,14 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workplan"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "dirs 6.0.0",
  "ego-tree",
  "getrandom 0.3.4",
+ "libc",
  "open",
  "pbkdf2",
  "reqwest 0.12.25",
@@ -6428,6 +6429,7 @@ dependencies = [
  "tauri-plugin-store",
  "url",
  "walkdir",
+ "windows-sys 0.61.2",
  "winreg 0.52.0",
  "zstd",
 ]
